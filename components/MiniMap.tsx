@@ -6,10 +6,13 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { osmStyle } from "@/lib/mapStyle";
 import type { Rank } from "@/lib/types";
 
+// RankBadge/MapViewと同じ配色
 const pinColors: Record<Rank, string> = {
   S: "#f59e0b",
-  A: "#9ca3af",
-  B: "#d1d5db",
+  A: "#a7f3d0",
+  B: "#93c5fd",
+  C: "#ffffff",
+  D: "#e5e7eb",
 };
 
 export default function MiniMap({
@@ -22,6 +25,7 @@ export default function MiniMap({
   rank: Rank;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -33,11 +37,11 @@ export default function MiniMap({
       interactive: false,
       attributionControl: { compact: true },
     });
-    new maplibregl.Marker({ color: pinColors[rank] })
-      .setLngLat([lng, lat])
-      .addTo(map);
+    mapRef.current = map;
+    new maplibregl.Marker({ color: pinColors[rank] }).setLngLat([lng, lat]).addTo(map);
     return () => {
       map.remove();
+      mapRef.current = null;
     };
   }, [lat, lng, rank]);
 

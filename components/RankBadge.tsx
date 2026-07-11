@@ -1,9 +1,11 @@
-import type { Rank } from "@/lib/types";
+import { RANK_LABELS, type Rank } from "@/lib/types";
 
 const styles: Record<Rank, string> = {
-  S: "bg-amber-400 text-amber-950",
-  A: "bg-gray-300 text-gray-800",
-  B: "bg-gray-100 text-gray-500 border border-gray-300",
+  S: "bg-[#f59e0b] text-[#451a03]",
+  A: "bg-[#a7f3d0] text-[#065f46]",
+  B: "bg-[#93c5fd] text-[#1e3a8a]",
+  C: "bg-white text-gray-700 border border-gray-300",
+  D: "bg-[#e5e7eb] text-gray-700",
 };
 
 export default function RankBadge({
@@ -18,7 +20,7 @@ export default function RankBadge({
       className={`inline-flex items-center justify-center rounded font-bold ${
         styles[rank]
       } ${size === "sm" ? "h-5 w-5 text-xs" : "h-6 w-6 text-sm"}`}
-      title={`必訪ランク ${rank}`}
+      title={RANK_LABELS[rank]}
     >
       {rank}
     </span>

@@ -1,17 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
 import {
   CATEGORIES,
   PREFECTURES,
   RANKS,
+  ROLE_LABELS,
+  type AppUser,
   type Category,
   type Rank,
+  type Role,
   type Spot,
 } from "@/lib/types";
 import RankBadge from "@/components/RankBadge";
+
+const STATUS_LABELS: Record<Spot["status"], string> = {
+  published: "公開中",
+  pending: "承認待ち",
+  rejected: "却下",
+};
+
+const STATUS_STYLES: Record<Spot["status"], string> = {
+  published: "bg-green-100 text-green-700",
+  pending: "bg-amber-100 text-amber-700",
+  rejected: "bg-red-100 text-red-700",
+};
+
+const ROLES: Role[] = ["admin", "moderator", "user"];
 
 interface SpotForm {
   name: string;
@@ -53,6 +71,11 @@ const CSV_COLUMNS = [
 ] as const;
 
 export default function AdminPage() {
+  const router = useRouter();
+  const [checkingRole, setCheckingRole] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [myId, setMyId] = useState<string | null>(null);
+
   const [spots, setSpots] = useState<Spot[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Spot | null>(null);
@@ -60,33 +83,111 @@ export default function AdminPage() {
   const [form, setForm] = useState<SpotForm>(EMPTY_FORM);
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [rankFilter, setRankFilter] = useState<Rank | "all">("S");
   const [importing, setImporting] = useState(false);
 
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState<Role>("user");
+  const [userMessage, setUserMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.auth.me().then(({ data }) => {
+      if (data?.role !== "admin") {
+        router.replace("/map");
+        return;
+      }
+      setIsAdmin(true);
+      setMyId(data.id);
+      setCheckingRole(false);
+    });
+  }, [router]);
+
   const load = useCallback(async () => {
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("spots")
-      .select("*")
-      .order("prefecture")
-      .order("name");
-    setSpots((data as Spot[]) ?? []);
+    const { data } = await api.spots.list();
+    setSpots(data ?? []);
     setLoading(false);
   }, []);
 
+  const loadUsers = useCallback(async () => {
+    const { data } = await api.admin.users.list();
+    setUsers(data ?? []);
+  }, []);
+
   useEffect(() => {
+    if (!isAdmin) return;
     load();
-  }, [load]);
+    loadUsers();
+  }, [isAdmin, load, loadUsers]);
+
+  const pendingSpots = useMemo(
+    () => spots.filter((s) => s.status === "pending"),
+    [spots]
+  );
+
+  const handleApprove = async (spot: Spot) => {
+    const { error } = await api.spots.setStatus(spot.id, "published");
+    setMessage(error ? "承認に失敗しました: " + error.message : `「${spot.name}」を承認しました。`);
+    load();
+  };
+
+  const handleReject = async (spot: Spot) => {
+    const { error } = await api.spots.setStatus(spot.id, "rejected");
+    setMessage(error ? "却下に失敗しました: " + error.message : `「${spot.name}」を却下しました。`);
+    load();
+  };
+
+  const handleBulkApprove = async () => {
+    if (!confirm(`承認待ちの${pendingSpots.length}件をすべて公開しますか?`)) return;
+    const { error } = await api.spots.bulkApprove();
+    setMessage(error ? "一括承認に失敗しました: " + error.message : "すべて承認しました。");
+    load();
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserMessage(null);
+    const { error } = await api.admin.users.create(
+      newUserEmail.trim(),
+      newUserPassword,
+      newUserRole
+    );
+    if (error) {
+      setUserMessage("作成に失敗しました: " + error.message);
+      return;
+    }
+    setUserMessage(`${newUserEmail} を作成しました。`);
+    setNewUserEmail("");
+    setNewUserPassword("");
+    setNewUserRole("user");
+    loadUsers();
+  };
+
+  const handleChangeRole = async (user: AppUser, role: Role) => {
+    if (user.id === myId) {
+      setUserMessage("自分自身のロールは変更できません。");
+      return;
+    }
+    const { error } = await api.admin.users.setRole(user.id, role);
+    setUserMessage(
+      error ? "ロール変更に失敗しました: " + error.message : `${user.email} のロールを変更しました。`
+    );
+    loadUsers();
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim();
-    if (!q) return spots;
-    return spots.filter(
-      (s) =>
+    return spots.filter((s) => {
+      if (rankFilter !== "all" && s.rank !== rankFilter) return false;
+      if (!q) return true;
+      return (
         s.name.includes(q) ||
         (s.name_kana ?? "").includes(q) ||
         s.prefecture.includes(q)
-    );
-  }, [spots, search]);
+      );
+    });
+  }, [spots, search, rankFilter]);
 
   const openNew = () => {
     setEditing(null);
@@ -113,7 +214,6 @@ export default function AdminPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const supabase = createClient();
     const payload = {
       name: form.name.trim(),
       name_kana: form.name_kana.trim() || null,
@@ -131,8 +231,8 @@ export default function AdminPage() {
       return;
     }
     const { error } = editing
-      ? await supabase.from("spots").update(payload).eq("id", editing.id)
-      : await supabase.from("spots").insert(payload);
+      ? await api.spots.update(editing.id, payload)
+      : await api.spots.create(payload);
     if (error) {
       setMessage("保存に失敗しました: " + error.message);
       return;
@@ -145,8 +245,7 @@ export default function AdminPage() {
   const handleDelete = async (spot: Spot) => {
     if (!confirm(`「${spot.name}」を削除しますか?(訪問記録も消えます)`))
       return;
-    const supabase = createClient();
-    const { error } = await supabase.from("spots").delete().eq("id", spot.id);
+    const { error } = await api.spots.delete(spot.id);
     setMessage(error ? "削除に失敗しました: " + error.message : "削除しました。");
     load();
   };
@@ -183,7 +282,7 @@ export default function AdminPage() {
         const lng = Number(get("lng"));
         if (!get("name")) errors.push(`${i + 1}行目: name が空`);
         else if (!RANKS.includes(rank))
-          errors.push(`${i + 1}行目: rank は S/A/B のいずれか`);
+          errors.push(`${i + 1}行目: rank は S/A/B/C/D のいずれか`);
         else if (!CATEGORIES.includes(category))
           errors.push(`${i + 1}行目: category が不正 (${category})`);
         else if (Number.isNaN(lat) || Number.isNaN(lng))
@@ -208,8 +307,7 @@ export default function AdminPage() {
         );
         return;
       }
-      const supabase = createClient();
-      const { error } = await supabase.from("spots").insert(records);
+      const { error } = await api.spots.createMany(records);
       if (error) {
         setMessage("インポートに失敗しました: " + error.message);
         return;
@@ -221,9 +319,159 @@ export default function AdminPage() {
     }
   };
 
+  if (checkingRole || !isAdmin) return null;
+
   return (
-    <main className="mx-auto max-w-2xl p-4">
+    <main className="mx-auto max-w-6xl p-4">
       <h1 className="mb-4 text-lg font-bold">管理画面</h1>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
+        {/* 左カラム: ユーザー管理 */}
+        <section>
+          <h2 className="mb-2 text-base font-bold">ユーザー管理</h2>
+          {userMessage && (
+            <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+              {userMessage}
+            </p>
+          )}
+          <ul className="mb-4 divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {users.map((u) => (
+              <li key={u.id} className="flex items-center gap-3 px-4 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {u.email}
+                    {u.id === myId && (
+                      <span className="ml-1 text-xs text-gray-400">(自分)</span>
+                    )}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {u.has_password && "パスワード"}
+                    {u.has_password && u.has_google && " / "}
+                    {u.has_google && "Google"}
+                  </p>
+                </div>
+                <select
+                  value={u.role}
+                  disabled={u.id === myId}
+                  onChange={(e) => handleChangeRole(u, e.target.value as Role)}
+                  title={u.id === myId ? "自分自身のロールは変更できません" : undefined}
+                  className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABELS[r]}
+                    </option>
+                  ))}
+                </select>
+              </li>
+            ))}
+          </ul>
+
+          <form
+            onSubmit={handleCreateUser}
+            className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3"
+          >
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                メールアドレス
+              </label>
+              <input
+                type="email"
+                required
+                value={newUserEmail}
+                onChange={(e) => setNewUserEmail(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                初期パスワード
+              </label>
+              <input
+                type="password"
+                required
+                value={newUserPassword}
+                onChange={(e) => setNewUserPassword(e.target.value)}
+                placeholder="8文字以上"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">ロール</label>
+              <select
+                value={newUserRole}
+                onChange={(e) => setNewUserRole(e.target.value as Role)}
+                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+              >
+                {ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
+            >
+              + ユーザー追加
+            </button>
+            <p className="text-xs text-gray-400">
+              Googleログインだけで使わせたい場合も、初期パスワードは必須です
+              (あとから本人が同じメールアドレスでGoogleログインすると自動的に
+              連携されます)。
+            </p>
+          </form>
+        </section>
+
+        {/* 右カラム: スポット管理 */}
+        <section>
+          <h2 className="mb-2 text-base font-bold">スポット管理</h2>
+
+          {/* 承認待ちスポット */}
+          {pendingSpots.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-bold text-amber-800">
+              承認待ち({pendingSpots.length}件)
+            </h2>
+            <button
+              onClick={handleBulkApprove}
+              className="rounded border border-amber-400 bg-white px-2 py-1 text-xs font-medium text-amber-700"
+            >
+              すべて承認
+            </button>
+          </div>
+          <ul className="space-y-2">
+            {pendingSpots.map((spot) => (
+              <li
+                key={spot.id}
+                className="flex items-center gap-2 rounded-lg bg-white p-2"
+              >
+                <RankBadge rank={spot.rank} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{spot.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {spot.prefecture} ・ {spot.category}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleApprove(spot)}
+                  className="rounded border border-green-300 px-2 py-1 text-xs text-green-700"
+                >
+                  承認
+                </button>
+                <button
+                  onClick={() => handleReject(spot)}
+                  className="rounded border border-red-200 px-2 py-1 text-xs text-red-500"
+                >
+                  却下
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* 操作エリア */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -256,6 +504,23 @@ export default function AdminPage() {
         />
       </div>
 
+      {/* ランク絞り込み */}
+      <div className="mb-3 flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
+        {(["all", ...RANKS] as const).map((r) => (
+          <button
+            key={r}
+            onClick={() => setRankFilter(r)}
+            className={`flex-1 px-3 py-1.5 font-medium ${
+              rankFilter === r
+                ? "bg-blue-600 text-white"
+                : "text-gray-500 hover:bg-gray-50"
+            }`}
+          >
+            {r === "all" ? "すべて" : r}
+          </button>
+        ))}
+      </div>
+
       <p className="mb-2 text-xs text-gray-400">
         CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng, rank,
         category は必須)
@@ -284,6 +549,13 @@ export default function AdminPage() {
                   {spot.prefecture} ・ {spot.category}
                 </p>
               </div>
+              {spot.status !== "published" && (
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[spot.status]}`}
+                >
+                  {STATUS_LABELS[spot.status]}
+                </span>
+              )}
               <button
                 onClick={() => openEdit(spot)}
                 className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600"
@@ -300,6 +572,9 @@ export default function AdminPage() {
           ))}
         </ul>
       )}
+
+        </section>
+      </div>
 
       {/* 追加・編集フォーム */}
       {showForm && (

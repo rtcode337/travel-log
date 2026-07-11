@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api } from "@/lib/api-client";
 import { PREFECTURES, type Spot, type Visit } from "@/lib/types";
 import FilterBar, {
   DEFAULT_FILTERS,
@@ -10,10 +9,11 @@ import FilterBar, {
   type SpotFilters,
 } from "@/components/FilterBar";
 import RankBadge from "@/components/RankBadge";
+import SpotDetailModal from "@/components/SpotDetailModal";
 
 type SortKey = "rank" | "name" | "visited";
 
-const RANK_ORDER = { S: 0, A: 1, B: 2 } as const;
+const RANK_ORDER = { S: 0, A: 1, B: 2, C: 3, D: 4 } as const;
 
 export default function SpotsPage() {
   const [spots, setSpots] = useState<Spot[]>([]);
@@ -22,23 +22,23 @@ export default function SpotsPage() {
   const [selectedPref, setSelectedPref] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>("rank");
+  const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
+
+  const loadVisits = useCallback(async () => {
+    const { data } = await api.visits.list();
+    setVisits(data ?? []);
+  }, []);
 
   useEffect(() => {
-    const supabase = createClient();
     (async () => {
-      const [{ data: spotsData }, { data: visitsData }] = await Promise.all([
-        supabase
-          .from("spots")
-          .select("*")
-          .eq("status", "published")
-          .order("name"),
-        supabase.from("visits").select("*"),
+      const [{ data: spotsData }] = await Promise.all([
+        api.spots.list("published"),
+        loadVisits(),
       ]);
-      setSpots((spotsData as Spot[]) ?? []);
-      setVisits((visitsData as Visit[]) ?? []);
+      setSpots(spotsData ?? []);
       setLoading(false);
     })();
-  }, []);
+  }, [loadVisits]);
 
   const visitedIds = useMemo(
     () => new Set(visits.map((v) => v.spot_id)),
@@ -169,9 +169,9 @@ export default function SpotsPage() {
       <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
         {filteredSpots.map((spot) => (
           <li key={spot.id}>
-            <Link
-              href={`/spots/${spot.id}`}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50"
+            <button
+              onClick={() => setDetailSpotId(spot.id)}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
             >
               <RankBadge rank={spot.rank} size="sm" />
               <div className="min-w-0 flex-1">
@@ -184,7 +184,7 @@ export default function SpotsPage() {
               {visitedIds.has(spot.id) && (
                 <span className="shrink-0 text-green-600">✓</span>
               )}
-            </Link>
+            </button>
           </li>
         ))}
       </ul>
@@ -192,6 +192,14 @@ export default function SpotsPage() {
         <p className="mt-4 text-sm text-gray-500">
           条件に合うスポットがありません。
         </p>
+      )}
+
+      {detailSpotId && (
+        <SpotDetailModal
+          spotId={detailSpotId}
+          onClose={() => setDetailSpotId(null)}
+          onVisitChange={loadVisits}
+        />
       )}
     </main>
   );
