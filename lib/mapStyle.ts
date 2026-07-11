@@ -21,6 +21,9 @@ export const osmStyle: StyleSpecification = {
   ],
 };
 
-/** 日本全体が入る初期表示 */
+/** 日本全体が入る初期表示(現在地が取得できない場合のフォールバック) */
 export const JAPAN_CENTER: [number, number] = [137.0, 37.5];
 export const JAPAN_ZOOM = 4.5;
+
+/** 現在地取得後にズームインする際のズームレベル */
+export const CURRENT_LOCATION_ZOOM = 14;

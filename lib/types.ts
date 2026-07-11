@@ -1,11 +1,20 @@
-export type Rank = "S" | "A" | "B";
+export type Rank = "S" | "A" | "B" | "C" | "D";
 
-export const RANKS: Rank[] = ["S", "A", "B"];
+export const RANKS: Rank[] = ["S", "A", "B", "C", "D"];
 
+/**
+ * ランクはWikipedia(ja)月次ページビュー数を知名度の指標とし、
+ * 全スポット中の相対順位(パーセンタイル)で機械的に区分している
+ * (世界遺産・国宝等の指定がある場所は目視で格上げする例外あり)。
+ * S: 上位5%(全国的に絶対外せない) / A: 次15%(全国区で有名) /
+ * B: 次30%(地方の定番) / C: 次30%(地元で知られている) / D: 残り20%(穴場)
+ */
 export const RANK_LABELS: Record<Rank, string> = {
   S: "S: 絶対外せない",
-  A: "A: 時間があれば行くべき",
-  B: "B: 知る人ぞ知る",
+  A: "A: 全国区で有名",
+  B: "B: 地方の定番",
+  C: "C: 地元で知られている",
+  D: "D: 穴場・マニアック",
 };
 
 export const CATEGORIES = [
@@ -43,8 +52,30 @@ export interface Spot {
   official_url: string | null;
   source: "manual" | "opendata" | "user_submitted";
   status: "published" | "pending" | "rejected";
+  created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * admin: 承認・削除・ユーザー管理ができる / moderator: スポットをpendingで追加できる /
+ * user: 一般ユーザー(訪問記録の閲覧・記録のみ)
+ */
+export type Role = "admin" | "moderator" | "user";
+
+export const ROLE_LABELS: Record<Role, string> = {
+  admin: "管理者",
+  moderator: "モデレーター",
+  user: "一般ユーザー",
+};
+
+export interface AppUser {
+  id: string;
+  email: string;
+  role: Role;
+  has_password: boolean;
+  has_google: boolean;
+  created_at: string;
 }
 
 export interface Visit {
@@ -56,6 +87,23 @@ export interface Visit {
   memo: string | null;
   photos: string[];
   created_at: string;
+}
+
+/** 自分自身の口コミ(スポット1件につき1件、upsert対象) */
+export interface Review {
+  id: string;
+  spot_id: string;
+  body: string;
+  visibility: "public" | "private";
+  created_at: string;
+}
+
+/** 他ユーザーにも見える公開口コミ一覧表示用 */
+export interface PublicReview {
+  id: string;
+  body: string;
+  created_at: string;
+  user_email: string;
 }
 
 export const PREFECTURES = [

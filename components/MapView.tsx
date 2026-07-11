@@ -1,30 +1,73 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { createClient } from "@/lib/supabase/client";
-import { osmStyle, JAPAN_CENTER, JAPAN_ZOOM } from "@/lib/mapStyle";
-import type { Rank, Spot } from "@/lib/types";
+import { api } from "@/lib/api-client";
+import {
+  osmStyle,
+  JAPAN_CENTER,
+  JAPAN_ZOOM,
+  CURRENT_LOCATION_ZOOM,
+} from "@/lib/mapStyle";
+import type { Rank, Role, Spot } from "@/lib/types";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
   type SpotFilters,
 } from "@/components/FilterBar";
-import RankBadge from "@/components/RankBadge";
+import AddSpotModal from "@/components/AddSpotModal";
+import SpotDetailModal from "@/components/SpotDetailModal";
 
-/** ランク別のピンの見た目: S=大きい金、A=銀、B=小さい灰 */
+const CAN_ADD_SPOT_ROLES: Role[] = ["admin", "moderator"];
+
+/**
+ * 直前に表示していた地図の中心・ズームを覚えておく(モジュールスコープの変数なので
+ * 他画面へ遷移してMapViewがアンマウントされても、同じセッション内であれば保持される)。
+ * これがあれば再訪時は現在地取得をせずそのまま復元し、なければ(このセッションで
+ * 初めて/map を開いたとき)従来通り現在地取得を試みる。
+ */
+let lastView: { center: [number, number]; zoom: number } | null = null;
+
+/**
+ * 現在地の青い丸を表示していたかどうかも同様にモジュールスコープで記憶する。
+ * 表示していた場合は最後に分かっている座標も覚えておき、再訪時に地図を動かさず
+ * その場に仮の丸を復元する(新たな位置情報取得はしない)。
+ */
+let lastLocation: { lat: number; lng: number } | null = null;
+let lastLocationVisible = false;
+
+function createLocationDotElement(): HTMLDivElement {
+  const el = document.createElement("div");
+  el.style.cssText = `
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #2563eb; border: 3px solid white;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.25), 0 1px 4px rgba(0,0,0,0.4);
+  `;
+  return el;
+}
+
+/** ランク別のピンの見た目: 上位ランクほど大きく・目立つ色にする */
 const pinStyles: Record<Rank, { size: number; bg: string; border: string }> = {
   S: { size: 26, bg: "#f59e0b", border: "#b45309" },
-  A: { size: 20, bg: "#9ca3af", border: "#4b5563" },
-  B: { size: 14, bg: "#d1d5db", border: "#9ca3af" },
+  A: { size: 22, bg: "#a7f3d0", border: "#34d399" },
+  B: { size: 18, bg: "#93c5fd", border: "#60a5fa" },
+  C: { size: 15, bg: "#ffffff", border: "#9ca3af" },
+  D: { size: 12, bg: "#e5e7eb", border: "#9ca3af" },
 };
 
 function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
   const { size, bg, border } = pinStyles[spot.rank];
-  const el = document.createElement("div");
-  el.style.cssText = `
+
+  // MapLibreはこの要素自体に `.maplibregl-marker { position: absolute }` を
+  // 適用して地図上に配置する。ここでinline styleに position を指定すると
+  // (詳細度の関係で)それを上書きしてしまい、マーカーが通常のドキュメントフローに
+  // 乗って本来と全く違う位置に積み上がってしまう。そのためピンの見た目(円+バッジ)は
+  // 内側のラッパーに閉じ込め、外側要素にはpositionを指定しない。
+  const outer = document.createElement("div");
+
+  const inner = document.createElement("div");
+  inner.style.cssText = `
     width: ${size}px; height: ${size}px;
     background: ${bg}; border: 2px solid ${border};
     border-radius: 50%; cursor: pointer; position: relative;
@@ -40,21 +83,47 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
       font-size: 10px; line-height: 15px; text-align: center;
       font-weight: bold; border: 1.5px solid white;
     `;
-    el.appendChild(check);
+    inner.appendChild(check);
   }
-  return el;
+  outer.appendChild(inner);
+  return outer;
 }
 
 export default function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
+  const locationDotRef = useRef<maplibregl.Marker | null>(null);
 
   const [spots, setSpots] = useState<Spot[]>([]);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
-  const [selected, setSelected] = useState<Spot | null>(null);
+  const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const [role, setRole] = useState<Role | null>(null);
+  const roleRef = useRef<Role | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [addSpotAt, setAddSpotAt] = useState<{ lat: number; lng: number } | null>(
+    null
+  );
+  const [pendingSpots, setPendingSpots] = useState<
+    { id: string; lat: number; lng: number; name: string }[]
+  >([]);
+  const pendingMarkersRef = useRef<maplibregl.Marker[]>([]);
+
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+
+  useEffect(() => {
+    api.auth.me().then(({ data }) => setRole(data?.role ?? null));
+  }, []);
 
   // 地図の初期化
   useEffect(() => {
@@ -62,38 +131,165 @@ export default function MapView() {
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: osmStyle,
-      center: JAPAN_CENTER,
-      zoom: JAPAN_ZOOM,
+      center: lastView?.center ?? JAPAN_CENTER,
+      zoom: lastView?.zoom ?? JAPAN_ZOOM,
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl(), "top-right");
-    map.addControl(
-      new maplibregl.GeolocateControl({ trackUserLocation: true }),
-      "top-right"
-    );
+    const geolocate = new maplibregl.GeolocateControl({
+      trackUserLocation: true,
+      fitBoundsOptions: { maxZoom: CURRENT_LOCATION_ZOOM },
+      positionOptions: { enableHighAccuracy: true, timeout: 10000 },
+    });
+    map.addControl(geolocate, "top-right");
     mapRef.current = map;
+
+    // このセッションで初めて/mapを開いたときだけ、起動時に現在地を自動取得して
+    // その周辺にズームインする(現在地を示す青い丸も表示される)。他画面から
+    // 戻ってきたときは直前に表示していた位置・ズームをそのまま復元する
+    if (!lastView) {
+      map.on("load", () => geolocate.trigger());
+    } else if (lastLocationVisible && lastLocation) {
+      // 前回青い丸を表示していた場合、地図は動かさずその場に仮の丸だけ復元する
+      // (新たな位置情報取得はしない。実際に取得できたら下のgeolocateイベントで
+      // 本物の丸に置き換わる)
+      locationDotRef.current = new maplibregl.Marker({
+        element: createLocationDotElement(),
+      })
+        .setLngLat([lastLocation.lng, lastLocation.lat])
+        .addTo(map);
+    }
+
+    // 現在地取得の成否・表示状態を覚えておき、次にこの画面を開いたときに復元する
+    const handleGeolocate = (position: GeolocationPosition) => {
+      lastLocation = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      };
+      lastLocationVisible = true;
+      // 実際の現在地マーカーが表示されるので、復元用の仮マーカーは片付ける
+      locationDotRef.current?.remove();
+      locationDotRef.current = null;
+    };
+    const handleGeolocateEnd = () => {
+      lastLocationVisible = false;
+    };
+    geolocate.on("geolocate", handleGeolocate);
+    geolocate.on("trackuserlocationend", handleGeolocateEnd);
+    geolocate.on("error", handleGeolocateEnd);
+
+    const saveView = () => {
+      lastView = {
+        center: map.getCenter().toArray() as [number, number],
+        zoom: map.getZoom(),
+      };
+    };
+    map.on("moveend", saveView);
+
+    // トラックパッドの二本指スクロールは移動、Ctrl/⌘+スクロール(ピンチ)は拡大縮小にする。
+    // MapLibreのデフォルトはどちらもズーム操作になってしまうため上書きする。
+    map.scrollZoom.disable();
+    const container = containerRef.current;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey) {
+        map.setZoom(map.getZoom() - e.deltaY * 0.01);
+      } else {
+        map.panBy([e.deltaX, e.deltaY], { animate: false });
+      }
+    };
+    container.addEventListener("wheel", handleWheel, { passive: false });
+
+    // 右クリック(PC)でスポット追加メニューを出す。権限がない場合は通常のブラウザ
+    // メニューのままにする(preventDefaultしない)
+    const handleContextMenu = (e: maplibregl.MapMouseEvent) => {
+      if (!CAN_ADD_SPOT_ROLES.includes(roleRef.current as Role)) return;
+      e.originalEvent.preventDefault();
+      setContextMenu({
+        x: e.point.x,
+        y: e.point.y,
+        lat: e.lngLat.lat,
+        lng: e.lngLat.lng,
+      });
+    };
+    map.on("contextmenu", handleContextMenu);
+
+    // 長押し(モバイル)でも同じメニューを出す
+    let longPressTimer: number | null = null;
+    let touchStart: { x: number; y: number } | null = null;
+    const clearLongPress = () => {
+      if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+      touchStart = null;
+    };
+    const handleTouchStart = (e: TouchEvent) => {
+      clearLongPress();
+      if (e.touches.length !== 1) return;
+      if (!CAN_ADD_SPOT_ROLES.includes(roleRef.current as Role)) return;
+      const touch = e.touches[0];
+      touchStart = { x: touch.clientX, y: touch.clientY };
+      longPressTimer = window.setTimeout(() => {
+        if (!touchStart) return;
+        const rect = container.getBoundingClientRect();
+        const point: [number, number] = [
+          touchStart.x - rect.left,
+          touchStart.y - rect.top,
+        ];
+        const lngLat = map.unproject(point);
+        setContextMenu({
+          x: point[0],
+          y: point[1],
+          lat: lngLat.lat,
+          lng: lngLat.lng,
+        });
+        touchStart = null;
+      }, 550);
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!touchStart) return;
+      const touch = e.touches[0];
+      const dx = touch.clientX - touchStart.x;
+      const dy = touch.clientY - touchStart.y;
+      if (Math.hypot(dx, dy) > 10) clearLongPress();
+    };
+    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchmove", handleTouchMove, { passive: true });
+    container.addEventListener("touchend", clearLongPress);
+    container.addEventListener("touchcancel", clearLongPress);
+
     return () => {
+      saveView();
+      container.removeEventListener("wheel", handleWheel);
+      map.off("contextmenu", handleContextMenu);
+      map.off("moveend", saveView);
+      geolocate.off("geolocate", handleGeolocate);
+      geolocate.off("trackuserlocationend", handleGeolocateEnd);
+      geolocate.off("error", handleGeolocateEnd);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", clearLongPress);
+      container.removeEventListener("touchcancel", clearLongPress);
+      clearLongPress();
+      locationDotRef.current?.remove();
+      locationDotRef.current = null;
       map.remove();
       mapRef.current = null;
     };
   }, []);
 
+  const loadVisits = async () => {
+    const { data } = await api.visits.list();
+    setVisitedIds(new Set((data ?? []).map((v) => v.spot_id)));
+  };
+
   // データ取得
   useEffect(() => {
-    const supabase = createClient();
     (async () => {
-      const [{ data: spotsData }, { data: visitsData }] = await Promise.all([
-        supabase
-          .from("spots")
-          .select("*")
-          .eq("status", "published")
-          .order("name"),
-        supabase.from("visits").select("spot_id"),
+      const [{ data: spotsData }] = await Promise.all([
+        api.spots.list("published"),
+        loadVisits(),
       ]);
-      setSpots((spotsData as Spot[]) ?? []);
-      setVisitedIds(
-        new Set((visitsData ?? []).map((v: { spot_id: string }) => v.spot_id))
-      );
+      setSpots(spotsData ?? []);
       setLoading(false);
     })();
   }, []);
@@ -114,7 +310,7 @@ export default function MapView() {
       const el = createPinElement(spot, visited);
       el.addEventListener("click", (e) => {
         e.stopPropagation();
-        setSelected(spot);
+        setDetailSpotId(spot.id);
       });
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([spot.lng, spot.lat])
@@ -123,12 +319,34 @@ export default function MapView() {
     }
   }, [spots, visitedIds, filters]);
 
+  // 今回のセッションで送信した承認待ちスポットの仮ピン(破線)を表示
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    pendingMarkersRef.current.forEach((m) => m.remove());
+    pendingMarkersRef.current = [];
+
+    for (const p of pendingSpots) {
+      const el = document.createElement("div");
+      el.title = `${p.name}(承認待ち)`;
+      el.style.cssText = `
+        width: 16px; height: 16px; border-radius: 50%;
+        background: rgba(217, 119, 6, 0.3); border: 2px dashed #d97706;
+      `;
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([p.lng, p.lat])
+        .addTo(map);
+      pendingMarkersRef.current.push(marker);
+    }
+  }, [pendingSpots]);
+
   return (
     <div className="relative h-[calc(100dvh-4rem)]">
       <div ref={containerRef} className="h-full w-full" />
 
-      {/* フィルタバー */}
-      <div className="absolute inset-x-0 top-0 z-10 p-2">
+      {/* フィルタバー(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
+      <div className="absolute left-0 right-16 top-0 z-10 p-2">
         <div className="rounded-xl bg-white/95 p-2 shadow">
           <FilterBar filters={filters} onChange={setFilters} />
         </div>
@@ -140,48 +358,57 @@ export default function MapView() {
         </div>
       )}
 
-      {/* ボトムシート: スポット概要 */}
-      {selected && (
-        <div className="absolute inset-x-0 bottom-0 z-20 rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-[0_-4px_16px_rgba(0,0,0,0.15)]">
-          <div className="mx-auto max-w-lg">
-            <div className="mb-2 flex items-start justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <RankBadge rank={selected.rank} />
-                <div>
-                  <h2 className="font-bold leading-tight">{selected.name}</h2>
-                  <p className="text-xs text-gray-500">
-                    {selected.prefecture}
-                    {selected.municipality && ` ${selected.municipality}`} ・{" "}
-                    {selected.category}
-                    {visitedIds.has(selected.id) && (
-                      <span className="ml-1 font-medium text-green-600">
-                        ✓ 訪問済み
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelected(null)}
-                className="rounded-full px-2 text-xl leading-none text-gray-400"
-                aria-label="閉じる"
-              >
-                ×
-              </button>
-            </div>
-            {selected.description && (
-              <p className="mb-3 line-clamp-2 text-sm text-gray-600">
-                {selected.description}
-              </p>
-            )}
-            <Link
-              href={`/spots/${selected.id}`}
-              className="block w-full rounded-lg bg-blue-600 py-2 text-center text-sm font-medium text-white"
+      {/* 右クリック/長押しメニュー */}
+      {contextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-30"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu(null);
+            }}
+          />
+          <div
+            className="absolute z-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <button
+              onClick={() => {
+                setAddSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
+                setContextMenu(null);
+              }}
+              className="whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
             >
-              詳細を見る
-            </Link>
+              ここにスポットを追加
+            </button>
           </div>
-        </div>
+        </>
+      )}
+
+      {/* スポット追加モーダル */}
+      {addSpotAt && (
+        <AddSpotModal
+          lat={addSpotAt.lat}
+          lng={addSpotAt.lng}
+          onClose={() => setAddSpotAt(null)}
+          onCreated={(spot) => {
+            setPendingSpots((prev) => [
+              ...prev,
+              { id: spot.id, lat: spot.lat, lng: spot.lng, name: spot.name },
+            ]);
+            setAddSpotAt(null);
+          }}
+        />
+      )}
+
+      {/* スポット詳細モーダル */}
+      {detailSpotId && (
+        <SpotDetailModal
+          spotId={detailSpotId}
+          onClose={() => setDetailSpotId(null)}
+          onVisitChange={loadVisits}
+        />
       )}
     </div>
   );

@@ -2,6 +2,15 @@
 
 import { CATEGORIES, RANKS, type Rank } from "@/lib/types";
 
+// RankBadge/MapViewと同じ配色
+const activeRankStyles: Record<Rank, string> = {
+  S: "bg-[#f59e0b] text-[#451a03]",
+  A: "bg-[#a7f3d0] text-[#065f46]",
+  B: "bg-[#93c5fd] text-[#1e3a8a]",
+  C: "bg-white text-gray-700 border border-gray-300",
+  D: "bg-[#e5e7eb] text-gray-700",
+};
+
 export type VisitedFilter = "all" | "visited" | "unvisited";
 
 export interface SpotFilters {
@@ -59,11 +68,7 @@ export default function FilterBar({
             onClick={() => toggleRank(rank)}
             className={`px-3 py-1.5 font-bold ${
               filters.ranks.includes(rank)
-                ? rank === "S"
-                  ? "bg-amber-400 text-amber-950"
-                  : rank === "A"
-                    ? "bg-gray-400 text-white"
-                    : "bg-gray-200 text-gray-700"
+                ? activeRankStyles[rank]
                 : "bg-white text-gray-300"
             }`}
           >
