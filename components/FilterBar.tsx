@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { distinctValues, type Rank, type Spot } from "@/lib/types";
-import { getRankBadgeStyle, getRankOrder } from "@/lib/rankStyle";
+import { getRankOrder } from "@/lib/rankStyle";
 
 export type VisitedFilter = "all" | "visited" | "unvisited";
 
@@ -76,65 +76,43 @@ export default function FilterBar({
     [spots]
   );
 
-  // 既定(filters.ranks === [])で実際にアクティブなランクは「hiddenRanks以外の全て」
-  const defaultActiveRanks = useMemo(
-    () => availableRanks.filter((r) => !hiddenRanks.includes(r)),
-    [availableRanks, hiddenRanks]
-  );
-
-  const toggleRank = (rank: string) => {
-    const current = filters.ranks.length > 0 ? filters.ranks : defaultActiveRanks;
-    const ranks = current.includes(rank)
-      ? current.filter((r) => r !== rank)
-      : [...current, rank];
-    // hiddenRanksを含まない状態で全ランクが揃ったときだけ「フィルタなし(既定)」に戻す
-    const collapsesToDefault =
-      !ranks.some((r) => hiddenRanks.includes(r)) &&
-      ranks.length >= defaultActiveRanks.length;
-    onChange({
-      ...filters,
-      ranks: collapsesToDefault ? [] : ranks,
-    });
-  };
+  // <select>は単一選択なので、既に複数選択された状態(過去互換)は「すべて」扱いにする
+  const selectedRank = filters.ranks.length === 1 ? filters.ranks[0] : "all";
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       {availableRanks.length > 0 && (
-        <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
-          {availableRanks.map((rank) => {
-            const active =
-              filters.ranks.length > 0
-                ? filters.ranks.includes(rank)
-                : !hiddenRanks.includes(rank);
-            return (
-              <button
-                key={rank}
-                onClick={() => toggleRank(rank)}
-                className={`px-3 py-1.5 font-bold ${
-                  active ? getRankBadgeStyle(rank) : "bg-white text-gray-300"
-                }`}
-              >
-                {rank}
-              </button>
-            );
-          })}
-        </div>
+        <select
+          value={selectedRank}
+          onChange={(e) =>
+            onChange({
+              ...filters,
+              ranks: e.target.value === "all" ? [] : [e.target.value],
+            })
+          }
+          className="rounded-lg border border-gray-300 bg-white px-2 py-1.5"
+        >
+          <option value="all">すべてのランク</option>
+          {availableRanks.map((rank) => (
+            <option key={rank} value={rank}>
+              {rank}
+            </option>
+          ))}
+        </select>
       )}
-      <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
+      <select
+        value={filters.visited}
+        onChange={(e) =>
+          onChange({ ...filters, visited: e.target.value as VisitedFilter })
+        }
+        className="rounded-lg border border-gray-300 bg-white px-2 py-1.5"
+      >
         {visitedOptions.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => onChange({ ...filters, visited: opt.value })}
-            className={`px-3 py-1.5 ${
-              filters.visited === opt.value
-                ? "bg-blue-600 text-white"
-                : "bg-white text-gray-500"
-            }`}
-          >
+          <option key={opt.value} value={opt.value}>
             {opt.label}
-          </button>
+          </option>
         ))}
-      </div>
+      </select>
       {availableCategories.length > 0 && (
         <select
           value={filters.category}

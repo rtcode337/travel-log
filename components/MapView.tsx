@@ -12,7 +12,7 @@ import {
   CURRENT_LOCATION_ZOOM,
 } from "@/lib/mapStyle";
 import type { Role, Spot } from "@/lib/types";
-import { getRankPinStyle } from "@/lib/rankStyle";
+import { getRankPinStyle, getRankPinTextColor } from "@/lib/rankStyle";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -270,13 +270,17 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
     box-shadow: 0 1px 3px rgba(0,0,0,0.4);
     display: flex; align-items: center; justify-content: center;
   `;
-  // 訪問済みはチェックマーク、郵便局ランクは(未訪問時)〒マークを丸の中に表示する
-  const mark = visited ? "✓" : spot.rank === "郵便局" ? "〒" : spot.status === "private" ? "🔒" : null;
+  // 訪問済みはチェックマーク、非公開は鍵マーク、それ以外はランクの文字
+  // (郵便局ランクだけ文字が長いので〒に短縮)をピンの色に合わせた文字色で表示する
+  const rankLabel = spot.rank === "郵便局" ? "〒" : spot.rank;
+  const mark = visited ? "✓" : spot.status === "private" ? "🔒" : rankLabel;
+  const markColor =
+    visited || spot.status === "private" ? "#ffffff" : getRankPinTextColor(spot.rank);
   if (mark) {
     const markEl = document.createElement("span");
     markEl.textContent = mark;
     markEl.style.cssText = `
-      color: white; font-weight: bold; line-height: 1;
+      color: ${markColor}; font-weight: bold; line-height: 1;
       font-size: ${Math.max(10, Math.round(size * 0.6))}px;
     `;
     inner.appendChild(markEl);
@@ -673,7 +677,7 @@ export default function MapView() {
       <div ref={containerRef} className="h-full w-full" />
 
       {/* フィルタバー・検索バー(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
-      <div className="absolute left-0 right-16 top-0 z-10 space-y-2 p-2">
+      <div className="absolute left-0 right-14 top-0 z-10 space-y-2 p-2">
         <div className="rounded-xl bg-white/95 p-2 shadow">
           <FilterBar
             spots={spots}
