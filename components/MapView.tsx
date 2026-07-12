@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { api } from "@/lib/api-client";
@@ -282,6 +283,10 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
 }
 
 export default function MapView() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const focusSpotId = searchParams.get("spot");
+
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
@@ -555,6 +560,26 @@ export default function MapView() {
       if (data) setSpots(data);
     });
   }, [filters.ranks, hiddenRanks, hiddenLoaded]);
+
+  // /map?spot=<id> で開かれたら、そのスポットの位置にズームする
+  // (詳細モーダルは開かない: モーダルがピンの真上に重なりどこが開かれたか分からなくなるため)
+  // (一覧画面の「アプリの地図で開く」から遷移してきたときなど)
+  useEffect(() => {
+    if (!focusSpotId || spots.length === 0) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const target = spots.find((s) => s.id === focusSpotId);
+    if (!target) return;
+
+    const fly = () => {
+      map.flyTo({ center: [target.lng, target.lat], zoom: 16 });
+    };
+    if (map.isStyleLoaded()) fly();
+    else map.once("load", fly);
+
+    // 一度処理したらURLから消す(戻る操作やスポット再取得のたびに再発火しないように)
+    router.replace("/map");
+  }, [focusSpotId, spots, router]);
 
   // マーカーの生成・フィルタ反映(件数に応じてDOM Marker/WebGLクラスタを切り替える)
   useEffect(() => {
