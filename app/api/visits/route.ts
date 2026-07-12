@@ -44,5 +44,11 @@ export async function POST(request: Request) {
     ]
   );
 
+  // 訪問を記録したら、その場所は訪問予定リストから自動的に外す
+  await query("delete from visit_plans where user_id = $1 and spot_id = $2", [
+    userId,
+    body.spot_id,
+  ]);
+
   return NextResponse.json({ data: rows[0] });
 }

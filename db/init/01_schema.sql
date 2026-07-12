@@ -67,8 +67,9 @@ create table spots (
   source        text not null default 'manual' check (
     source in ('manual', 'opendata', 'user_submitted')
   ),
+  -- private: 誰でも作成できる非公開スポット。作成者本人にしか見えず、口コミも使えない
   status        text not null default 'published' check (
-    status in ('published', 'pending', 'rejected')
+    status in ('published', 'pending', 'rejected', 'private')
   ),
   created_by    uuid references users (id) on delete set null,
   created_at    timestamptz not null default now(),
@@ -112,6 +113,22 @@ create table visits (
 
 create index visits_user_id_idx on visits (user_id);
 create index visits_spot_id_idx on visits (spot_id);
+
+-- =============================================================
+-- visit_plans: 訪問予定リスト(行きたい場所のブックマーク)。
+-- 同一ユーザー×同一スポットは1件まで(トグル管理)。訪問を記録すると自動で消える
+-- (app/api/visits/route.tsのPOST参照)
+-- =============================================================
+create table visit_plans (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references users (id) on delete cascade,
+  spot_id    uuid not null references spots (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (user_id, spot_id)
+);
+
+create index visit_plans_user_id_idx on visit_plans (user_id);
+create index visit_plans_spot_id_idx on visit_plans (spot_id);
 
 -- =============================================================
 -- reviews: 口コミ。投稿するたびに増える掲示板方式(1ユーザーが同じスポットに何件でも書ける)。

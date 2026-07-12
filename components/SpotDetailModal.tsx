@@ -13,6 +13,7 @@ import {
 import RankBadge from "@/components/RankBadge";
 import MiniMap from "@/components/MiniMap";
 import VisitFormModal from "@/components/VisitFormModal";
+import AddSpotModal from "@/components/AddSpotModal";
 
 function formatReviewDatetime(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", {
@@ -26,13 +27,25 @@ function formatReviewDatetime(iso: string): string {
 
 export default function SpotDetailModal({
   spotId,
+  spots,
   onClose,
   onVisitChange,
+  onSpotChange,
+  onSpotDeleted,
+  onVisitPlanChange,
 }: {
   spotId: string;
+  /** 編集モーダルのランク・カテゴリ入力サジェスト用(省略時はサジェストなし) */
+  spots?: Spot[];
   onClose: () => void;
   /** 訪問記録の追加・削除があったときに呼ばれる(呼び出し元の一覧・バッジ更新用) */
   onVisitChange?: () => void;
+  /** スポット自体の編集で内容が変わったときに呼ばれる(呼び出し元の一覧の再取得用) */
+  onSpotChange?: () => void;
+  /** スポットが削除されたときに呼ばれる(呼び出し元の一覧の再取得用) */
+  onSpotDeleted?: () => void;
+  /** 訪問予定への追加・解除があったときに呼ばれる(呼び出し元の一覧の再取得用) */
+  onVisitPlanChange?: () => void;
 }) {
   const [spot, setSpot] = useState<Spot | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
@@ -42,17 +55,27 @@ export default function SpotDetailModal({
   const [reviewsPage, setReviewsPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [myId, setMyId] = useState<string | null>(null);
+  const [planned, setPlanned] = useState(false);
+  const [planUpdating, setPlanUpdating] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: spotData }, { data: visitsData }, { data: typesData }] =
-      await Promise.all([
-        api.spots.get(spotId),
-        api.visits.list(spotId),
-        api.spotTypes.list(),
-      ]);
+    const [
+      { data: spotData },
+      { data: visitsData },
+      { data: typesData },
+      { data: plansData },
+    ] = await Promise.all([
+      api.spots.get(spotId),
+      api.visits.list(spotId),
+      api.spotTypes.list(),
+      api.visitPlans.list(spotId),
+    ]);
     setSpot(spotData ?? null);
     setVisits(visitsData ?? []);
     setSpotTypes(typesData ?? []);
+    setPlanned((plansData?.length ?? 0) > 0);
     setLoading(false);
   }, [spotId]);
 
@@ -61,10 +84,30 @@ export default function SpotDetailModal({
     setReviewsPage(1);
   }, [load]);
 
+  useEffect(() => {
+    api.auth.me().then(({ data }) => setMyId(data?.id ?? null));
+  }, []);
+
+  const toggleVisitPlan = async () => {
+    setPlanUpdating(true);
+    const { error } = planned
+      ? await api.visitPlans.delete(spotId)
+      : await api.visitPlans.create(spotId);
+    setPlanUpdating(false);
+    if (error) return;
+    setPlanned((prev) => !prev);
+    onVisitPlanChange?.();
+  };
+
+  // 非公開スポットの作成者本人だけが編集・削除できる
+  const canEdit = !!spot && spot.status === "private" && spot.created_by === myId;
+
+  // 非公開スポットは口コミの表示・投稿ともに不可
   const reviewsEnabled = useMemo(
     () =>
-      spotTypes.find((t) => t.id === spot?.spot_type_id)?.reviews_enabled ??
-      true,
+      spot?.status !== "private" &&
+      (spotTypes.find((t) => t.id === spot?.spot_type_id)?.reviews_enabled ??
+        true),
     [spotTypes, spot]
   );
 
@@ -114,6 +157,20 @@ export default function SpotDetailModal({
                 <div>
                   <h2 className="text-lg font-bold leading-tight">
                     {spot.name}
+                    {spot.status === "private" && (
+                      <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-xs font-normal text-gray-600">
+                        非公開
+                      </span>
+                    )}
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => setShowEditForm(true)}
+                        className="ml-2 text-xs font-normal text-blue-600 underline"
+                      >
+                        編集
+                      </button>
+                    )}
                   </h2>
                   <p className="text-xs text-gray-500">
                     {spot.prefecture}
@@ -186,12 +243,25 @@ export default function SpotDetailModal({
                     </span>
                   )}
                 </h3>
-                <button
-                  onClick={() => setShowForm(true)}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
-                >
-                  + 訪問を記録
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={toggleVisitPlan}
+                    disabled={planUpdating}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                      planned
+                        ? "border border-gray-300 text-gray-600"
+                        : "border border-blue-600 text-blue-600"
+                    }`}
+                  >
+                    {planned ? "訪問予定をはずす" : "訪問予定にする"}
+                  </button>
+                  <button
+                    onClick={() => setShowForm(true)}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
+                  >
+                    + 訪問を記録
+                  </button>
+                </div>
               </div>
               {visits.length === 0 ? (
                 <p className="text-sm text-gray-500">
@@ -318,6 +388,27 @@ export default function SpotDetailModal({
             setReviewsPage(1);
             loadReviews(1);
             onVisitChange?.();
+            // 訪問記録時、サーバー側で訪問予定からも自動的に外れる
+            onVisitPlanChange?.();
+          }}
+        />
+      )}
+
+      {showEditForm && spot && (
+        <AddSpotModal
+          spot={spot}
+          spots={spots ?? []}
+          role={null}
+          onClose={() => setShowEditForm(false)}
+          onSaved={() => {
+            setShowEditForm(false);
+            load();
+            onSpotChange?.();
+          }}
+          onDeleted={() => {
+            setShowEditForm(false);
+            onSpotDeleted?.();
+            onClose();
           }}
         />
       )}

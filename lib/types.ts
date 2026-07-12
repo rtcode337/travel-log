@@ -50,6 +50,19 @@ export const DATE_PRECISIONS: { value: DatePrecision; label: string }[] = [
   { value: "unknown", label: "覚えていない" },
 ];
 
+/**
+ * published: 公開 / pending: 承認待ち / rejected: 却下(承認操作専用、作成時には選べない) /
+ * private: 非公開。誰でも作成できるが、作成者本人にしか見えず口コミも使えない
+ */
+export type SpotStatus = "published" | "pending" | "rejected" | "private";
+
+export const STATUS_LABELS: Record<SpotStatus, string> = {
+  published: "公開",
+  pending: "承認待ち",
+  rejected: "却下",
+  private: "非公開",
+};
+
 export interface Spot {
   id: string;
   spot_type_id: string;
@@ -64,7 +77,7 @@ export interface Spot {
   description: string | null;
   official_url: string | null;
   source: "manual" | "opendata" | "user_submitted";
-  status: "published" | "pending" | "rejected";
+  status: SpotStatus;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -82,8 +95,9 @@ export interface SpotType {
 }
 
 /**
- * admin: 承認・削除・ユーザー管理ができる / moderator: スポットをpendingで追加できる /
- * user: 一般ユーザー(訪問記録の閲覧・記録のみ)
+ * admin: 承認・削除・ユーザー管理・公開スポットの直接作成ができる /
+ * moderator: スポットを非公開・承認待ちで追加できる /
+ * user: 一般ユーザー(訪問記録の閲覧・記録に加え、非公開スポットの追加ができる)
  */
 export type Role = "admin" | "moderator" | "user";
 
@@ -91,6 +105,13 @@ export const ROLE_LABELS: Record<Role, string> = {
   admin: "管理者",
   moderator: "モデレーター",
   user: "一般ユーザー",
+};
+
+/** スポット作成時にroleごとに選べるstatus(rejectedは承認操作専用なのでどのroleにも含めない) */
+export const ALLOWED_STATUS_BY_ROLE: Record<Role, SpotStatus[]> = {
+  user: ["private"],
+  moderator: ["private", "pending"],
+  admin: ["private", "pending", "published"],
 };
 
 export interface AppUser {
@@ -111,6 +132,14 @@ export interface Visit {
   date_precision: DatePrecision;
   memo: string | null;
   photos: string[];
+  created_at: string;
+}
+
+/** 訪問予定(行きたい場所のブックマーク)。訪問を記録すると自動で消える */
+export interface VisitPlan {
+  id: string;
+  user_id: string;
+  spot_id: string;
   created_at: string;
 }
 

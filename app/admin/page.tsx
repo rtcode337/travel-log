@@ -22,12 +22,14 @@ const STATUS_LABELS: Record<Spot["status"], string> = {
   published: "公開中",
   pending: "承認待ち",
   rejected: "却下",
+  private: "非公開",
 };
 
 const STATUS_STYLES: Record<Spot["status"], string> = {
   published: "bg-green-100 text-green-700",
   pending: "bg-amber-100 text-amber-700",
   rejected: "bg-red-100 text-red-700",
+  private: "bg-gray-200 text-gray-600",
 };
 
 const ROLES: Role[] = ["admin", "moderator", "user"];
