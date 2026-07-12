@@ -11,20 +11,36 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
+  const includeHidden = searchParams.get("includeHidden") === "1";
 
-  const { rows } = status
-    ? await query<Spot>(
-        `select * from spots
-         where status = $1
-           and spot_type_id = (select active_spot_type_id from app_settings)
-         order by prefecture, name`,
-        [status]
-      )
-    : await query<Spot>(
-        `select * from spots
-         where spot_type_id = (select active_spot_type_id from app_settings)
-         order by prefecture, name`
-      );
+  const conditions = [
+    "spot_type_id = (select active_spot_type_id from app_settings)",
+  ];
+  const params: unknown[] = [];
+
+  if (status) {
+    params.push(status);
+    conditions.push(`status = $${params.length}`);
+  }
+
+  if (!includeHidden) {
+    // アクティブなスポット種類の hidden_ranks に含まれるランクは、明示的に
+    // includeHidden=1 が指定されない限り返さない(大量の未整理データの遅延ロード用)
+    const { rows: typeRows } = await query<{ hidden_ranks: string[] }>(
+      `select t.hidden_ranks from spot_types t
+       join app_settings s on s.active_spot_type_id = t.id`
+    );
+    const hiddenRanks = typeRows[0]?.hidden_ranks ?? [];
+    if (hiddenRanks.length > 0) {
+      params.push(hiddenRanks);
+      conditions.push(`(rank is null or not (rank = any($${params.length})))`);
+    }
+  }
+
+  const { rows } = await query<Spot>(
+    `select * from spots where ${conditions.join(" and ")} order by prefecture, name`,
+    params
+  );
 
   return NextResponse.json({ data: rows });
 }

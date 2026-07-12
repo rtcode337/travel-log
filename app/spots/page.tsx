@@ -16,6 +16,8 @@ type SortKey = "rank" | "name" | "visited";
 
 export default function SpotsPage() {
   const [spots, setSpots] = useState<Spot[]>([]);
+  const [hiddenRanks, setHiddenRanks] = useState<string[]>([]);
+  const [hiddenLoaded, setHiddenLoaded] = useState(false);
   const [visits, setVisits] = useState<Visit[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPref, setSelectedPref] = useState<string | null>(null);
@@ -28,16 +30,29 @@ export default function SpotsPage() {
     setVisits(data ?? []);
   }, []);
 
+  // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
   useEffect(() => {
     (async () => {
-      const [{ data: spotsData }] = await Promise.all([
+      const [{ data: spotsData }, { data: activeType }] = await Promise.all([
         api.spots.list("published"),
+        api.appSettings.get(),
         loadVisits(),
       ]);
       setSpots(spotsData ?? []);
+      setHiddenRanks(activeType?.hidden_ranks ?? []);
       setLoading(false);
     })();
   }, [loadVisits]);
+
+  // ランクフィルタで非表示ランクが明示的に選ばれたら、まだ取得していなければ全件取り直す
+  useEffect(() => {
+    if (hiddenLoaded || hiddenRanks.length === 0) return;
+    if (!filters.ranks.some((r) => hiddenRanks.includes(r))) return;
+    setHiddenLoaded(true);
+    api.spots.list("published", { includeHidden: true }).then(({ data }) => {
+      if (data) setSpots(data);
+    });
+  }, [filters.ranks, hiddenRanks, hiddenLoaded]);
 
   const visitedIds = useMemo(
     () => new Set(visits.map((v) => v.spot_id)),
@@ -75,7 +90,13 @@ export default function SpotsPage() {
     const list = spots.filter(
       (s) =>
         s.prefecture === selectedPref &&
-        passesFilters(filters, s.rank, s.category, visitedIds.has(s.id))
+        passesFilters(
+          filters,
+          s.rank,
+          s.category,
+          visitedIds.has(s.id),
+          hiddenRanks
+        )
     );
     list.sort((a, b) => {
       switch (sortKey) {
@@ -97,7 +118,15 @@ export default function SpotsPage() {
       }
     });
     return list;
-  }, [spots, selectedPref, filters, visitedIds, sortKey, latestVisitDate]);
+  }, [
+    spots,
+    selectedPref,
+    filters,
+    visitedIds,
+    sortKey,
+    latestVisitDate,
+    hiddenRanks,
+  ]);
 
   if (loading) {
     return (
@@ -157,6 +186,7 @@ export default function SpotsPage() {
           spots={spots.filter((s) => s.prefecture === selectedPref)}
           filters={filters}
           onChange={setFilters}
+          hiddenRanks={hiddenRanks}
         />
         <select
           value={sortKey}

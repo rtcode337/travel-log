@@ -3,6 +3,9 @@ import type { StyleSpecification } from "maplibre-gl";
 /** OpenStreetMap ラスタタイルを使った無料のマップスタイル */
 export const osmStyle: StyleSpecification = {
   version: 8,
+  // クラスタの件数ラベル(symbolレイヤーのtext-field)を描画するためのフォント。
+  // MapLibre公式のデモグリフサーバー(無料・APIキー不要)を利用する。
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   sources: {
     osm: {
       type: "raster",

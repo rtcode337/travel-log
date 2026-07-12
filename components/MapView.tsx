@@ -22,6 +22,203 @@ import SpotDetailModal from "@/components/SpotDetailModal";
 
 const CAN_ADD_SPOT_ROLES: Role[] = ["admin", "moderator"];
 
+const CLUSTER_SOURCE_ID = "spots-cluster";
+const CLUSTER_LAYER_ID = "spots-clusters";
+const CLUSTER_COUNT_LAYER_ID = "spots-cluster-count";
+const UNCLUSTERED_LAYER_ID = "spots-unclustered-point";
+const UNCLUSTERED_CHECK_LAYER_ID = "spots-unclustered-check";
+
+/**
+ * フィルタ後の件数がこれを超えたら、個別のDOM Marker(ランクバッジ・訪問チェック付き)
+ * をやめてWebGL側でクラスタ描画に切り替える(郵便局のような大量データの種類向け。
+ * 観光地は現状2,741件でこの閾値を超えないため今まで通り個別ピンのまま表示される)。
+ */
+const CLUSTER_THRESHOLD = 3000;
+
+type ClusterFeatureProps = { id: string; rank: string | null; visited: boolean };
+
+function buildClusterGeoJSON(
+  spots: Spot[],
+  visitedIds: Set<string>
+): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
+  return {
+    type: "FeatureCollection",
+    features: spots.map((spot) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [spot.lng, spot.lat] },
+      properties: {
+        id: spot.id,
+        rank: spot.rank,
+        visited: visitedIds.has(spot.id),
+      },
+    })),
+  };
+}
+
+/** クラスタ用のsource/layerを(まだなければ)追加する。冪等 */
+function ensureClusterLayers(
+  map: maplibregl.Map,
+  onSelectSpot: (id: string) => void
+) {
+  if (map.getSource(CLUSTER_SOURCE_ID)) return;
+
+  map.addSource(CLUSTER_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+    cluster: true,
+    clusterMaxZoom: 16,
+    clusterRadius: 50,
+  });
+
+  map.addLayer({
+    id: CLUSTER_LAYER_ID,
+    type: "circle",
+    source: CLUSTER_SOURCE_ID,
+    filter: ["has", "point_count"],
+    paint: {
+      "circle-color": "#2563eb",
+      "circle-opacity": 0.85,
+      "circle-stroke-width": 2,
+      "circle-stroke-color": "#ffffff",
+      "circle-radius": [
+        "step",
+        ["get", "point_count"],
+        14,
+        50, 18,
+        500, 24,
+        2000, 30,
+      ],
+    },
+  });
+
+  map.addLayer({
+    id: CLUSTER_COUNT_LAYER_ID,
+    type: "symbol",
+    source: CLUSTER_SOURCE_ID,
+    filter: ["has", "point_count"],
+    layout: {
+      "text-field": "{point_count_abbreviated}",
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 12,
+    },
+    paint: {
+      "text-color": "#ffffff",
+    },
+  });
+
+  map.addLayer({
+    id: UNCLUSTERED_LAYER_ID,
+    type: "circle",
+    source: CLUSTER_SOURCE_ID,
+    filter: ["!", ["has", "point_count"]],
+    paint: {
+      // 訪問済みは(ランクの色より視認性を優先し)緑丸で塗りつぶす
+      "circle-color": [
+        "case",
+        ["get", "visited"],
+        "#16a34a",
+        [
+          "match",
+          ["get", "rank"],
+          "S", "#f59e0b",
+          "A", "#a7f3d0",
+          "B", "#93c5fd",
+          "C", "#fef3c7",
+          "D", "#e5e7eb",
+          "Z", "#6b7280",
+          "郵便局", "#dc2626",
+          "#9ca3af",
+        ],
+      ],
+      // ランクごとのサイズ(lib/rankStyle.tsのPIN_STYLES.size/2に対応)。訪問済みでもサイズは変えない
+      "circle-radius": [
+        "match",
+        ["get", "rank"],
+        "S", 13,
+        "A", 11,
+        "B", 9,
+        "C", 7.5,
+        "D", 6,
+        "Z", 5,
+        "郵便局", 11,
+        8,
+      ],
+      "circle-stroke-width": 1.5,
+      "circle-stroke-color": "#ffffff",
+    },
+  });
+
+  // 訪問済みはチェックマーク、郵便局ランクは〒マークを丸の中に重ねて表示する
+  map.addLayer({
+    id: UNCLUSTERED_CHECK_LAYER_ID,
+    type: "symbol",
+    source: CLUSTER_SOURCE_ID,
+    filter: [
+      "all",
+      ["!", ["has", "point_count"]],
+      ["any", ["get", "visited"], ["==", ["get", "rank"], "郵便局"]],
+    ],
+    layout: {
+      "text-field": [
+        "case",
+        ["get", "visited"], "✓",
+        ["==", ["get", "rank"], "郵便局"], "〒",
+        "",
+      ],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": ["case", ["get", "visited"], 11, 12],
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+    },
+    paint: {
+      "text-color": "#ffffff",
+    },
+  });
+
+  map.on("click", CLUSTER_LAYER_ID, async (e) => {
+    const features = map.queryRenderedFeatures(e.point, {
+      layers: [CLUSTER_LAYER_ID],
+    });
+    const clusterId = features[0]?.properties?.cluster_id;
+    if (clusterId == null) return;
+    const source = map.getSource(CLUSTER_SOURCE_ID) as maplibregl.GeoJSONSource;
+    const zoom = await source.getClusterExpansionZoom(clusterId);
+    map.easeTo({
+      center: (features[0].geometry as GeoJSON.Point).coordinates as [
+        number,
+        number,
+      ],
+      zoom,
+    });
+  });
+
+  map.on("click", UNCLUSTERED_LAYER_ID, (e) => {
+    const id = e.features?.[0]?.properties?.id;
+    if (id) onSelectSpot(id);
+  });
+
+  for (const layerId of [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID]) {
+    map.on("mouseenter", layerId, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", layerId, () => {
+      map.getCanvas().style.cursor = "";
+    });
+  }
+}
+
+function setClusterLayersVisible(map: maplibregl.Map, visible: boolean) {
+  const visibility = visible ? "visible" : "none";
+  for (const id of [
+    CLUSTER_LAYER_ID,
+    CLUSTER_COUNT_LAYER_ID,
+    UNCLUSTERED_LAYER_ID,
+    UNCLUSTERED_CHECK_LAYER_ID,
+  ]) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", visibility);
+  }
+}
+
 /**
  * 直前に表示していた地図の中心・ズームを覚えておく(モジュールスコープの変数なので
  * 他画面へ遷移してMapViewがアンマウントされても、同じセッション内であれば保持される)。
@@ -44,6 +241,7 @@ function createLocationDotElement(): HTMLDivElement {
     width: 16px; height: 16px; border-radius: 50%;
     background: #2563eb; border: 3px solid white;
     box-shadow: 0 0 0 1px rgba(0,0,0,0.25), 0 1px 4px rgba(0,0,0,0.4);
+    pointer-events: none;
   `;
   return el;
 }
@@ -58,24 +256,28 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
   // 内側のラッパーに閉じ込め、外側要素にはpositionを指定しない。
   const outer = document.createElement("div");
 
+  // 訪問済みは(ランクの色より視認性を優先し)ピン全体を緑丸+チェックマークにする
+  const fillColor = visited ? "#16a34a" : bg;
+  const borderColor = visited ? "#15803d" : border;
+
   const inner = document.createElement("div");
   inner.style.cssText = `
     width: ${size}px; height: ${size}px;
-    background: ${bg}; border: 2px solid ${border};
+    background: ${fillColor}; border: 2px solid ${borderColor};
     border-radius: 50%; cursor: pointer; position: relative;
     box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
   `;
-  if (visited) {
-    const check = document.createElement("div");
-    check.textContent = "✓";
-    check.style.cssText = `
-      position: absolute; top: -7px; right: -7px;
-      width: 15px; height: 15px; border-radius: 50%;
-      background: #16a34a; color: white;
-      font-size: 10px; line-height: 15px; text-align: center;
-      font-weight: bold; border: 1.5px solid white;
+  // 訪問済みはチェックマーク、郵便局ランクは(未訪問時)〒マークを丸の中に表示する
+  const mark = visited ? "✓" : spot.rank === "郵便局" ? "〒" : null;
+  if (mark) {
+    const markEl = document.createElement("span");
+    markEl.textContent = mark;
+    markEl.style.cssText = `
+      color: white; font-weight: bold; line-height: 1;
+      font-size: ${Math.max(10, Math.round(size * 0.6))}px;
     `;
-    inner.appendChild(check);
+    inner.appendChild(markEl);
   }
   outer.appendChild(inner);
   return outer;
@@ -88,6 +290,8 @@ export default function MapView() {
   const locationDotRef = useRef<maplibregl.Marker | null>(null);
 
   const [spots, setSpots] = useState<Spot[]>([]);
+  const [hiddenRanks, setHiddenRanks] = useState<string[]>([]);
+  const [hiddenLoaded, setHiddenLoaded] = useState(false);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
@@ -322,31 +526,71 @@ export default function MapView() {
     setSearchResults([]);
   };
 
-  // データ取得
+  // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
   useEffect(() => {
     (async () => {
-      const [{ data: spotsData }] = await Promise.all([
+      const [{ data: spotsData }, { data: activeType }] = await Promise.all([
         api.spots.list("published"),
+        api.appSettings.get(),
         loadVisits(),
       ]);
       setSpots(spotsData ?? []);
+      setHiddenRanks(activeType?.hidden_ranks ?? []);
       setLoading(false);
     })();
   }, []);
 
-  // マーカーの生成・フィルタ反映
+  // ランクフィルタで非表示ランクが明示的に選ばれたら、まだ取得していなければ全件取り直す
+  useEffect(() => {
+    if (hiddenLoaded || hiddenRanks.length === 0) return;
+    if (!filters.ranks.some((r) => hiddenRanks.includes(r))) return;
+    setHiddenLoaded(true);
+    api.spots.list("published", { includeHidden: true }).then(({ data }) => {
+      if (data) setSpots(data);
+    });
+  }, [filters.ranks, hiddenRanks, hiddenLoaded]);
+
+  // マーカーの生成・フィルタ反映(件数に応じてDOM Marker/WebGLクラスタを切り替える)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+
+    const filteredSpots = spots.filter((spot) =>
+      passesFilters(
+        filters,
+        spot.rank,
+        spot.category,
+        visitedIds.has(spot.id),
+        hiddenRanks
+      )
+    );
+
+    if (filteredSpots.length > CLUSTER_THRESHOLD) {
+      // 大量データ: 個別マーカーは全部片付けてクラスタ表示に切り替える
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current.clear();
+
+      const render = () => {
+        ensureClusterLayers(map, setDetailSpotId);
+        setClusterLayersVisible(map, true);
+        const source = map.getSource(CLUSTER_SOURCE_ID) as
+          | maplibregl.GeoJSONSource
+          | undefined;
+        source?.setData(buildClusterGeoJSON(filteredSpots, visitedIds));
+      };
+      if (map.isStyleLoaded()) render();
+      else map.once("load", render);
+      return;
+    }
+
+    setClusterLayersVisible(map, false);
 
     // 既存マーカーを一旦すべて破棄して作り直す(件数が少ないため単純に)
     markersRef.current.forEach((m) => m.remove());
     markersRef.current.clear();
 
-    for (const spot of spots) {
+    for (const spot of filteredSpots) {
       const visited = visitedIds.has(spot.id);
-      if (!passesFilters(filters, spot.rank, spot.category, visited)) continue;
-
       const el = createPinElement(spot, visited);
       el.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -357,7 +601,7 @@ export default function MapView() {
         .addTo(map);
       markersRef.current.set(spot.id, marker);
     }
-  }, [spots, visitedIds, filters]);
+  }, [spots, visitedIds, filters, hiddenRanks]);
 
   // 今回のセッションで送信した承認待ちスポットの仮ピン(破線)を表示
   useEffect(() => {
@@ -388,7 +632,12 @@ export default function MapView() {
       {/* フィルタバー・検索バー(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
       <div className="absolute left-0 right-16 top-0 z-10 space-y-2 p-2">
         <div className="rounded-xl bg-white/95 p-2 shadow">
-          <FilterBar spots={spots} filters={filters} onChange={setFilters} />
+          <FilterBar
+            spots={spots}
+            filters={filters}
+            onChange={setFilters}
+            hiddenRanks={hiddenRanks}
+          />
         </div>
         <div className="rounded-xl bg-white/95 p-2 shadow">
           <form onSubmit={handleSearch} className="flex gap-2">

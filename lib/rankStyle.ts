@@ -7,7 +7,7 @@ import type { Rank } from "./types";
  * 無難なデフォルトを返すようにしている。
  */
 
-const KNOWN_ORDER: Record<string, number> = { S: 0, A: 1, B: 2, C: 3, D: 4 };
+const KNOWN_ORDER: Record<string, number> = { S: 0, A: 1, B: 2, C: 3, D: 4, Z: 5, 郵便局: 6 };
 const UNKNOWN_ORDER = Object.keys(KNOWN_ORDER).length;
 const NULL_ORDER = UNKNOWN_ORDER + 1;
 
@@ -21,8 +21,10 @@ const BADGE_STYLES: Record<string, string> = {
   S: "bg-[#f59e0b] text-[#451a03]",
   A: "bg-[#a7f3d0] text-[#065f46]",
   B: "bg-[#93c5fd] text-[#1e3a8a]",
-  C: "bg-white text-gray-700 border border-gray-300",
+  C: "bg-[#fef3c7] text-[#78350f] border border-[#fde68a]",
   D: "bg-[#e5e7eb] text-gray-700",
+  Z: "bg-[#6b7280] text-white",
+  郵便局: "bg-[#dc2626] text-white",
 };
 const DEFAULT_BADGE_STYLE = "bg-gray-100 text-gray-600 border border-gray-300";
 
@@ -36,8 +38,10 @@ const PIN_COLORS: Record<string, string> = {
   S: "#f59e0b",
   A: "#a7f3d0",
   B: "#93c5fd",
-  C: "#ffffff",
+  C: "#fef3c7",
   D: "#e5e7eb",
+  Z: "#6b7280",
+  郵便局: "#dc2626",
 };
 const DEFAULT_PIN_COLOR = "#9ca3af";
 
@@ -57,8 +61,10 @@ const PIN_STYLES: Record<string, PinStyle> = {
   S: { size: 26, bg: "#f59e0b", border: "#b45309" },
   A: { size: 22, bg: "#a7f3d0", border: "#34d399" },
   B: { size: 18, bg: "#93c5fd", border: "#60a5fa" },
-  C: { size: 15, bg: "#ffffff", border: "#9ca3af" },
+  C: { size: 15, bg: "#fef3c7", border: "#fbbf24" },
   D: { size: 12, bg: "#e5e7eb", border: "#9ca3af" },
+  Z: { size: 10, bg: "#6b7280", border: "#374151" },
+  郵便局: { size: 22, bg: "#dc2626", border: "#b91c1c" },
 };
 const DEFAULT_PIN_STYLE: PinStyle = { size: 16, bg: "#9ca3af", border: "#6b7280" };
 

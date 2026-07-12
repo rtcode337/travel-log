@@ -8,10 +8,15 @@ create extension if not exists pgcrypto;
 -- spot_types: スポットの種類マスタ。管理者が新しい種類を追加できる
 -- =============================================================
 create table spot_types (
-  id         uuid primary key default gen_random_uuid(),
-  key        text not null unique,   -- 機械可読キー(例: 'tourist', 'post_office', 'goshuin')
-  label      text not null,          -- 表示名(例: '観光地', '郵便局', '御朱印')
-  created_at timestamptz not null default now()
+  id              uuid primary key default gen_random_uuid(),
+  key             text not null unique,   -- 機械可読キー(例: 'tourist', 'post_office', 'goshuin')
+  label           text not null,          -- 表示名(例: '観光地', '郵便局', '御朱印')
+  reviews_enabled boolean not null default true, -- この種類のスポットで口コミ機能を使うか
+  -- ランクごとの既定非表示設定。ここに含まれるrank値のスポットは、GET /api/spots で
+  -- includeHidden指定がない限り返さない(地図・一覧では未取得=非表示)。
+  -- ランクフィルタで明示的に選んだときだけ includeHidden 付きで取得する(遅延ロード)。
+  hidden_ranks    text[] not null default '{}',
+  created_at      timestamptz not null default now()
 );
 
 -- =============================================================
@@ -36,6 +41,7 @@ create table users (
   password_hash text,
   google_id     text unique,
   role          text not null default 'user' check (role in ('admin', 'moderator', 'user')),
+  nickname      text, -- 口コミ等に表示する表示名(未設定ならメールアドレスを使う)
   created_at    timestamptz not null default now(),
   constraint users_has_login_method check (password_hash is not null or google_id is not null)
 );
@@ -108,7 +114,8 @@ create index visits_user_id_idx on visits (user_id);
 create index visits_spot_id_idx on visits (spot_id);
 
 -- =============================================================
--- reviews: 口コミ。ユーザー1人につき1スポット1件(upsert対象)
+-- reviews: 口コミ。投稿するたびに増える掲示板方式(1ユーザーが同じスポットに何件でも書ける)。
+-- スポットの種類ごとにspot_types.reviews_enabledで機能そのもののON/OFFを切り替えられる。
 -- ランク表示ロジックには reviews を一切参照させないこと
 -- =============================================================
 create table reviews (
@@ -117,19 +124,20 @@ create table reviews (
   spot_id    uuid not null references spots (id) on delete cascade,
   body       text not null,
   visibility text not null default 'private' check (visibility in ('public', 'private')),
-  created_at timestamptz not null default now(),
-  unique (user_id, spot_id)
+  created_at timestamptz not null default now()
 );
 
 create index reviews_spot_id_idx on reviews (spot_id);
 
 -- =============================================================
 -- 参考データ: スポットの種類3つ(観光地のみデータあり。郵便局・御朱印は今後用の空の種類)
+-- 御朱印はOverpass一括取得のうちWikipedia情報がなく未整理なものをrank='Z'として大量に
+-- 抱えているため、既定では非表示(hidden_ranks)にしている
 -- =============================================================
-insert into spot_types (key, label) values
-  ('tourist', '観光地'),
-  ('post_office', '郵便局'),
-  ('goshuin', '御朱印');
+insert into spot_types (key, label, reviews_enabled, hidden_ranks) values
+  ('tourist', '観光地', true, '{}'),
+  ('post_office', '郵便局', false, '{}'),
+  ('goshuin', '御朱印', true, '{Z}');
 
 insert into app_settings (active_spot_type_id)
   select id from spot_types where key = 'tourist';

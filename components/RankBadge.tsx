@@ -11,9 +11,9 @@ export default function RankBadge({
   if (rank === null) return null;
   return (
     <span
-      className={`inline-flex items-center justify-center rounded font-bold ${getRankBadgeStyle(
+      className={`inline-flex items-center justify-center rounded-full px-1.5 font-bold ${getRankBadgeStyle(
         rank
-      )} ${size === "sm" ? "h-5 w-5 text-xs" : "h-6 w-6 text-sm"}`}
+      )} ${size === "sm" ? "h-5 min-w-5 text-xs" : "h-6 min-w-6 text-sm"}`}
       title={RANK_LABELS[rank] ?? rank}
     >
       {rank}

@@ -22,6 +22,8 @@ export const RANK_LABELS: Record<string, string> = {
   B: "B: 地方の定番",
   C: "C: 地元で知られている",
   D: "D: 穴場・マニアック",
+  Z: "Z: 未整理(Wikipedia情報なし・地図では既定で非表示)",
+  郵便局: "郵便局",
 };
 
 export const CATEGORIES = [
@@ -73,6 +75,9 @@ export interface SpotType {
   id: string;
   key: string;
   label: string;
+  reviews_enabled: boolean;
+  /** 既定では取得・表示しないランク(GET /api/spotsはincludeHidden指定がない限りこれらを返さない) */
+  hidden_ranks: string[];
   created_at: string;
 }
 
@@ -91,6 +96,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 export interface AppUser {
   id: string;
   email: string;
+  nickname: string | null;
   role: Role;
   has_password: boolean;
   has_google: boolean;
@@ -108,7 +114,7 @@ export interface Visit {
   created_at: string;
 }
 
-/** 自分自身の口コミ(スポット1件につき1件、upsert対象) */
+/** 口コミ投稿1件(投稿するたびに新しく増える。編集・upsertはしない) */
 export interface Review {
   id: string;
   spot_id: string;
@@ -117,13 +123,15 @@ export interface Review {
   created_at: string;
 }
 
-/** 他ユーザーにも見える公開口コミ一覧表示用 */
+/** 他ユーザーにも見える公開口コミ一覧表示用(新しい順・ページング) */
 export interface PublicReview {
   id: string;
   body: string;
   created_at: string;
-  user_email: string;
+  user_name: string;
 }
+
+export const REVIEWS_PAGE_SIZE = 10;
 
 export const PREFECTURES = [
   "北海道",

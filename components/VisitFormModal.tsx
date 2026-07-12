@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "@/lib/api-client";
 import { DATE_PRECISIONS, type DatePrecision } from "@/lib/types";
 
@@ -35,11 +35,14 @@ function resizeImageToDataUrl(file: File): Promise<string> {
 export default function VisitFormModal({
   spotId,
   spotName,
+  reviewsEnabled,
   onClose,
   onSaved,
 }: {
   spotId: string;
   spotName: string;
+  /** falseならこのスポットの種類では口コミ機能が無効(郵便局など)なので入力欄自体を出さない */
+  reviewsEnabled: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -52,12 +55,6 @@ export default function VisitFormModal({
   const [reviewBody, setReviewBody] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.reviews.mine(spotId).then(({ data }) => {
-      if (data) setReviewBody(data.body);
-    });
-  }, [spotId]);
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -96,8 +93,8 @@ export default function VisitFormModal({
       return;
     }
 
-    if (reviewBody.trim()) {
-      const { error: reviewError } = await api.reviews.upsert(
+    if (reviewsEnabled && reviewBody.trim()) {
+      const { error: reviewError } = await api.reviews.create(
         spotId,
         reviewBody.trim()
       );
@@ -213,22 +210,24 @@ export default function VisitFormModal({
             </label>
           </div>
 
-          <div className="border-t border-gray-100 pt-3">
-            <label className="mb-1 block text-sm font-medium">
-              口コミ(公開・任意)
-            </label>
-            <p className="mb-2 text-xs text-gray-400">
-              他のユーザーにも公開されます。スポットごとに1件だけ保存され、
-              再度投稿すると上書きされます。
-            </p>
-            <textarea
-              value={reviewBody}
-              onChange={(e) => setReviewBody(e.target.value)}
-              rows={2}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="行ってみた感想など"
-            />
-          </div>
+          {reviewsEnabled && (
+            <div className="border-t border-gray-100 pt-3">
+              <label className="mb-1 block text-sm font-medium">
+                口コミ投稿(公開・任意)
+              </label>
+              <p className="mb-2 text-xs text-gray-400">
+                他のユーザーにも公開されます。投稿するたびに新しい口コミとして
+                追加されます(上書きはされません)。
+              </p>
+              <textarea
+                value={reviewBody}
+                onChange={(e) => setReviewBody(e.target.value)}
+                rows={2}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                placeholder="行ってみた感想など"
+              />
+            </div>
+          )}
 
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex gap-2">
