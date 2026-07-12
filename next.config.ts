@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   devIndicators: {
     position: "bottom-right",
   },
+  // 本番用Dockerイメージ(Dockerfileのprodステージ)を最小構成にするため
+  output: "standalone",
 };
 
 export default nextConfig;
