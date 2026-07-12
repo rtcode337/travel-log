@@ -1,4 +1,4 @@
-name: travel-log-prod
+name: travel-log-dev
 
 services:
   db:
@@ -15,24 +15,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    restart: unless-stopped
 
   app:
     build:
       context: .
-      target: prod
+      target: dev
     depends_on:
       db:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
-      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required (openssl rand -base64 32)}
+      SESSION_SECRET: ${SESSION_SECRET:-local-dev-secret-change-me}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      NODE_ENV: production
+      NODE_ENV: development
     ports:
       - "3000:3000"
-    restart: unless-stopped
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
 
 volumes:
   pgdata:
