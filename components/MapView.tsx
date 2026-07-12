@@ -11,8 +11,9 @@ import {
   JAPAN_ZOOM,
   CURRENT_LOCATION_ZOOM,
 } from "@/lib/mapStyle";
-import type { Role, Spot, SpotType } from "@/lib/types";
+import type { Role, Spot } from "@/lib/types";
 import { getRankPinStyle, getRankPinTextColor } from "@/lib/rankStyle";
+import { resolveActiveType } from "@/lib/spotType";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -248,16 +249,6 @@ function createLocationDotElement(): HTMLDivElement {
     pointer-events: none;
   `;
   return el;
-}
-
-/** spotTypeKey指定時はそのキーの種類、未指定ならapp_settingsの既定を返す */
-async function resolveActiveType(spotTypeKey?: string): Promise<SpotType | null> {
-  if (spotTypeKey) {
-    const { data } = await api.spotTypes.list();
-    return data?.find((t) => t.key === spotTypeKey) ?? null;
-  }
-  const { data } = await api.appSettings.get();
-  return data;
 }
 
 function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
@@ -613,8 +604,13 @@ export default function MapView({
     // next/navigationのrouter.replaceだとuseSearchParams経由でSuspense境界が
     // 再評価され、MapView自体が再マウントされてspotsが空に戻ってしまうことが
     // あったため、ブラウザ標準のHistory APIで直接URLだけ書き換える
-    window.history.replaceState(null, "", "/map");
-  }, [focusSpotId, spots]);
+    // (種類キー付きのURLで開いていた場合はそのキーを保つ)
+    window.history.replaceState(
+      null,
+      "",
+      spotTypeKey ? `/${spotTypeKey}/map` : "/map"
+    );
+  }, [focusSpotId, spots, spotTypeKey]);
 
   // マーカーの生成・フィルタ反映。
   // 公開スポットは件数が多くても軽いWebGLクラスタ表示で常に描画する。

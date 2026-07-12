@@ -4,16 +4,18 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
+import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 
 const items = [
-  { href: "/map", label: "地図", icon: "🗺️" },
-  { href: "/spots", label: "リスト", icon: "📋" },
+  { href: "/map", label: "地図", icon: "🗺️", typed: true },
+  { href: "/spots", label: "リスト", icon: "📋", typed: true },
   { href: "/admin", label: "管理", icon: "⚙️", adminOnly: true },
 ];
 
 export default function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
+  const typeKey = useCurrentSpotTypeKey();
   const [isAdmin, setIsAdmin] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
   const [activeTypeLabel, setActiveTypeLabel] = useState<string | null>(null);
@@ -50,14 +52,13 @@ export default function NavBar() {
         <div className="mx-auto flex max-w-lg items-stretch">
           {items.map((item) => {
             if (item.adminOnly && !isAdmin) return null;
-            const active =
-              item.href === "/spots"
-                ? pathname === "/spots" || pathname.startsWith("/spots/")
-                : pathname.startsWith(item.href);
+            // 地図・リストタブは、今表示中のスポット種類キーを保ったまま遷移する
+            const href = item.typed && typeKey ? `/${typeKey}${item.href}` : item.href;
+            const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={href}
                 className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-xs ${
                   active ? "font-bold text-blue-600" : "text-gray-500"
                 }`}
