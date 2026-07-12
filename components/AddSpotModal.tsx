@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import {
   ALLOWED_STATUS_BY_ROLE,
@@ -58,6 +58,23 @@ export default function AddSpotModal({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
+
+  // 新規追加時のみ、置いた座標から都道府県・市区町村を自動入力する(手で上書き可能)
+  useEffect(() => {
+    if (isEdit || lat == null || lng == null) return;
+    setLocating(true);
+    api.geocode.reverse(lat, lng).then(({ data }) => {
+      setLocating(false);
+      if (!data) return;
+      if (data.prefecture && PREFECTURES.includes(data.prefecture as (typeof PREFECTURES)[number])) {
+        setPrefecture((prev) => prev || data.prefecture!);
+      }
+      if (data.municipality) {
+        setMunicipality((prev) => prev || data.municipality!);
+      }
+    });
+  }, []);
 
   const availableRanks = useMemo(
     () => distinctValues(spots.map((s) => s.rank)),
@@ -175,6 +192,9 @@ export default function AddSpotModal({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </div>
+        {locating && (
+          <p className="text-xs text-gray-400">座標から住所を自動取得中…</p>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="mb-1 block text-sm font-medium">

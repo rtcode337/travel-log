@@ -111,6 +111,10 @@ export const api = {
       request<{ name: string; lat: number; lng: number }[]>(
         `/api/geocode?q=${encodeURIComponent(q)}`
       ),
+    reverse: (lat: number, lng: number) =>
+      request<{ prefecture: string | null; municipality: string | null }>(
+        `/api/geocode/reverse?lat=${lat}&lng=${lng}`
+      ),
   },
   spotTypes: {
     list: () => request<SpotType[]>("/api/spot-types"),
