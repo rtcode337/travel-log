@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { api } from "@/lib/api-client";
@@ -11,7 +11,7 @@ import {
   JAPAN_ZOOM,
   CURRENT_LOCATION_ZOOM,
 } from "@/lib/mapStyle";
-import type { Role, Spot } from "@/lib/types";
+import type { Role, Spot, SpotType } from "@/lib/types";
 import { getRankPinStyle, getRankPinTextColor } from "@/lib/rankStyle";
 import FilterBar, {
   DEFAULT_FILTERS,
@@ -250,6 +250,16 @@ function createLocationDotElement(): HTMLDivElement {
   return el;
 }
 
+/** spotTypeKey指定時はそのキーの種類、未指定ならapp_settingsの既定を返す */
+async function resolveActiveType(spotTypeKey?: string): Promise<SpotType | null> {
+  if (spotTypeKey) {
+    const { data } = await api.spotTypes.list();
+    return data?.find((t) => t.key === spotTypeKey) ?? null;
+  }
+  const { data } = await api.appSettings.get();
+  return data;
+}
+
 function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
   const { size, bg, border } = getRankPinStyle(spot.rank);
 
@@ -294,8 +304,12 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
   return outer;
 }
 
-export default function MapView() {
-  const router = useRouter();
+export default function MapView({
+  spotTypeKey,
+}: {
+  /** 指定すると管理画面の既定(app_settings)ではなく、このキーのスポット種類を表示する */
+  spotTypeKey?: string;
+} = {}) {
   const searchParams = useSearchParams();
   const focusSpotId = searchParams.get("spot");
 
@@ -543,28 +557,28 @@ export default function MapView() {
 
   const loadSpots = useCallback(async () => {
     const [{ data: pub }, { data: priv }] = await Promise.all([
-      api.spots.list("published", hiddenLoaded ? { includeHidden: true } : undefined),
-      api.spots.list("private", { includeHidden: true }),
+      api.spots.list("published", { includeHidden: hiddenLoaded, type: spotTypeKey }),
+      api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
     ]);
     setSpots([...(pub ?? []), ...(priv ?? [])]);
-  }, [hiddenLoaded]);
+  }, [hiddenLoaded, spotTypeKey]);
 
   // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
   useEffect(() => {
     (async () => {
-      const [{ data: spotsData }, { data: privateData }, { data: activeType }] =
+      const [{ data: spotsData }, { data: privateData }, activeType] =
         await Promise.all([
-          api.spots.list("published"),
+          api.spots.list("published", { type: spotTypeKey }),
           // 自分の非公開スポットは常に(hidden_ranks設定に関わらず)表示する
-          api.spots.list("private", { includeHidden: true }),
-          api.appSettings.get(),
+          api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
+          resolveActiveType(spotTypeKey),
           loadVisits(),
         ]);
       setSpots([...(spotsData ?? []), ...(privateData ?? [])]);
       setHiddenRanks(activeType?.hidden_ranks ?? []);
       setLoading(false);
     })();
-  }, []);
+  }, [spotTypeKey]);
 
   // ランクフィルタで非表示ランクが明示的に選ばれたら、まだ取得していなければ全件取り直す
   useEffect(() => {
@@ -572,12 +586,12 @@ export default function MapView() {
     if (!filters.ranks.some((r) => hiddenRanks.includes(r))) return;
     setHiddenLoaded(true);
     Promise.all([
-      api.spots.list("published", { includeHidden: true }),
-      api.spots.list("private", { includeHidden: true }),
+      api.spots.list("published", { includeHidden: true, type: spotTypeKey }),
+      api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
     ]).then(([{ data: pub }, { data: priv }]) => {
       setSpots([...(pub ?? []), ...(priv ?? [])]);
     });
-  }, [filters.ranks, hiddenRanks, hiddenLoaded]);
+  }, [filters.ranks, hiddenRanks, hiddenLoaded, spotTypeKey]);
 
   // /map?spot=<id> で開かれたら、そのスポットの位置にズームする
   // (詳細モーダルは開かない: モーダルがピンの真上に重なりどこが開かれたか分からなくなるため)
@@ -595,9 +609,12 @@ export default function MapView() {
     if (map.isStyleLoaded()) fly();
     else map.once("load", fly);
 
-    // 一度処理したらURLから消す(戻る操作やスポット再取得のたびに再発火しないように)
-    router.replace("/map");
-  }, [focusSpotId, spots, router]);
+    // 一度処理したらURLから消す(戻る操作やスポット再取得のたびに再発火しないように)。
+    // next/navigationのrouter.replaceだとuseSearchParams経由でSuspense境界が
+    // 再評価され、MapView自体が再マウントされてspotsが空に戻ってしまうことが
+    // あったため、ブラウザ標準のHistory APIで直接URLだけ書き換える
+    window.history.replaceState(null, "", "/map");
+  }, [focusSpotId, spots]);
 
   // マーカーの生成・フィルタ反映。
   // 公開スポットは件数が多くても軽いWebGLクラスタ表示で常に描画する。

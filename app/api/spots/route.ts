@@ -12,31 +12,42 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
   const includeHidden = searchParams.get("includeHidden") === "1";
+  // typeを指定すると、app_settingsの既定(管理画面で選んだ種類)ではなく
+  // そのキーのスポット種類を対象にする(例: /tourist/map からの呼び出し)
+  const typeKey = searchParams.get("type");
+
+  const { rows: typeRows } = await query<{ id: string; hidden_ranks: string[] }>(
+    typeKey
+      ? "select id, hidden_ranks from spot_types where key = $1"
+      : `select t.id, t.hidden_ranks from spot_types t
+         join app_settings s on s.active_spot_type_id = t.id`,
+    typeKey ? [typeKey] : []
+  );
+  const activeType = typeRows[0];
+  if (!activeType) {
+    return NextResponse.json(
+      typeKey ? { error: "存在しない種類です。" } : { data: [] },
+      typeKey ? { status: 404 } : undefined
+    );
+  }
 
   const conditions = [
-    "spot_type_id = (select active_spot_type_id from app_settings)",
+    "spot_type_id = $2",
     // privateは作成者本人にのみ見える
     "(status != 'private' or created_by = $1)",
   ];
-  const params: unknown[] = [userId];
+  const params: unknown[] = [userId, activeType.id];
 
   if (status) {
     params.push(status);
     conditions.push(`status = $${params.length}`);
   }
 
-  if (!includeHidden) {
-    // アクティブなスポット種類の hidden_ranks に含まれるランクは、明示的に
-    // includeHidden=1 が指定されない限り返さない(大量の未整理データの遅延ロード用)
-    const { rows: typeRows } = await query<{ hidden_ranks: string[] }>(
-      `select t.hidden_ranks from spot_types t
-       join app_settings s on s.active_spot_type_id = t.id`
-    );
-    const hiddenRanks = typeRows[0]?.hidden_ranks ?? [];
-    if (hiddenRanks.length > 0) {
-      params.push(hiddenRanks);
-      conditions.push(`(rank is null or not (rank = any($${params.length})))`);
-    }
+  if (!includeHidden && activeType.hidden_ranks.length > 0) {
+    // hidden_ranksに含まれるランクは、明示的にincludeHidden=1が指定されない
+    // 限り返さない(大量の未整理データの遅延ロード用)
+    params.push(activeType.hidden_ranks);
+    conditions.push(`(rank is null or not (rank = any($${params.length})))`);
   }
 
   const { rows } = await query<Spot>(
