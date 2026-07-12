@@ -7,6 +7,10 @@ services:
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
+      # db/data直下(bindマウントのルート)を直接PGDATAにすると、.gitkeepのような
+      # ドットファイルの存在だけでinitdbが「マウントポイントを直接使うな」と
+      # 初期化を拒否するため、1段掘ったサブディレクトリをPGDATAにする
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - ./db/data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
