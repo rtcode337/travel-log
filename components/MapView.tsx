@@ -259,16 +259,19 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
   const fillColor = visited ? "#16a34a" : bg;
   const borderColor = visited ? "#15803d" : border;
 
+  // 自分だけの非公開スポットは、公開スポットと見分けられるよう破線の枠にする
+  const borderStyle = spot.status === "private" ? "dashed" : "solid";
+
   const inner = document.createElement("div");
   inner.style.cssText = `
     width: ${size}px; height: ${size}px;
-    background: ${fillColor}; border: 2px solid ${borderColor};
+    background: ${fillColor}; border: 2px ${borderStyle} ${borderColor};
     border-radius: 50%; cursor: pointer; position: relative;
     box-shadow: 0 1px 3px rgba(0,0,0,0.4);
     display: flex; align-items: center; justify-content: center;
   `;
   // 訪問済みはチェックマーク、郵便局ランクは(未訪問時)〒マークを丸の中に表示する
-  const mark = visited ? "✓" : spot.rank === "郵便局" ? "〒" : null;
+  const mark = visited ? "✓" : spot.rank === "郵便局" ? "〒" : spot.status === "private" ? "🔒" : null;
   if (mark) {
     const markEl = document.createElement("span");
     markEl.textContent = mark;
@@ -530,22 +533,25 @@ export default function MapView() {
   };
 
   const loadSpots = useCallback(async () => {
-    const { data } = await api.spots.list(
-      "published",
-      hiddenLoaded ? { includeHidden: true } : undefined
-    );
-    setSpots(data ?? []);
+    const [{ data: pub }, { data: priv }] = await Promise.all([
+      api.spots.list("published", hiddenLoaded ? { includeHidden: true } : undefined),
+      api.spots.list("private", { includeHidden: true }),
+    ]);
+    setSpots([...(pub ?? []), ...(priv ?? [])]);
   }, [hiddenLoaded]);
 
   // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
   useEffect(() => {
     (async () => {
-      const [{ data: spotsData }, { data: activeType }] = await Promise.all([
-        api.spots.list("published"),
-        api.appSettings.get(),
-        loadVisits(),
-      ]);
-      setSpots(spotsData ?? []);
+      const [{ data: spotsData }, { data: privateData }, { data: activeType }] =
+        await Promise.all([
+          api.spots.list("published"),
+          // 自分の非公開スポットは常に(hidden_ranks設定に関わらず)表示する
+          api.spots.list("private", { includeHidden: true }),
+          api.appSettings.get(),
+          loadVisits(),
+        ]);
+      setSpots([...(spotsData ?? []), ...(privateData ?? [])]);
       setHiddenRanks(activeType?.hidden_ranks ?? []);
       setLoading(false);
     })();
@@ -556,8 +562,11 @@ export default function MapView() {
     if (hiddenLoaded || hiddenRanks.length === 0) return;
     if (!filters.ranks.some((r) => hiddenRanks.includes(r))) return;
     setHiddenLoaded(true);
-    api.spots.list("published", { includeHidden: true }).then(({ data }) => {
-      if (data) setSpots(data);
+    Promise.all([
+      api.spots.list("published", { includeHidden: true }),
+      api.spots.list("private", { includeHidden: true }),
+    ]).then(([{ data: pub }, { data: priv }]) => {
+      setSpots([...(pub ?? []), ...(priv ?? [])]);
     });
   }, [filters.ranks, hiddenRanks, hiddenLoaded]);
 
@@ -754,16 +763,21 @@ export default function MapView() {
           role={role}
           onClose={() => setAddSpotAt(null)}
           onSaved={(spot) => {
-            setPendingSpots((prev) => [
-              ...prev,
-              {
-                id: spot.id,
-                lat: spot.lat,
-                lng: spot.lng,
-                name: spot.name,
-                status: spot.status,
-              },
-            ]);
+            if (spot.status === "private") {
+              // 非公開は自分にだけ常に見えるので、通常のスポットと同じように取り直して表示する
+              loadSpots();
+            } else {
+              setPendingSpots((prev) => [
+                ...prev,
+                {
+                  id: spot.id,
+                  lat: spot.lat,
+                  lng: spot.lng,
+                  name: spot.name,
+                  status: spot.status,
+                },
+              ]);
+            }
             setAddSpotAt(null);
           }}
         />
