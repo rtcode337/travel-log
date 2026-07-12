@@ -14,10 +14,17 @@ export async function GET(request: Request) {
 
   const { rows } = status
     ? await query<Spot>(
-        "select * from spots where status = $1 order by prefecture, name",
+        `select * from spots
+         where status = $1
+           and spot_type_id = (select active_spot_type_id from app_settings)
+         order by prefecture, name`,
         [status]
       )
-    : await query<Spot>("select * from spots order by prefecture, name");
+    : await query<Spot>(
+        `select * from spots
+         where spot_type_id = (select active_spot_type_id from app_settings)
+         order by prefecture, name`
+      );
 
   return NextResponse.json({ data: rows });
 }
@@ -29,8 +36,8 @@ interface SpotInput {
   municipality: string | null;
   lat: number;
   lng: number;
-  rank: string;
-  category: string;
+  rank: string | null;
+  category: string | null;
   description: string | null;
   official_url: string | null;
 }
@@ -42,8 +49,8 @@ async function insertSpot(
 ) {
   const { rows } = await query<Spot>(
     `insert into spots
-      (name, name_kana, prefecture, municipality, lat, lng, rank, category, description, official_url, source, status, created_by)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)
+      (spot_type_id, name, name_kana, prefecture, municipality, lat, lng, rank, category, description, official_url, source, status, created_by)
+     values ((select active_spot_type_id from app_settings), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)
      returning *`,
     [
       spot.name,

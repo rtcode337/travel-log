@@ -10,7 +10,8 @@ import {
   JAPAN_ZOOM,
   CURRENT_LOCATION_ZOOM,
 } from "@/lib/mapStyle";
-import type { Rank, Role, Spot } from "@/lib/types";
+import type { Role, Spot } from "@/lib/types";
+import { getRankPinStyle } from "@/lib/rankStyle";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -47,17 +48,8 @@ function createLocationDotElement(): HTMLDivElement {
   return el;
 }
 
-/** ランク別のピンの見た目: 上位ランクほど大きく・目立つ色にする */
-const pinStyles: Record<Rank, { size: number; bg: string; border: string }> = {
-  S: { size: 26, bg: "#f59e0b", border: "#b45309" },
-  A: { size: 22, bg: "#a7f3d0", border: "#34d399" },
-  B: { size: 18, bg: "#93c5fd", border: "#60a5fa" },
-  C: { size: 15, bg: "#ffffff", border: "#9ca3af" },
-  D: { size: 12, bg: "#e5e7eb", border: "#9ca3af" },
-};
-
 function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
-  const { size, bg, border } = pinStyles[spot.rank];
+  const { size, bg, border } = getRankPinStyle(spot.rank);
 
   // MapLibreはこの要素自体に `.maplibregl-marker { position: absolute }` を
   // 適用して地図上に配置する。ここでinline styleに position を指定すると
@@ -116,6 +108,14 @@ export default function MapView() {
     { id: string; lat: number; lng: number; name: string }[]
   >([]);
   const pendingMarkersRef = useRef<maplibregl.Marker[]>([]);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<
+    { name: string; lat: number; lng: number }[]
+  >([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   useEffect(() => {
     roleRef.current = role;
@@ -272,6 +272,8 @@ export default function MapView() {
       clearLongPress();
       locationDotRef.current?.remove();
       locationDotRef.current = null;
+      searchMarkerRef.current?.remove();
+      searchMarkerRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -280,6 +282,44 @@ export default function MapView() {
   const loadVisits = async () => {
     const { data } = await api.visits.list();
     setVisitedIds(new Set((data ?? []).map((v) => v.spot_id)));
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearchError(null);
+    const { data, error } = await api.geocode.search(q);
+    setSearching(false);
+    if (error || !data) {
+      setSearchError(error?.message ?? "検索に失敗しました");
+      setSearchResults([]);
+      return;
+    }
+    if (data.length === 0) {
+      setSearchError("見つかりませんでした。");
+    }
+    setSearchResults(data);
+  };
+
+  const handleSelectSearchResult = (result: {
+    name: string;
+    lat: number;
+    lng: number;
+  }) => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.flyTo({ center: [result.lng, result.lat], zoom: 16 });
+
+    searchMarkerRef.current?.remove();
+    searchMarkerRef.current = new maplibregl.Marker({ color: "#dc2626" })
+      .setLngLat([result.lng, result.lat])
+      .setPopup(new maplibregl.Popup({ offset: 24 }).setText(result.name))
+      .addTo(map)
+      .togglePopup();
+
+    setSearchResults([]);
   };
 
   // データ取得
@@ -345,10 +385,46 @@ export default function MapView() {
     <div className="relative h-[calc(100dvh-4rem)]">
       <div ref={containerRef} className="h-full w-full" />
 
-      {/* フィルタバー(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
-      <div className="absolute left-0 right-16 top-0 z-10 p-2">
+      {/* フィルタバー・検索バー(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
+      <div className="absolute left-0 right-16 top-0 z-10 space-y-2 p-2">
         <div className="rounded-xl bg-white/95 p-2 shadow">
-          <FilterBar filters={filters} onChange={setFilters} />
+          <FilterBar spots={spots} filters={filters} onChange={setFilters} />
+        </div>
+        <div className="rounded-xl bg-white/95 p-2 shadow">
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="住所・建物名で検索"
+              className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={searching}
+              className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {searching ? "検索中…" : "検索"}
+            </button>
+          </form>
+          {searchError && (
+            <p className="mt-1.5 text-xs text-red-600">{searchError}</p>
+          )}
+          {searchResults.length > 0 && (
+            <ul className="mt-1.5 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+              {searchResults.map((r, i) => (
+                <li key={i}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectSearchResult(r)}
+                    className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-gray-50"
+                  >
+                    {r.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 
@@ -391,6 +467,7 @@ export default function MapView() {
         <AddSpotModal
           lat={addSpotAt.lat}
           lng={addSpotAt.lng}
+          spots={spots}
           onClose={() => setAddSpotAt(null)}
           onCreated={(spot) => {
             setPendingSpots((prev) => [

@@ -5,15 +5,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { osmStyle } from "@/lib/mapStyle";
 import type { Rank } from "@/lib/types";
-
-// RankBadge/MapViewと同じ配色
-const pinColors: Record<Rank, string> = {
-  S: "#f59e0b",
-  A: "#a7f3d0",
-  B: "#93c5fd",
-  C: "#ffffff",
-  D: "#e5e7eb",
-};
+import { getRankPinColor } from "@/lib/rankStyle";
 
 export default function MiniMap({
   lat,
@@ -22,7 +14,7 @@ export default function MiniMap({
 }: {
   lat: number;
   lng: number;
-  rank: Rank;
+  rank: Rank | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -38,7 +30,7 @@ export default function MiniMap({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
-    new maplibregl.Marker({ color: pinColors[rank] }).setLngLat([lng, lat]).addTo(map);
+    new maplibregl.Marker({ color: getRankPinColor(rank) }).setLngLat([lng, lat]).addTo(map);
     return () => {
       map.remove();
       mapRef.current = null;

@@ -16,14 +16,25 @@ export default function NavBar() {
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const [activeTypeLabel, setActiveTypeLabel] = useState<string | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   useEffect(() => {
-    api.auth.me().then(({ data }) => {
-      setIsAdmin(data?.role === "admin");
-      setEmail(data?.email ?? null);
+    if (pathname.startsWith("/login")) return;
+    api.auth.me().then(async ({ data }) => {
+      if (!data) {
+        // Cookieの署名は有効でも、DBを作り直す等でユーザー自体が
+        // 既に存在しない場合はここに来る。Cookieを消してログイン画面に戻す
+        // (消さないとmiddlewareが「署名は正しい」と判断し/loginへ戻れなくなる)
+        await api.auth.logout();
+        router.replace("/login");
+        return;
+      }
+      setIsAdmin(data.role === "admin");
+      setEmail(data.email);
     });
-  }, []);
+    api.appSettings.get().then(({ data }) => setActiveTypeLabel(data?.label ?? null));
+  }, [pathname, router]);
 
   if (pathname.startsWith("/login")) return null;
 
@@ -67,10 +78,15 @@ export default function NavBar() {
             onClick={() => setShowUserMenu(false)}
           />
           <div className="fixed bottom-36 left-4 z-50 w-56 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
-            {email && (
-              <p className="truncate border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
-                {email}
-              </p>
+            {(email || activeTypeLabel) && (
+              <div className="truncate border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
+                {email && <p className="truncate">{email}</p>}
+                {activeTypeLabel && (
+                  <p className="mt-0.5 text-gray-400">
+                    現在のモード: {activeTypeLabel}
+                  </p>
+                )}
+              </div>
             )}
             <button
               onClick={handleLogout}

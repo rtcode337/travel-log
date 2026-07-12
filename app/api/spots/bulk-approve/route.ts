@@ -14,7 +14,10 @@ export async function POST() {
   }
 
   const { rows } = await query<Spot>(
-    "update spots set status = 'published' where status = 'pending' returning *"
+    `update spots set status = 'published'
+     where status = 'pending'
+       and spot_type_id = (select active_spot_type_id from app_settings)
+     returning *`
   );
   return NextResponse.json({ data: rows });
 }

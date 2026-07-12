@@ -1,26 +1,20 @@
 "use client";
 
-import { CATEGORIES, RANKS, type Rank } from "@/lib/types";
-
-// RankBadge/MapViewと同じ配色
-const activeRankStyles: Record<Rank, string> = {
-  S: "bg-[#f59e0b] text-[#451a03]",
-  A: "bg-[#a7f3d0] text-[#065f46]",
-  B: "bg-[#93c5fd] text-[#1e3a8a]",
-  C: "bg-white text-gray-700 border border-gray-300",
-  D: "bg-[#e5e7eb] text-gray-700",
-};
+import { useMemo } from "react";
+import { distinctValues, type Rank, type Spot } from "@/lib/types";
+import { getRankBadgeStyle, getRankOrder } from "@/lib/rankStyle";
 
 export type VisitedFilter = "all" | "visited" | "unvisited";
 
 export interface SpotFilters {
+  /** 空配列 = ランクによる絞り込みなし(全件表示) */
   ranks: Rank[];
   visited: VisitedFilter;
   category: string; // "all" またはカテゴリ名
 }
 
 export const DEFAULT_FILTERS: SpotFilters = {
-  ranks: [...RANKS],
+  ranks: [],
   visited: "all",
   category: "all",
 };
@@ -28,11 +22,16 @@ export const DEFAULT_FILTERS: SpotFilters = {
 /** フィルタを通過するか判定する(地図・リスト共通ロジック) */
 export function passesFilters(
   filters: SpotFilters,
-  rank: Rank,
-  category: string,
+  rank: Rank | null,
+  category: string | null,
   isVisited: boolean
 ): boolean {
-  if (!filters.ranks.includes(rank)) return false;
+  if (
+    filters.ranks.length > 0 &&
+    (rank === null || !filters.ranks.includes(rank))
+  ) {
+    return false;
+  }
   if (filters.visited === "visited" && !isVisited) return false;
   if (filters.visited === "unvisited" && isVisited) return false;
   if (filters.category !== "all" && filters.category !== category) return false;
@@ -46,36 +45,59 @@ const visitedOptions: { value: VisitedFilter; label: string }[] = [
 ];
 
 export default function FilterBar({
+  spots,
   filters,
   onChange,
 }: {
+  /** 現在アクティブなスポット種類の実データから、ランク・カテゴリの選択肢を動的に作る */
+  spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;
 }) {
-  const toggleRank = (rank: Rank) => {
-    const ranks = filters.ranks.includes(rank)
-      ? filters.ranks.filter((r) => r !== rank)
-      : [...filters.ranks, rank];
-    onChange({ ...filters, ranks });
+  const availableRanks = useMemo(
+    () =>
+      distinctValues(spots.map((s) => s.rank)).sort(
+        (a, b) => getRankOrder(a) - getRankOrder(b)
+      ),
+    [spots]
+  );
+  const availableCategories = useMemo(
+    () => distinctValues(spots.map((s) => s.category)),
+    [spots]
+  );
+
+  const toggleRank = (rank: string) => {
+    const current = filters.ranks.length > 0 ? filters.ranks : availableRanks;
+    const ranks = current.includes(rank)
+      ? current.filter((r) => r !== rank)
+      : [...current, rank];
+    onChange({
+      ...filters,
+      ranks: ranks.length >= availableRanks.length ? [] : ranks,
+    });
   };
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
-        {RANKS.map((rank) => (
-          <button
-            key={rank}
-            onClick={() => toggleRank(rank)}
-            className={`px-3 py-1.5 font-bold ${
-              filters.ranks.includes(rank)
-                ? activeRankStyles[rank]
-                : "bg-white text-gray-300"
-            }`}
-          >
-            {rank}
-          </button>
-        ))}
-      </div>
+      {availableRanks.length > 0 && (
+        <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
+          {availableRanks.map((rank) => {
+            const active =
+              filters.ranks.length === 0 || filters.ranks.includes(rank);
+            return (
+              <button
+                key={rank}
+                onClick={() => toggleRank(rank)}
+                className={`px-3 py-1.5 font-bold ${
+                  active ? getRankBadgeStyle(rank) : "bg-white text-gray-300"
+                }`}
+              >
+                {rank}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
         {visitedOptions.map((opt) => (
           <button
@@ -91,18 +113,20 @@ export default function FilterBar({
           </button>
         ))}
       </div>
-      <select
-        value={filters.category}
-        onChange={(e) => onChange({ ...filters, category: e.target.value })}
-        className="rounded-lg border border-gray-300 bg-white px-2 py-1.5"
-      >
-        <option value="all">全カテゴリ</option>
-        {CATEGORIES.map((c) => (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ))}
-      </select>
+      {availableCategories.length > 0 && (
+        <select
+          value={filters.category}
+          onChange={(e) => onChange({ ...filters, category: e.target.value })}
+          className="rounded-lg border border-gray-300 bg-white px-2 py-1.5"
+        >
+          <option value="all">全カテゴリ</option>
+          {availableCategories.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }
