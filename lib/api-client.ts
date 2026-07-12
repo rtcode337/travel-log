@@ -79,10 +79,11 @@ export const api = {
     me: () => request<{ id: string; role: Role; email: string }>("/api/auth/me"),
   },
   spots: {
-    list: (status?: string, opts?: { includeHidden?: boolean }) => {
+    list: (status?: string, opts?: { includeHidden?: boolean; type?: string }) => {
       const qs = new URLSearchParams();
       if (status) qs.set("status", status);
       if (opts?.includeHidden) qs.set("includeHidden", "1");
+      if (opts?.type) qs.set("type", opts.type);
       const q = qs.toString();
       return request<Spot[]>(`/api/spots${q ? `?${q}` : ""}`);
     },
