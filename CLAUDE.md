@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## コマンド
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。db/init/*.sqlは新規ボリューム作成時のみ自動実行される
+docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。db/init/*.sqlは db/data/ が空の場合のみ自動実行される
 docker compose up --build                              # 本番用(NAS等): next buildの成果物で起動。SESSION_SECRET環境変数が必須
 npm run dev                                             # Next.js開発サーバー(ローカルPostgresを直接使う場合のみ)
 npm run build                                            # 本番ビルド
@@ -20,7 +20,7 @@ npm run lint                                              # next lint
 
 このプロジェクトにテストスイート/テストコマンドは存在しない。
 
-`db/init/*.sql`は既存のPostgresボリュームに対しては自動実行されない。`db`コンテナ/ボリュームが既に存在する場合、新規または変更したinitファイルは手動で適用する。
+`db/init/*.sql`は既存の`db/data/`(Postgresの実データ。リポジトリ直下にbindマウントされるが`.gitignore`対象)に対しては自動実行されない。`db/data/`が既に存在する場合、新規または変更したinitファイルは手動で適用する。
 
 ```bash
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d travel_log < db/init/<file>.sql
