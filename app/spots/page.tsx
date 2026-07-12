@@ -46,23 +46,26 @@ export default function SpotsPage() {
   }, []);
 
   const loadSpots = useCallback(async () => {
-    const { data } = await api.spots.list(
-      "published",
-      hiddenLoaded ? { includeHidden: true } : undefined
-    );
-    setSpots(data ?? []);
+    const [{ data: pub }, { data: priv }] = await Promise.all([
+      api.spots.list("published", hiddenLoaded ? { includeHidden: true } : undefined),
+      // 自分の非公開スポットは常に(hidden_ranks設定に関わらず)表示する
+      api.spots.list("private", { includeHidden: true }),
+    ]);
+    setSpots([...(pub ?? []), ...(priv ?? [])]);
   }, [hiddenLoaded]);
 
   // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
   useEffect(() => {
     (async () => {
-      const [{ data: spotsData }, { data: activeType }] = await Promise.all([
-        api.spots.list("published"),
-        api.appSettings.get(),
-        loadVisits(),
-        loadVisitPlans(),
-      ]);
-      setSpots(spotsData ?? []);
+      const [{ data: spotsData }, { data: privateData }, { data: activeType }] =
+        await Promise.all([
+          api.spots.list("published"),
+          api.spots.list("private", { includeHidden: true }),
+          api.appSettings.get(),
+          loadVisits(),
+          loadVisitPlans(),
+        ]);
+      setSpots([...(spotsData ?? []), ...(privateData ?? [])]);
       setHiddenRanks(activeType?.hidden_ranks ?? []);
       setLoading(false);
     })();
@@ -73,8 +76,11 @@ export default function SpotsPage() {
     if (hiddenLoaded || hiddenRanks.length === 0) return;
     if (!filters.ranks.some((r) => hiddenRanks.includes(r))) return;
     setHiddenLoaded(true);
-    api.spots.list("published", { includeHidden: true }).then(({ data }) => {
-      if (data) setSpots(data);
+    Promise.all([
+      api.spots.list("published", { includeHidden: true }),
+      api.spots.list("private", { includeHidden: true }),
+    ]).then(([{ data: pub }, { data: priv }]) => {
+      setSpots([...(pub ?? []), ...(priv ?? [])]);
     });
   }, [filters.ranks, hiddenRanks, hiddenLoaded]);
 
@@ -108,6 +114,13 @@ export default function SpotsPage() {
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .map((p) => ({ plan: p, spot: spotById.get(p.spot_id)! }));
   }, [visitPlans, spotById]);
+
+  /** 自分が追加した非公開スポット(新しい順) */
+  const myPrivateSpots = useMemo(() => {
+    return spots
+      .filter((s) => s.status === "private")
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [spots]);
 
   /** 最近訪問した場所(スポット単位で重複排除し、記録日時が新しい順に最大50件) */
   const recentVisits = useMemo(() => {
@@ -233,6 +246,33 @@ export default function SpotsPage() {
                             {spot.municipality && ` ${spot.municipality}`}
                           </p>
                         </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {myPrivateSpots.length > 0 && (
+              <div className="mb-6">
+                <h1 className="mb-4 text-lg font-bold">自分の非公開スポット</h1>
+                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  {myPrivateSpots.map((spot) => (
+                    <li key={spot.id}>
+                      <button
+                        onClick={() => setDetailSpotId(spot.id)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                      >
+                        <RankBadge rank={spot.rank} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{spot.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {spot.prefecture}
+                            {spot.municipality && ` ${spot.municipality}`}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                          非公開
+                        </span>
                       </button>
                     </li>
                   ))}
@@ -396,6 +436,11 @@ export default function SpotsPage() {
                 <p className="truncate font-medium">{spot.name}</p>
                 <p className="text-xs text-gray-500">{spot.category}</p>
               </div>
+              {spot.status === "private" && (
+                <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                  非公開
+                </span>
+              )}
               {visitedIds.has(spot.id) && (
                 <span className="shrink-0 text-green-600">✓</span>
               )}
