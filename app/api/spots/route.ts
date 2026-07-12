@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser, getCurrentUserId } from "@/lib/auth/current-user";
-import type { Spot } from "@/lib/types";
+import { ALLOWED_STATUS_BY_ROLE, type Spot } from "@/lib/types";
 
 export async function GET(request: Request) {
   const userId = await getCurrentUserId();
@@ -15,8 +15,10 @@ export async function GET(request: Request) {
 
   const conditions = [
     "spot_type_id = (select active_spot_type_id from app_settings)",
+    // privateは作成者本人にのみ見える
+    "(status != 'private' or created_by = $1)",
   ];
-  const params: unknown[] = [];
+  const params: unknown[] = [userId];
 
   if (status) {
     params.push(status);
@@ -61,12 +63,13 @@ interface SpotInput {
 async function insertSpot(
   spot: SpotInput,
   source: "manual" | "user_submitted",
+  status: string,
   createdBy: string
 ) {
   const { rows } = await query<Spot>(
     `insert into spots
       (spot_type_id, name, name_kana, prefecture, municipality, lat, lng, rank, category, description, official_url, source, status, created_by)
-     values ((select active_spot_type_id from app_settings), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)
+     values ((select active_spot_type_id from app_settings), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      returning *`,
     [
       spot.name,
@@ -80,6 +83,7 @@ async function insertSpot(
       spot.description,
       spot.official_url,
       source,
+      status,
       createdBy,
     ]
   );
@@ -91,23 +95,33 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (user.role === "user") {
+
+  // 一般ユーザーは非公開スポットのみ、モデレーターは非公開/承認待ち、管理者は
+  // それに加えて公開も選べる(いずれも未指定なら user以外は承認待ち、userは非公開)
+  const allowedStatuses = ALLOWED_STATUS_BY_ROLE[user.role];
+  const defaultStatus = user.role === "user" ? "private" : "pending";
+  const source = user.role === "admin" ? "manual" : "user_submitted";
+
+  const body = await request.json();
+  const records: (SpotInput & { status?: string })[] = Array.isArray(body)
+    ? body
+    : [body];
+
+  const statuses = records.map((r) => r.status ?? defaultStatus);
+  const invalid = statuses.find(
+    (s) => !(allowedStatuses as string[]).includes(s)
+  );
+  if (invalid) {
     return NextResponse.json(
-      { error: "スポットを追加する権限がありません。" },
+      { error: `この権限では状態「${invalid}」を選べません。` },
       { status: 403 }
     );
   }
 
-  // 管理者・モデレーターのどちらの追加も一旦pendingとし、管理者の承認を経て公開する
-  const source = user.role === "admin" ? "manual" : "user_submitted";
-
-  const body = await request.json();
-  const records: SpotInput[] = Array.isArray(body) ? body : [body];
-
   try {
     const inserted = [];
-    for (const record of records) {
-      inserted.push(await insertSpot(record, source, user.id));
+    for (let i = 0; i < records.length; i++) {
+      inserted.push(await insertSpot(records[i], source, statuses[i], user.id));
     }
     return NextResponse.json({ data: Array.isArray(body) ? inserted : inserted[0] });
   } catch (err) {

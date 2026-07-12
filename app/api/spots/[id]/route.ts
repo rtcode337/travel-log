@@ -14,7 +14,29 @@ export async function GET(
 
   const { id } = await params;
   const { rows } = await query<Spot>("select * from spots where id = $1", [id]);
-  return NextResponse.json({ data: rows[0] ?? null });
+  const spot = rows[0];
+  // privateは作成者本人にのみ見える
+  if (spot && spot.status === "private" && spot.created_by !== userId) {
+    return NextResponse.json({ data: null });
+  }
+  return NextResponse.json({ data: spot ?? null });
+}
+
+/**
+ * 編集・削除できるのは admin、または「非公開スポットの作成者本人」のみ。
+ * 承認待ち・公開になった時点で、作成者本人でも編集・削除はできなくなる。
+ */
+async function canEditOrDelete(
+  user: { id: string; role: string },
+  id: string
+): Promise<boolean> {
+  if (user.role === "admin") return true;
+  const { rows } = await query<{ status: string; created_by: string | null }>(
+    "select status, created_by from spots where id = $1",
+    [id]
+  );
+  const spot = rows[0];
+  return !!spot && spot.status === "private" && spot.created_by === user.id;
 }
 
 export async function PATCH(
@@ -25,11 +47,12 @@ export async function PATCH(
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (user.role !== "admin") {
+
+  const { id } = await params;
+  if (!(await canEditOrDelete(user, id))) {
     return NextResponse.json({ error: "権限がありません。" }, { status: 403 });
   }
 
-  const { id } = await params;
   const spot = await request.json();
 
   const { rows } = await query<Spot>(
@@ -64,11 +87,12 @@ export async function DELETE(
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (user.role !== "admin") {
+
+  const { id } = await params;
+  if (!(await canEditOrDelete(user, id))) {
     return NextResponse.json({ error: "権限がありません。" }, { status: 403 });
   }
 
-  const { id } = await params;
   await query("delete from spots where id = $1", [id]);
   return NextResponse.json({ ok: true });
 }

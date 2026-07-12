@@ -1,4 +1,13 @@
-import type { AppUser, PublicReview, Review, Role, Spot, SpotType, Visit } from "@/lib/types";
+import type {
+  AppUser,
+  PublicReview,
+  Review,
+  Role,
+  Spot,
+  SpotType,
+  Visit,
+  VisitPlan,
+} from "@/lib/types";
 
 interface Result<T> {
   data: T | null;
@@ -127,6 +136,21 @@ export const api = {
       request<Visit>("/api/visits", { method: "POST", body: JSON.stringify(visit) }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/visits/${id}`, { method: "DELETE" }),
+  },
+  visitPlans: {
+    list: (spotId?: string) =>
+      request<VisitPlan[]>(
+        `/api/visit-plans${spotId ? `?spot_id=${spotId}` : ""}`
+      ),
+    create: (spotId: string) =>
+      request<VisitPlan>("/api/visit-plans", {
+        method: "POST",
+        body: JSON.stringify({ spot_id: spotId }),
+      }),
+    delete: (spotId: string) =>
+      request<{ ok: boolean }>(`/api/visit-plans/${spotId}`, {
+        method: "DELETE",
+      }),
   },
   reviews: {
     list: (spotId: string, page = 1) =>

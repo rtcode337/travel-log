@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
-import { PREFECTURES, type Spot, type Visit } from "@/lib/types";
+import {
+  PREFECTURES,
+  formatVisitedOn,
+  type Spot,
+  type Visit,
+  type VisitPlan,
+} from "@/lib/types";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -14,13 +20,17 @@ import { getRankOrder } from "@/lib/rankStyle";
 
 type SortKey = "rank" | "name" | "visited";
 
+const UNKNOWN_MUNICIPALITY = "(市区町村不明)";
+
 export default function SpotsPage() {
   const [spots, setSpots] = useState<Spot[]>([]);
   const [hiddenRanks, setHiddenRanks] = useState<string[]>([]);
   const [hiddenLoaded, setHiddenLoaded] = useState(false);
   const [visits, setVisits] = useState<Visit[]>([]);
+  const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPref, setSelectedPref] = useState<string | null>(null);
+  const [selectedMuni, setSelectedMuni] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
@@ -30,6 +40,19 @@ export default function SpotsPage() {
     setVisits(data ?? []);
   }, []);
 
+  const loadVisitPlans = useCallback(async () => {
+    const { data } = await api.visitPlans.list();
+    setVisitPlans(data ?? []);
+  }, []);
+
+  const loadSpots = useCallback(async () => {
+    const { data } = await api.spots.list(
+      "published",
+      hiddenLoaded ? { includeHidden: true } : undefined
+    );
+    setSpots(data ?? []);
+  }, [hiddenLoaded]);
+
   // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
   useEffect(() => {
     (async () => {
@@ -37,12 +60,13 @@ export default function SpotsPage() {
         api.spots.list("published"),
         api.appSettings.get(),
         loadVisits(),
+        loadVisitPlans(),
       ]);
       setSpots(spotsData ?? []);
       setHiddenRanks(activeType?.hidden_ranks ?? []);
       setLoading(false);
     })();
-  }, [loadVisits]);
+  }, [loadVisits, loadVisitPlans]);
 
   // ランクフィルタで非表示ランクが明示的に選ばれたら、まだ取得していなければ全件取り直す
   useEffect(() => {
@@ -53,6 +77,12 @@ export default function SpotsPage() {
       if (data) setSpots(data);
     });
   }, [filters.ranks, hiddenRanks, hiddenLoaded]);
+
+  const spotById = useMemo(() => {
+    const m = new Map<string, Spot>();
+    for (const s of spots) m.set(s.id, s);
+    return m;
+  }, [spots]);
 
   const visitedIds = useMemo(
     () => new Set(visits.map((v) => v.spot_id)),
@@ -71,6 +101,27 @@ export default function SpotsPage() {
     return m;
   }, [visits]);
 
+  /** 訪問予定(追加した日時が新しい順) */
+  const plannedSpots = useMemo(() => {
+    return visitPlans
+      .filter((p) => spotById.has(p.spot_id))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((p) => ({ plan: p, spot: spotById.get(p.spot_id)! }));
+  }, [visitPlans, spotById]);
+
+  /** 最近訪問した場所(スポット単位で重複排除し、記録日時が新しい順に最大50件) */
+  const recentVisits = useMemo(() => {
+    const latestBySpot = new Map<string, Visit>();
+    for (const v of visits) {
+      const prev = latestBySpot.get(v.spot_id);
+      if (!prev || v.created_at > prev.created_at) latestBySpot.set(v.spot_id, v);
+    }
+    return Array.from(latestBySpot.values())
+      .filter((v) => spotById.has(v.spot_id))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, 50);
+  }, [visits, spotById]);
+
   /** 都道府県ごとの件数(登録があるものだけ、JIS順) */
   const prefectureRows = useMemo(() => {
     const counts = new Map<string, { total: number; visited: number }>();
@@ -86,18 +137,39 @@ export default function SpotsPage() {
     }));
   }, [spots, visitedIds]);
 
+  /** 選択中の都道府県内の市区町村ごとの件数(名前順、市区町村不明は最後) */
+  const municipalityRows = useMemo(() => {
+    if (!selectedPref) return [];
+    const counts = new Map<string, { total: number; visited: number }>();
+    for (const spot of spots) {
+      if (spot.prefecture !== selectedPref) continue;
+      const key = spot.municipality ?? UNKNOWN_MUNICIPALITY;
+      const row = counts.get(key) ?? { total: 0, visited: 0 };
+      row.total += 1;
+      if (visitedIds.has(spot.id)) row.visited += 1;
+      counts.set(key, row);
+    }
+    return Array.from(counts.entries())
+      .map(([municipality, v]) => ({ municipality, ...v }))
+      .sort((a, b) => {
+        if (a.municipality === UNKNOWN_MUNICIPALITY) return 1;
+        if (b.municipality === UNKNOWN_MUNICIPALITY) return -1;
+        return a.municipality.localeCompare(b.municipality, "ja");
+      });
+  }, [spots, selectedPref, visitedIds]);
+
   const filteredSpots = useMemo(() => {
-    const list = spots.filter(
-      (s) =>
-        s.prefecture === selectedPref &&
-        passesFilters(
-          filters,
-          s.rank,
-          s.category,
-          visitedIds.has(s.id),
-          hiddenRanks
-        )
-    );
+    const list = spots.filter((s) => {
+      if (s.prefecture !== selectedPref) return false;
+      if ((s.municipality ?? UNKNOWN_MUNICIPALITY) !== selectedMuni) return false;
+      return passesFilters(
+        filters,
+        s.rank,
+        s.category,
+        visitedIds.has(s.id),
+        hiddenRanks
+      );
+    });
     list.sort((a, b) => {
       switch (sortKey) {
         case "rank":
@@ -121,6 +193,7 @@ export default function SpotsPage() {
   }, [
     spots,
     selectedPref,
+    selectedMuni,
     filters,
     visitedIds,
     sortKey,
@@ -136,54 +209,166 @@ export default function SpotsPage() {
     );
   }
 
-  // 都道府県一覧(ドリルダウンの起点)
+  // トップ画面: 2カラム(左=最近の訪問、右=都道府県別)
   if (!selectedPref) {
     return (
+      <main className="mx-auto max-w-4xl p-4">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <section>
+            {plannedSpots.length > 0 && (
+              <div className="mb-6">
+                <h1 className="mb-4 text-lg font-bold">訪問予定</h1>
+                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  {plannedSpots.map(({ plan, spot }) => (
+                    <li key={plan.id}>
+                      <button
+                        onClick={() => setDetailSpotId(spot.id)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                      >
+                        <RankBadge rank={spot.rank} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{spot.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {spot.prefecture}
+                            {spot.municipality && ` ${spot.municipality}`}
+                          </p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <h1 className="mb-4 text-lg font-bold">最近の訪問場所</h1>
+            {recentVisits.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                まだ訪問記録がありません。
+              </p>
+            ) : (
+              <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                {recentVisits.map((visit) => {
+                  const spot = spotById.get(visit.spot_id)!;
+                  return (
+                    <li key={visit.id}>
+                      <button
+                        onClick={() => setDetailSpotId(spot.id)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                      >
+                        <RankBadge rank={spot.rank} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{spot.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {spot.prefecture}
+                            {spot.municipality && ` ${spot.municipality}`}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-xs text-gray-400">
+                          {formatVisitedOn(visit.visited_on, visit.date_precision)}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h1 className="mb-4 text-lg font-bold">都道府県から探す</h1>
+            <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+              {prefectureRows.map((row) => (
+                <li key={row.prefecture}>
+                  <button
+                    onClick={() => setSelectedPref(row.prefecture)}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+                  >
+                    <span className="font-medium">{row.prefecture}</span>
+                    <span className="text-sm text-gray-500">
+                      <span className="mr-2 text-green-600">
+                        ✓ {row.visited}
+                      </span>
+                      / {row.total} 件
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {prefectureRows.length === 0 && (
+              <p className="text-sm text-gray-500">
+                スポットが未登録です。管理画面から追加してください。
+              </p>
+            )}
+          </section>
+        </div>
+
+        {detailSpotId && (
+          <SpotDetailModal
+            spotId={detailSpotId}
+            spots={spots}
+            onClose={() => setDetailSpotId(null)}
+            onVisitChange={loadVisits}
+            onSpotChange={loadSpots}
+            onSpotDeleted={loadSpots}
+            onVisitPlanChange={loadVisitPlans}
+          />
+        )}
+      </main>
+    );
+  }
+
+  // 市区町村一覧(都道府県を選択した直後)
+  if (!selectedMuni) {
+    return (
       <main className="mx-auto max-w-lg p-4">
-        <h1 className="mb-4 text-lg font-bold">都道府県から探す</h1>
+        <div className="mb-4 flex items-center gap-2">
+          <button
+            onClick={() => setSelectedPref(null)}
+            className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-600"
+          >
+            ← 都道府県
+          </button>
+          <h1 className="text-lg font-bold">{selectedPref}</h1>
+        </div>
         <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-          {prefectureRows.map((row) => (
-            <li key={row.prefecture}>
+          {municipalityRows.map((row) => (
+            <li key={row.municipality}>
               <button
-                onClick={() => setSelectedPref(row.prefecture)}
+                onClick={() => setSelectedMuni(row.municipality)}
                 className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
               >
-                <span className="font-medium">{row.prefecture}</span>
+                <span className="font-medium">{row.municipality}</span>
                 <span className="text-sm text-gray-500">
-                  <span className="mr-2 text-green-600">
-                    ✓ {row.visited}
-                  </span>
+                  <span className="mr-2 text-green-600">✓ {row.visited}</span>
                   / {row.total} 件
                 </span>
               </button>
             </li>
           ))}
         </ul>
-        {prefectureRows.length === 0 && (
-          <p className="text-sm text-gray-500">
-            スポットが未登録です。管理画面から追加してください。
-          </p>
-        )}
       </main>
     );
   }
 
-  // スポット一覧
+  // スポット一覧(市区町村まで選択した後)
   return (
     <main className="mx-auto max-w-lg p-4">
       <div className="mb-3 flex items-center gap-2">
         <button
-          onClick={() => setSelectedPref(null)}
+          onClick={() => setSelectedMuni(null)}
           className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-600"
         >
-          ← 都道府県
+          ← {selectedPref}
         </button>
-        <h1 className="text-lg font-bold">{selectedPref}</h1>
+        <h1 className="text-lg font-bold">{selectedMuni}</h1>
       </div>
 
       <div className="mb-3 space-y-2">
         <FilterBar
-          spots={spots.filter((s) => s.prefecture === selectedPref)}
+          spots={spots.filter(
+            (s) =>
+              s.prefecture === selectedPref &&
+              (s.municipality ?? UNKNOWN_MUNICIPALITY) === selectedMuni
+          )}
           filters={filters}
           onChange={setFilters}
           hiddenRanks={hiddenRanks}
@@ -209,10 +394,7 @@ export default function SpotsPage() {
               <RankBadge rank={spot.rank} size="sm" />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{spot.name}</p>
-                <p className="text-xs text-gray-500">
-                  {spot.category}
-                  {spot.municipality && ` ・ ${spot.municipality}`}
-                </p>
+                <p className="text-xs text-gray-500">{spot.category}</p>
               </div>
               {visitedIds.has(spot.id) && (
                 <span className="shrink-0 text-green-600">✓</span>
@@ -230,8 +412,12 @@ export default function SpotsPage() {
       {detailSpotId && (
         <SpotDetailModal
           spotId={detailSpotId}
+          spots={spots}
           onClose={() => setDetailSpotId(null)}
           onVisitChange={loadVisits}
+          onSpotChange={loadSpots}
+          onSpotDeleted={loadSpots}
+          onVisitPlanChange={loadVisitPlans}
         />
       )}
     </main>

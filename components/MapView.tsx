@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { api } from "@/lib/api-client";
@@ -19,8 +19,6 @@ import FilterBar, {
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotDetailModal from "@/components/SpotDetailModal";
-
-const CAN_ADD_SPOT_ROLES: Role[] = ["admin", "moderator"];
 
 const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
@@ -309,7 +307,7 @@ export default function MapView() {
     null
   );
   const [pendingSpots, setPendingSpots] = useState<
-    { id: string; lat: number; lng: number; name: string }[]
+    { id: string; lat: number; lng: number; name: string; status: string }[]
   >([]);
   const pendingMarkersRef = useRef<maplibregl.Marker[]>([]);
 
@@ -404,10 +402,10 @@ export default function MapView() {
     };
     container.addEventListener("wheel", handleWheel, { passive: false });
 
-    // 右クリック(PC)でスポット追加メニューを出す。権限がない場合は通常のブラウザ
-    // メニューのままにする(preventDefaultしない)
+    // 右クリック(PC)でスポット追加メニューを出す(ログイン中なら誰でも、非公開スポットとして
+    // 追加できる)。roleがまだ分からない間は通常のブラウザメニューのままにする
     const handleContextMenu = (e: maplibregl.MapMouseEvent) => {
-      if (!CAN_ADD_SPOT_ROLES.includes(roleRef.current as Role)) return;
+      if (!roleRef.current) return;
       e.originalEvent.preventDefault();
       setContextMenu({
         x: e.point.x,
@@ -429,7 +427,7 @@ export default function MapView() {
     const handleTouchStart = (e: TouchEvent) => {
       clearLongPress();
       if (e.touches.length !== 1) return;
-      if (!CAN_ADD_SPOT_ROLES.includes(roleRef.current as Role)) return;
+      if (!roleRef.current) return;
       const touch = e.touches[0];
       touchStart = { x: touch.clientX, y: touch.clientY };
       longPressTimer = window.setTimeout(() => {
@@ -526,6 +524,14 @@ export default function MapView() {
     setSearchResults([]);
   };
 
+  const loadSpots = useCallback(async () => {
+    const { data } = await api.spots.list(
+      "published",
+      hiddenLoaded ? { includeHidden: true } : undefined
+    );
+    setSpots(data ?? []);
+  }, [hiddenLoaded]);
+
   // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
   useEffect(() => {
     (async () => {
@@ -603,7 +609,8 @@ export default function MapView() {
     }
   }, [spots, visitedIds, filters, hiddenRanks]);
 
-  // 今回のセッションで送信した承認待ちスポットの仮ピン(破線)を表示
+  // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
+  // (通常の取得はpublishedのみなので、それ以外は一覧に反映されるまでこれで見せる)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -612,11 +619,13 @@ export default function MapView() {
     pendingMarkersRef.current = [];
 
     for (const p of pendingSpots) {
+      const label = p.status === "private" ? "非公開" : "承認待ち";
+      const color = p.status === "private" ? "#6b7280" : "#d97706";
       const el = document.createElement("div");
-      el.title = `${p.name}(承認待ち)`;
+      el.title = `${p.name}(${label})`;
       el.style.cssText = `
         width: 16px; height: 16px; border-radius: 50%;
-        background: rgba(217, 119, 6, 0.3); border: 2px dashed #d97706;
+        background: ${color}4d; border: 2px dashed ${color};
       `;
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([p.lng, p.lat])
@@ -717,11 +726,18 @@ export default function MapView() {
           lat={addSpotAt.lat}
           lng={addSpotAt.lng}
           spots={spots}
+          role={role}
           onClose={() => setAddSpotAt(null)}
-          onCreated={(spot) => {
+          onSaved={(spot) => {
             setPendingSpots((prev) => [
               ...prev,
-              { id: spot.id, lat: spot.lat, lng: spot.lng, name: spot.name },
+              {
+                id: spot.id,
+                lat: spot.lat,
+                lng: spot.lng,
+                name: spot.name,
+                status: spot.status,
+              },
             ]);
             setAddSpotAt(null);
           }}
@@ -732,8 +748,11 @@ export default function MapView() {
       {detailSpotId && (
         <SpotDetailModal
           spotId={detailSpotId}
+          spots={spots}
           onClose={() => setDetailSpotId(null)}
           onVisitChange={loadVisits}
+          onSpotChange={loadSpots}
+          onSpotDeleted={loadSpots}
         />
       )}
     </div>

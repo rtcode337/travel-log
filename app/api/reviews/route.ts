@@ -50,8 +50,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
 
-  const { rows: spotRows } = await query<{ reviews_enabled: boolean }>(
-    `select st.reviews_enabled
+  const { rows: spotRows } = await query<{
+    reviews_enabled: boolean;
+    status: string;
+  }>(
+    `select st.reviews_enabled, s.status
      from spots s join spot_types st on st.id = s.spot_type_id
      where s.id = $1`,
     [spot_id]
@@ -62,6 +65,12 @@ export async function POST(request: Request) {
   if (!spotRows[0].reviews_enabled) {
     return NextResponse.json(
       { error: "このスポットの種類では口コミが無効になっています。" },
+      { status: 400 }
+    );
+  }
+  if (spotRows[0].status === "private") {
+    return NextResponse.json(
+      { error: "非公開スポットには口コミを投稿できません。" },
       { status: 400 }
     );
   }
