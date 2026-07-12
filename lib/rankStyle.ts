@@ -73,3 +73,22 @@ export function getRankPinStyle(rank: Rank | null): PinStyle {
   if (rank === null) return DEFAULT_PIN_STYLE;
   return PIN_STYLES[rank] ?? DEFAULT_PIN_STYLE;
 }
+
+// PIN_STYLESの背景色に合わせた文字色(BADGE_STYLESのtext-*と同じ配色)。
+// A/B/C/Dは背景が薄いので白文字だと読めないため、濃い色にしている
+const PIN_TEXT_COLORS: Record<string, string> = {
+  S: "#451a03",
+  A: "#065f46",
+  B: "#1e3a8a",
+  C: "#78350f",
+  D: "#374151",
+  Z: "#ffffff",
+  郵便局: "#ffffff",
+};
+const DEFAULT_PIN_TEXT_COLOR = "#ffffff";
+
+/** MapViewの地図ピンに表示するランク文字の色(ピン背景とのコントラスト確保用) */
+export function getRankPinTextColor(rank: Rank | null): string {
+  if (rank === null) return DEFAULT_PIN_TEXT_COLOR;
+  return PIN_TEXT_COLORS[rank] ?? DEFAULT_PIN_TEXT_COLOR;
+}
