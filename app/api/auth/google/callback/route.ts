@@ -6,8 +6,10 @@ import {
   GOOGLE_STATE_COOKIE,
 } from "@/lib/auth/google";
 import { createSessionToken, SESSION_COOKIE, SESSION_MAX_AGE } from "@/lib/auth/session";
+import { getExternalOrigin, isSecureRequest } from "@/lib/auth/request-url";
 
 export async function GET(request: Request) {
+  const origin = getExternalOrigin(request);
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -18,14 +20,14 @@ export async function GET(request: Request) {
     .find((c) => c.startsWith(`${GOOGLE_STATE_COOKIE}=`))
     ?.split("=")[1];
 
-  const failure = NextResponse.redirect(new URL("/login?error=google", request.url));
+  const failure = NextResponse.redirect(new URL("/login?error=google", origin));
   failure.cookies.delete(GOOGLE_STATE_COOKIE);
 
   if (!code || !state || !cookieState || state !== cookieState) {
     return failure;
   }
 
-  const redirectUri = new URL("/api/auth/google/callback", request.url).toString();
+  const redirectUri = new URL("/api/auth/google/callback", origin).toString();
   const tokens = await exchangeGoogleCode(code, redirectUri);
   if (!tokens) return failure;
 
@@ -36,11 +38,11 @@ export async function GET(request: Request) {
   if (!user) return failure;
 
   const token = await createSessionToken(user.id);
-  const response = NextResponse.redirect(new URL("/map", request.url));
+  const response = NextResponse.redirect(new URL("/map", origin));
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest(request),
     maxAge: SESSION_MAX_AGE,
     path: "/",
   });

@@ -17,7 +17,11 @@ async function request<T>(
   if (!res.ok) {
     return { data: null, error: { message: body?.error ?? res.statusText } };
   }
-  return { data: (body?.data ?? body) as T, error: null };
+  // APIは基本 { data: T } でラップして返すが、一部( /api/auth/status 等)は素のJSONを返す。
+  // `body?.data ?? body` だと data: null (該当データなしの正常系)を素のJSON側と区別できず
+  // ラッパーオブジェクトごと返してしまうため、"data"キーの有無で判定する
+  const data = body && typeof body === "object" && "data" in body ? body.data : body;
+  return { data: data as T, error: null };
 }
 
 export const api = {
@@ -37,8 +41,13 @@ export const api = {
     me: () => request<{ id: string; role: Role; email: string }>("/api/auth/me"),
   },
   spots: {
-    list: (status?: string) =>
-      request<Spot[]>(`/api/spots${status ? `?status=${status}` : ""}`),
+    list: (status?: string, opts?: { includeHidden?: boolean }) => {
+      const qs = new URLSearchParams();
+      if (status) qs.set("status", status);
+      if (opts?.includeHidden) qs.set("includeHidden", "1");
+      const q = qs.toString();
+      return request<Spot[]>(`/api/spots${q ? `?${q}` : ""}`);
+    },
     get: (id: string) => request<Spot>(`/api/spots/${id}`),
     create: (spot: unknown) =>
       request<Spot>("/api/spots", { method: "POST", body: JSON.stringify(spot) }),
@@ -72,6 +81,16 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ key, label }),
       }),
+    setReviewsEnabled: (id: string, reviewsEnabled: boolean) =>
+      request<SpotType>(`/api/spot-types/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ reviews_enabled: reviewsEnabled }),
+      }),
+    setHiddenRanks: (id: string, hiddenRanks: string[]) =>
+      request<SpotType>(`/api/spot-types/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ hidden_ranks: hiddenRanks }),
+      }),
   },
   appSettings: {
     get: () => request<SpotType>("/api/app-settings"),
@@ -84,15 +103,20 @@ export const api = {
   admin: {
     users: {
       list: () => request<AppUser[]>("/api/admin/users"),
-      create: (email: string, password: string, role: Role) =>
+      create: (email: string, password: string, role: Role, nickname?: string) =>
         request<AppUser>("/api/admin/users", {
           method: "POST",
-          body: JSON.stringify({ email, password, role }),
+          body: JSON.stringify({ email, password, role, nickname }),
         }),
       setRole: (id: string, role: Role) =>
         request<AppUser>(`/api/admin/users/${id}`, {
           method: "PATCH",
           body: JSON.stringify({ role }),
+        }),
+      setNickname: (id: string, nickname: string) =>
+        request<AppUser>(`/api/admin/users/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ nickname }),
         }),
     },
   },
@@ -105,11 +129,11 @@ export const api = {
       request<{ ok: boolean }>(`/api/visits/${id}`, { method: "DELETE" }),
   },
   reviews: {
-    list: (spotId: string) =>
-      request<PublicReview[]>(`/api/reviews?spot_id=${spotId}`),
-    mine: (spotId: string) =>
-      request<Review | null>(`/api/reviews?spot_id=${spotId}&mine=true`),
-    upsert: (spotId: string, body: string) =>
+    list: (spotId: string, page = 1) =>
+      request<{ items: PublicReview[]; total: number }>(
+        `/api/reviews?spot_id=${spotId}&page=${page}`
+      ),
+    create: (spotId: string, body: string) =>
       request<Review>("/api/reviews", {
         method: "POST",
         body: JSON.stringify({ spot_id: spotId, body }),

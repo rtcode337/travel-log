@@ -15,7 +15,7 @@ export async function GET() {
   }
 
   const { rows } = await query<AppUser>(
-    `select id, email, role, created_at,
+    `select id, email, nickname, role, created_at,
        (password_hash is not null) as has_password,
        (google_id is not null) as has_google
      from users
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "権限がありません。" }, { status: 403 });
   }
 
-  const { email, password, role } = await request.json();
+  const { email, password, role, nickname } = await request.json();
   if (typeof email !== "string" || typeof password !== "string") {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
@@ -49,12 +49,12 @@ export async function POST(request: Request) {
 
   try {
     const { rows } = await query<AppUser>(
-      `insert into users (email, password_hash, role)
-       values ($1, crypt($2, gen_salt('bf')), $3)
-       returning id, email, role, created_at,
+      `insert into users (email, password_hash, role, nickname)
+       values ($1, crypt($2, gen_salt('bf')), $3, $4)
+       returning id, email, nickname, role, created_at,
          (password_hash is not null) as has_password,
          (google_id is not null) as has_google`,
-      [email, password, role]
+      [email, password, role, typeof nickname === "string" ? nickname.trim() || null : null]
     );
     return NextResponse.json({ data: rows[0] });
   } catch (err) {

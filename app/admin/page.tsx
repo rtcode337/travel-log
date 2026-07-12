@@ -84,13 +84,14 @@ export default function AdminPage() {
   const [form, setForm] = useState<SpotForm>(EMPTY_FORM);
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [rankFilter, setRankFilter] = useState<Rank | "all">("all");
+  const [rankFilter, setRankFilter] = useState<Rank | "all">("S");
   const [importing, setImporting] = useState(false);
 
   const [users, setUsers] = useState<AppUser[]>([]);
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<Role>("user");
+  const [newUserNickname, setNewUserNickname] = useState("");
   const [userMessage, setUserMessage] = useState<string | null>(null);
 
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
@@ -112,7 +113,8 @@ export default function AdminPage() {
   }, [router]);
 
   const load = useCallback(async () => {
-    const { data } = await api.spots.list();
+    // 管理画面は非表示ランク(rank='Z'の未整理データ等)も含めて全件見える必要がある
+    const { data } = await api.spots.list(undefined, { includeHidden: true });
     setSpots(data ?? []);
     setLoading(false);
   }, []);
@@ -168,7 +170,8 @@ export default function AdminPage() {
     const { error } = await api.admin.users.create(
       newUserEmail.trim(),
       newUserPassword,
-      newUserRole
+      newUserRole,
+      newUserNickname.trim() || undefined
     );
     if (error) {
       setUserMessage("作成に失敗しました: " + error.message);
@@ -178,6 +181,7 @@ export default function AdminPage() {
     setNewUserEmail("");
     setNewUserPassword("");
     setNewUserRole("user");
+    setNewUserNickname("");
     loadUsers();
   };
 
@@ -191,6 +195,48 @@ export default function AdminPage() {
       error ? "ロール変更に失敗しました: " + error.message : `${user.email} のロールを変更しました。`
     );
     loadUsers();
+  };
+
+  const handleChangeNickname = async (user: AppUser, nickname: string) => {
+    const { error } = await api.admin.users.setNickname(user.id, nickname);
+    setUserMessage(
+      error
+        ? "ニックネームの変更に失敗しました: " + error.message
+        : `${user.email} のニックネームを変更しました。`
+    );
+    loadUsers();
+  };
+
+  const handleToggleReviewsEnabled = async (type: SpotType) => {
+    const { error } = await api.spotTypes.setReviewsEnabled(
+      type.id,
+      !type.reviews_enabled
+    );
+    if (error) {
+      setTypeMessage("口コミ設定の変更に失敗しました: " + error.message);
+      return;
+    }
+    setTypeMessage(
+      `「${type.label}」の口コミを${!type.reviews_enabled ? "有効" : "無効"}にしました。`
+    );
+    loadSpotTypes();
+  };
+
+  const handleToggleHiddenRank = async (type: SpotType, rank: string) => {
+    const nextHidden = type.hidden_ranks.includes(rank)
+      ? type.hidden_ranks.filter((r) => r !== rank)
+      : [...type.hidden_ranks, rank];
+    const { error } = await api.spotTypes.setHiddenRanks(type.id, nextHidden);
+    if (error) {
+      setTypeMessage("非表示ランク設定の変更に失敗しました: " + error.message);
+      return;
+    }
+    setTypeMessage(
+      `「${type.label}」のランク${rank}を既定${
+        nextHidden.includes(rank) ? "非表示" : "表示"
+      }にしました。`
+    );
+    loadSpotTypes();
   };
 
   const handleSwitchType = async (type: SpotType) => {
@@ -392,15 +438,40 @@ export default function AdminPage() {
         )}
         <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
           {spotTypes.map((t) => (
-            <li key={t.id} className="flex items-center gap-3 px-3 py-2">
-              <input
-                type="radio"
-                name="active-spot-type"
-                checked={activeType?.id === t.id}
-                onChange={() => handleSwitchType(t)}
-              />
-              <span className="flex-1 text-sm">{t.label}</span>
-              <span className="text-xs text-gray-400">{t.key}</span>
+            <li key={t.id} className="px-3 py-2">
+              <div className="flex items-center gap-3">
+                <input
+                  type="radio"
+                  name="active-spot-type"
+                  checked={activeType?.id === t.id}
+                  onChange={() => handleSwitchType(t)}
+                />
+                <span className="flex-1 text-sm">{t.label}</span>
+                <span className="text-xs text-gray-400">{t.key}</span>
+                <label className="flex items-center gap-1 text-xs text-gray-500">
+                  <input
+                    type="checkbox"
+                    checked={t.reviews_enabled}
+                    onChange={() => handleToggleReviewsEnabled(t)}
+                  />
+                  口コミ
+                </label>
+              </div>
+              {activeType?.id === t.id && availableRanks.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-6 text-xs text-gray-500">
+                  <span>既定で非表示にするランク(地図・一覧では未取得。フィルタで選ぶと取得):</span>
+                  {availableRanks.map((r) => (
+                    <label key={r} className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={t.hidden_ranks.includes(r)}
+                        onChange={() => handleToggleHiddenRank(t, r)}
+                      />
+                      {r}
+                    </label>
+                  ))}
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -463,6 +534,18 @@ export default function AdminPage() {
                     {u.has_password && u.has_google && " / "}
                     {u.has_google && "Google"}
                   </p>
+                  <input
+                    type="text"
+                    defaultValue={u.nickname ?? ""}
+                    placeholder="ニックネーム未設定(口コミ等に表示)"
+                    onBlur={(e) => {
+                      const value = e.target.value.trim();
+                      if (value !== (u.nickname ?? "")) {
+                        handleChangeNickname(u, value);
+                      }
+                    }}
+                    className="mt-1 w-full rounded border border-gray-200 px-1.5 py-1 text-xs"
+                  />
                 </div>
                 <select
                   value={u.role}
@@ -494,6 +577,18 @@ export default function AdminPage() {
                 required
                 value={newUserEmail}
                 onChange={(e) => setNewUserEmail(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                ニックネーム(任意)
+              </label>
+              <input
+                type="text"
+                value={newUserNickname}
+                onChange={(e) => setNewUserNickname(e.target.value)}
+                placeholder="口コミ等に表示する名前(未設定ならメールアドレス)"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
@@ -621,7 +716,7 @@ export default function AdminPage() {
       {/* ランク絞り込み(現在のスポット種類に実在するランクのみ表示) */}
       {availableRanks.length > 0 && (
         <div className="mb-3 flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
-          {(["all", ...availableRanks] as const).map((r) => (
+          {([...availableRanks, "all"] as const).map((r) => (
             <button
               key={r}
               onClick={() => setRankFilter(r)}

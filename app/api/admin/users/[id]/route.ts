@@ -18,7 +18,25 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const { role } = await request.json();
+  const { role, nickname } = await request.json();
+
+  if (nickname !== undefined) {
+    if (typeof nickname !== "string" && nickname !== null) {
+      return NextResponse.json({ error: "invalid nickname" }, { status: 400 });
+    }
+    const { rows } = await query<AppUser>(
+      `update users set nickname = $1 where id = $2
+       returning id, email, nickname, role, created_at,
+         (password_hash is not null) as has_password,
+         (google_id is not null) as has_google`,
+      [typeof nickname === "string" ? nickname.trim() || null : null, id]
+    );
+    if (!rows[0]) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    return NextResponse.json({ data: rows[0] });
+  }
+
   if (!ROLES.includes(role)) {
     return NextResponse.json({ error: "invalid role" }, { status: 400 });
   }
@@ -54,7 +72,7 @@ export async function PATCH(
 
   const { rows } = await query<AppUser>(
     `update users set role = $1 where id = $2
-     returning id, email, role, created_at,
+     returning id, email, nickname, role, created_at,
        (password_hash is not null) as has_password,
        (google_id is not null) as has_google`,
     [role, id]

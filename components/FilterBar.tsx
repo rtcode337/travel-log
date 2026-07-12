@@ -19,17 +19,23 @@ export const DEFAULT_FILTERS: SpotFilters = {
   category: "all",
 };
 
-/** フィルタを通過するか判定する(地図・リスト共通ロジック) */
+/**
+ * フィルタを通過するか判定する(地図・リスト共通ロジック)。
+ * hiddenRanks(現在アクティブなスポット種類のspot_types.hidden_ranks)に含まれるランクは、
+ * ランクフィルタで明示的に選んだときだけ表示する(既定では除外)。
+ * サーバー側(GET /api/spots)でも同じ既定除外をしているので、hiddenRanksを明示的に
+ * 選んでいない限りそもそも該当スポットはfetchされない想定だが、二重に防御している。
+ */
 export function passesFilters(
   filters: SpotFilters,
   rank: Rank | null,
   category: string | null,
-  isVisited: boolean
+  isVisited: boolean,
+  hiddenRanks: string[] = []
 ): boolean {
-  if (
-    filters.ranks.length > 0 &&
-    (rank === null || !filters.ranks.includes(rank))
-  ) {
+  if (filters.ranks.length > 0) {
+    if (rank === null || !filters.ranks.includes(rank)) return false;
+  } else if (rank !== null && hiddenRanks.includes(rank)) {
     return false;
   }
   if (filters.visited === "visited" && !isVisited) return false;
@@ -48,32 +54,46 @@ export default function FilterBar({
   spots,
   filters,
   onChange,
+  hiddenRanks = [],
 }: {
   /** 現在アクティブなスポット種類の実データから、ランク・カテゴリの選択肢を動的に作る */
   spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;
+  /** アクティブなスポット種類のspot_types.hidden_ranks。未取得でもボタンは出せるよう
+   * distinctValues(spots)とは別に渡す */
+  hiddenRanks?: string[];
 }) {
   const availableRanks = useMemo(
     () =>
-      distinctValues(spots.map((s) => s.rank)).sort(
+      distinctValues([...spots.map((s) => s.rank), ...hiddenRanks]).sort(
         (a, b) => getRankOrder(a) - getRankOrder(b)
       ),
-    [spots]
+    [spots, hiddenRanks]
   );
   const availableCategories = useMemo(
     () => distinctValues(spots.map((s) => s.category)),
     [spots]
   );
 
+  // 既定(filters.ranks === [])で実際にアクティブなランクは「hiddenRanks以外の全て」
+  const defaultActiveRanks = useMemo(
+    () => availableRanks.filter((r) => !hiddenRanks.includes(r)),
+    [availableRanks, hiddenRanks]
+  );
+
   const toggleRank = (rank: string) => {
-    const current = filters.ranks.length > 0 ? filters.ranks : availableRanks;
+    const current = filters.ranks.length > 0 ? filters.ranks : defaultActiveRanks;
     const ranks = current.includes(rank)
       ? current.filter((r) => r !== rank)
       : [...current, rank];
+    // hiddenRanksを含まない状態で全ランクが揃ったときだけ「フィルタなし(既定)」に戻す
+    const collapsesToDefault =
+      !ranks.some((r) => hiddenRanks.includes(r)) &&
+      ranks.length >= defaultActiveRanks.length;
     onChange({
       ...filters,
-      ranks: ranks.length >= availableRanks.length ? [] : ranks,
+      ranks: collapsesToDefault ? [] : ranks,
     });
   };
 
@@ -83,7 +103,9 @@ export default function FilterBar({
         <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
           {availableRanks.map((rank) => {
             const active =
-              filters.ranks.length === 0 || filters.ranks.includes(rank);
+              filters.ranks.length > 0
+                ? filters.ranks.includes(rank)
+                : !hiddenRanks.includes(rank);
             return (
               <button
                 key={rank}

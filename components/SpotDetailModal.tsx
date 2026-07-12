@@ -1,11 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
-import { formatVisitedOn, type PublicReview, type Spot, type Visit } from "@/lib/types";
+import {
+  formatVisitedOn,
+  REVIEWS_PAGE_SIZE,
+  type PublicReview,
+  type Spot,
+  type SpotType,
+  type Visit,
+} from "@/lib/types";
 import RankBadge from "@/components/RankBadge";
 import MiniMap from "@/components/MiniMap";
 import VisitFormModal from "@/components/VisitFormModal";
+
+function formatReviewDatetime(iso: string): string {
+  return new Date(iso).toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function SpotDetailModal({
   spotId,
@@ -19,26 +36,55 @@ export default function SpotDetailModal({
 }) {
   const [spot, setSpot] = useState<Spot | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
+  const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
   const [reviews, setReviews] = useState<PublicReview[]>([]);
+  const [reviewsTotal, setReviewsTotal] = useState(0);
+  const [reviewsPage, setReviewsPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: spotData }, { data: visitsData }, { data: reviewsData }] =
+    const [{ data: spotData }, { data: visitsData }, { data: typesData }] =
       await Promise.all([
         api.spots.get(spotId),
         api.visits.list(spotId),
-        api.reviews.list(spotId),
+        api.spotTypes.list(),
       ]);
     setSpot(spotData ?? null);
     setVisits(visitsData ?? []);
-    setReviews(reviewsData ?? []);
+    setSpotTypes(typesData ?? []);
     setLoading(false);
   }, [spotId]);
 
   useEffect(() => {
     load();
+    setReviewsPage(1);
   }, [load]);
+
+  const reviewsEnabled = useMemo(
+    () =>
+      spotTypes.find((t) => t.id === spot?.spot_type_id)?.reviews_enabled ??
+      true,
+    [spotTypes, spot]
+  );
+
+  const loadReviews = useCallback(
+    async (page: number) => {
+      const { data } = await api.reviews.list(spotId, page);
+      setReviews(data?.items ?? []);
+      setReviewsTotal(data?.total ?? 0);
+    },
+    [spotId]
+  );
+
+  useEffect(() => {
+    if (spot && reviewsEnabled) loadReviews(reviewsPage);
+  }, [loadReviews, spot, reviewsEnabled, reviewsPage]);
+
+  const reviewsTotalPages = Math.max(
+    1,
+    Math.ceil(reviewsTotal / REVIEWS_PAGE_SIZE)
+  );
 
   const deleteVisit = async (id: string) => {
     if (!confirm("この訪問記録を削除しますか?")) return;
@@ -73,9 +119,9 @@ export default function SpotDetailModal({
                     {spot.prefecture}
                     {spot.municipality && ` ${spot.municipality}`} ・{" "}
                     {spot.category}
-                    {reviews.length > 0 && (
+                    {reviewsEnabled && reviewsTotal > 0 && (
                       <span className="ml-2 text-gray-400">
-                        口コミ{reviews.length}件
+                        口コミ{reviewsTotal}件
                       </span>
                     )}
                   </p>
@@ -195,28 +241,67 @@ export default function SpotDetailModal({
               )}
             </div>
 
-            {/* 口コミ(公開) */}
-            <div className="mt-4 border-t border-gray-100 pt-4">
-              <h3 className="mb-3 font-bold">口コミ</h3>
-              {reviews.length === 0 ? (
-                <p className="text-sm text-gray-500">
-                  まだ口コミがありません。
-                </p>
-              ) : (
-                <ul className="space-y-3">
-                  {reviews.map((review) => (
-                    <li key={review.id}>
-                      <span className="text-xs text-gray-400">
-                        {review.user_email}
-                      </span>
-                      <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-700">
-                        {review.body}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            {/* 口コミ(公開・掲示板形式) */}
+            {reviewsEnabled && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <h3 className="mb-3 font-bold">
+                  口コミ
+                  {reviewsTotal > 0 && (
+                    <span className="ml-1 font-normal text-gray-400">
+                      ({reviewsTotal}件)
+                    </span>
+                  )}
+                </h3>
+                {reviews.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    まだ口コミがありません。
+                  </p>
+                ) : (
+                  <>
+                    <ul className="divide-y divide-gray-100">
+                      {reviews.map((review) => (
+                        <li key={review.id} className="py-2.5">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="text-sm font-medium">
+                              {review.user_name}
+                            </span>
+                            <span className="shrink-0 text-xs text-gray-400">
+                              {formatReviewDatetime(review.created_at)}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-700">
+                            {review.body}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                    {reviewsTotalPages > 1 && (
+                      <div className="mt-3 flex items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          disabled={reviewsPage <= 1}
+                          onClick={() => setReviewsPage((p) => p - 1)}
+                          className="rounded-lg border border-gray-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          前へ
+                        </button>
+                        <span className="text-sm text-gray-500">
+                          {reviewsPage} / {reviewsTotalPages}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={reviewsPage >= reviewsTotalPages}
+                          onClick={() => setReviewsPage((p) => p + 1)}
+                          className="rounded-lg border border-gray-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          次へ
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -225,10 +310,13 @@ export default function SpotDetailModal({
         <VisitFormModal
           spotId={spot.id}
           spotName={spot.name}
+          reviewsEnabled={reviewsEnabled}
           onClose={() => setShowForm(false)}
           onSaved={() => {
             setShowForm(false);
             load();
+            setReviewsPage(1);
+            loadReviews(1);
             onVisitChange?.();
           }}
         />

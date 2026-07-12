@@ -3,6 +3,8 @@ import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import type { PublicReview, Review } from "@/lib/types";
 
+const PAGE_SIZE = 10;
+
 export async function GET(request: Request) {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -14,25 +16,27 @@ export async function GET(request: Request) {
   if (!spotId) {
     return NextResponse.json({ error: "spot_id is required" }, { status: 400 });
   }
+  const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
 
-  if (searchParams.get("mine") === "true") {
-    const { rows } = await query<Review>(
-      `select id, spot_id, body, visibility, created_at
-       from reviews where spot_id = $1 and user_id = $2`,
-      [spotId, userId]
-    );
-    return NextResponse.json({ data: rows[0] ?? null });
-  }
+  const [{ rows }, { rows: countRows }] = await Promise.all([
+    query<PublicReview>(
+      `select r.id, r.body, r.created_at, coalesce(u.nickname, u.email) as user_name
+       from reviews r
+       join users u on u.id = r.user_id
+       where r.spot_id = $1 and r.visibility = 'public'
+       order by r.created_at desc
+       limit $2 offset $3`,
+      [spotId, PAGE_SIZE, (page - 1) * PAGE_SIZE]
+    ),
+    query<{ count: string }>(
+      `select count(*) from reviews where spot_id = $1 and visibility = 'public'`,
+      [spotId]
+    ),
+  ]);
 
-  const { rows } = await query<PublicReview>(
-    `select r.id, r.body, r.created_at, u.email as user_email
-     from reviews r
-     join users u on u.id = r.user_id
-     where r.spot_id = $1 and r.visibility = 'public'
-     order by r.created_at desc`,
-    [spotId]
-  );
-  return NextResponse.json({ data: rows });
+  return NextResponse.json({
+    data: { items: rows, total: Number(countRows[0].count) },
+  });
 }
 
 export async function POST(request: Request) {
@@ -46,11 +50,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
 
+  const { rows: spotRows } = await query<{ reviews_enabled: boolean }>(
+    `select st.reviews_enabled
+     from spots s join spot_types st on st.id = s.spot_type_id
+     where s.id = $1`,
+    [spot_id]
+  );
+  if (!spotRows[0]) {
+    return NextResponse.json({ error: "spot not found" }, { status: 404 });
+  }
+  if (!spotRows[0].reviews_enabled) {
+    return NextResponse.json(
+      { error: "このスポットの種類では口コミが無効になっています。" },
+      { status: 400 }
+    );
+  }
+
   const { rows } = await query<Review>(
     `insert into reviews (user_id, spot_id, body, visibility)
      values ($1, $2, $3, 'public')
-     on conflict (user_id, spot_id)
-     do update set body = excluded.body, visibility = 'public'
      returning id, spot_id, body, visibility, created_at`,
     [userId, spot_id, body.trim()]
   );

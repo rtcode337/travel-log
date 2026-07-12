@@ -8,3 +8,11 @@ body {
 body {
   @apply bg-gray-50 text-gray-900 antialiased;
 }
+
+/* 現在地の青い丸・精度円はクリックを奪わないようにする(下にあるスポットピンを
+   選択できなくなるため)。ラッパーの .maplibregl-marker ごと透過させないと
+   円のサイズ分だけ当たり判定だけが残ってしまう */
+.maplibregl-marker:has(> .maplibregl-user-location-dot),
+.maplibregl-marker:has(> .maplibregl-user-location-accuracy-circle) {
+  pointer-events: none;
+}
