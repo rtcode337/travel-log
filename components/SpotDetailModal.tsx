@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
+import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import {
   formatVisitedOn,
   REVIEWS_PAGE_SIZE,
@@ -48,6 +49,7 @@ export default function SpotDetailModal({
   /** 訪問予定への追加・解除があったときに呼ばれる(呼び出し元の一覧の再取得用) */
   onVisitPlanChange?: () => void;
 }) {
+  const typeKey = useCurrentSpotTypeKey();
   const [spot, setSpot] = useState<Spot | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
@@ -222,7 +224,7 @@ export default function SpotDetailModal({
                 Google マップで経路を表示 ↗
               </a>
               <Link
-                href={`/map?spot=${spot.id}`}
+                href={`${typeKey ? `/${typeKey}` : ""}/map?spot=${spot.id}`}
                 className="inline-block text-sm text-blue-600 underline"
               >
                 アプリの地図で開く
