@@ -489,7 +489,7 @@ export default function AdminPage() {
               required
               value={newTypeKey}
               onChange={(e) => setNewTypeKey(e.target.value)}
-              placeholder="post_office"
+              placeholder="tourist"
               className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
             />
           </div>
@@ -499,7 +499,7 @@ export default function AdminPage() {
               required
               value={newTypeLabel}
               onChange={(e) => setNewTypeLabel(e.target.value)}
-              placeholder="郵便局"
+              placeholder="観光地"
               className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
             />
           </div>
@@ -538,6 +538,7 @@ export default function AdminPage() {
                   </p>
                   <input
                     type="text"
+                    autoComplete="off"
                     defaultValue={u.nickname ?? ""}
                     placeholder="ニックネーム未設定(口コミ等に表示)"
                     onBlur={(e) => {
@@ -576,6 +577,7 @@ export default function AdminPage() {
               </label>
               <input
                 type="email"
+                autoComplete="email"
                 required
                 value={newUserEmail}
                 onChange={(e) => setNewUserEmail(e.target.value)}
@@ -588,6 +590,7 @@ export default function AdminPage() {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={newUserNickname}
                 onChange={(e) => setNewUserNickname(e.target.value)}
                 placeholder="口コミ等に表示する名前(未設定ならメールアドレス)"
@@ -600,6 +603,7 @@ export default function AdminPage() {
               </label>
               <input
                 type="password"
+                autoComplete="new-password"
                 required
                 value={newUserPassword}
                 onChange={(e) => setNewUserPassword(e.target.value)}
