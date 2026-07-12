@@ -21,6 +21,10 @@ yarn-error.log*
 .env
 .env*.local
 
+# Postgresの実データ(docker-compose.yml/docker-compose.dev.ymlのbindマウント先)
+# 個人情報を含むため絶対にコミットしない
+/db/data/
+
 # vercel
 .vercel
 
