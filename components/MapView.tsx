@@ -30,9 +30,11 @@ const UNCLUSTERED_CHECK_LAYER_ID = "spots-unclustered-check";
 /**
  * フィルタ後の件数がこれを超えたら、個別のDOM Marker(ランクバッジ・訪問チェック付き)
  * をやめてWebGL側でクラスタ描画に切り替える(郵便局のような大量データの種類向け。
- * 観光地は現状2,741件でこの閾値を超えないため今まで通り個別ピンのまま表示される)。
+ * 観光地はデータ拡充で3,000件を超えたため、当面の増加分も見込んで余裕を持たせている。
+ * クラスタ表示側にはランク文字を出す仕組みが無いので、観光地程度の件数では
+ * 個別ピンのままにしておきたい)。
  */
-const CLUSTER_THRESHOLD = 3000;
+const CLUSTER_THRESHOLD = 6000;
 
 type ClusterFeatureProps = { id: string; rank: string | null; visited: boolean };
 
