@@ -27,15 +27,6 @@ const CLUSTER_COUNT_LAYER_ID = "spots-cluster-count";
 const UNCLUSTERED_LAYER_ID = "spots-unclustered-point";
 const UNCLUSTERED_CHECK_LAYER_ID = "spots-unclustered-check";
 
-/**
- * フィルタ後の件数がこれを超えたら、個別のDOM Marker(ランクバッジ・訪問チェック付き)
- * をやめてWebGL側でクラスタ描画に切り替える(郵便局のような大量データの種類向け。
- * 観光地はデータ拡充で3,000件を超えたため、当面の増加分も見込んで余裕を持たせている。
- * クラスタ表示側にはランク文字を出す仕組みが無いので、観光地程度の件数では
- * 個別ピンのままにしておきたい)。
- */
-const CLUSTER_THRESHOLD = 6000;
-
 type ClusterFeatureProps = { id: string; rank: string | null; visited: boolean };
 
 function buildClusterGeoJSON(
@@ -149,21 +140,19 @@ function ensureClusterLayers(
     },
   });
 
-  // 訪問済みはチェックマーク、郵便局ランクは〒マークを丸の中に重ねて表示する
+  // 訪問済みはチェックマーク、郵便局ランクは〒マーク、それ以外はランクの文字を
+  // 丸の中に重ねて表示する(lib/rankStyle.tsのPIN_TEXT_COLORSと同じ配色)
   map.addLayer({
     id: UNCLUSTERED_CHECK_LAYER_ID,
     type: "symbol",
     source: CLUSTER_SOURCE_ID,
-    filter: [
-      "all",
-      ["!", ["has", "point_count"]],
-      ["any", ["get", "visited"], ["==", ["get", "rank"], "郵便局"]],
-    ],
+    filter: ["!", ["has", "point_count"]],
     layout: {
       "text-field": [
         "case",
         ["get", "visited"], "✓",
         ["==", ["get", "rank"], "郵便局"], "〒",
+        ["!=", ["get", "rank"], null], ["get", "rank"],
         "",
       ],
       "text-font": ["Noto Sans Regular"],
@@ -172,7 +161,22 @@ function ensureClusterLayers(
       "text-ignore-placement": true,
     },
     paint: {
-      "text-color": "#ffffff",
+      "text-color": [
+        "case",
+        ["get", "visited"], "#ffffff",
+        [
+          "match",
+          ["get", "rank"],
+          "S", "#451a03",
+          "A", "#065f46",
+          "B", "#1e3a8a",
+          "C", "#78350f",
+          "D", "#374151",
+          "Z", "#ffffff",
+          "郵便局", "#ffffff",
+          "#ffffff",
+        ],
+      ],
     },
   });
 
@@ -208,15 +212,14 @@ function ensureClusterLayers(
   }
 }
 
-function setClusterLayersVisible(map: maplibregl.Map, visible: boolean) {
-  const visibility = visible ? "visible" : "none";
+function showClusterLayers(map: maplibregl.Map) {
   for (const id of [
     CLUSTER_LAYER_ID,
     CLUSTER_COUNT_LAYER_ID,
     UNCLUSTERED_LAYER_ID,
     UNCLUSTERED_CHECK_LAYER_ID,
   ]) {
-    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", visibility);
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible");
   }
 }
 
@@ -596,7 +599,10 @@ export default function MapView() {
     router.replace("/map");
   }, [focusSpotId, spots, router]);
 
-  // マーカーの生成・フィルタ反映(件数に応じてDOM Marker/WebGLクラスタを切り替える)
+  // マーカーの生成・フィルタ反映。
+  // 公開スポットは件数が多くても軽いWebGLクラスタ表示で常に描画する。
+  // 自分の非公開スポットは件数が少なく、破線枠+🔒の見た目(クラスタ側には
+  // 無い表現)を保ちたいので、引き続きDOM Markerで個別に描画する。
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -610,32 +616,24 @@ export default function MapView() {
         hiddenRanks
       )
     );
+    const publicSpots = filteredSpots.filter((s) => s.status !== "private");
+    const myPrivateSpots = filteredSpots.filter((s) => s.status === "private");
 
-    if (filteredSpots.length > CLUSTER_THRESHOLD) {
-      // 大量データ: 個別マーカーは全部片付けてクラスタ表示に切り替える
-      markersRef.current.forEach((m) => m.remove());
-      markersRef.current.clear();
+    const renderPublic = () => {
+      ensureClusterLayers(map, setDetailSpotId);
+      showClusterLayers(map);
+      const source = map.getSource(CLUSTER_SOURCE_ID) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      source?.setData(buildClusterGeoJSON(publicSpots, visitedIds));
+    };
+    if (map.isStyleLoaded()) renderPublic();
+    else map.once("load", renderPublic);
 
-      const render = () => {
-        ensureClusterLayers(map, setDetailSpotId);
-        setClusterLayersVisible(map, true);
-        const source = map.getSource(CLUSTER_SOURCE_ID) as
-          | maplibregl.GeoJSONSource
-          | undefined;
-        source?.setData(buildClusterGeoJSON(filteredSpots, visitedIds));
-      };
-      if (map.isStyleLoaded()) render();
-      else map.once("load", render);
-      return;
-    }
-
-    setClusterLayersVisible(map, false);
-
-    // 既存マーカーを一旦すべて破棄して作り直す(件数が少ないため単純に)
     markersRef.current.forEach((m) => m.remove());
     markersRef.current.clear();
 
-    for (const spot of filteredSpots) {
+    for (const spot of myPrivateSpots) {
       const visited = visitedIds.has(spot.id);
       const el = createPinElement(spot, visited);
       el.addEventListener("click", (e) => {
