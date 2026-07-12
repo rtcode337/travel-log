@@ -35,7 +35,7 @@
 インストールする必要はない)。
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 ```
 
 初回起動時、Postgres コンテナが `db/init/` 配下のSQL(`01_schema.sql`=スキーマ一式、
