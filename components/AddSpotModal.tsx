@@ -1,24 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import {
-  CATEGORIES,
   PREFECTURES,
-  RANKS,
-  type Category,
+  distinctValues,
   type Rank,
+  type Category,
   type Spot,
 } from "@/lib/types";
 
 export default function AddSpotModal({
   lat,
   lng,
+  spots,
   onClose,
   onCreated,
 }: {
   lat: number;
   lng: number;
+  /** ランク・カテゴリ入力のサジェスト用に、現在アクティブな種類の既存スポットを渡す */
+  spots: Spot[];
   onClose: () => void;
   onCreated: (spot: Spot) => void;
 }) {
@@ -26,11 +28,20 @@ export default function AddSpotModal({
   const [nameKana, setNameKana] = useState("");
   const [prefecture, setPrefecture] = useState("");
   const [municipality, setMunicipality] = useState("");
-  const [rank, setRank] = useState<Rank>("B");
-  const [category, setCategory] = useState<Category>("その他");
+  const [rank, setRank] = useState<Rank>("");
+  const [category, setCategory] = useState<Category>("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const availableRanks = useMemo(
+    () => distinctValues(spots.map((s) => s.rank)),
+    [spots]
+  );
+  const availableCategories = useMemo(
+    () => distinctValues(spots.map((s) => s.category)),
+    [spots]
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,8 +54,8 @@ export default function AddSpotModal({
       municipality: municipality.trim() || null,
       lat,
       lng,
-      rank,
-      category,
+      rank: rank.trim() || null,
+      category: category.trim() || null,
       description: description.trim() || null,
       official_url: null,
     });
@@ -122,36 +133,32 @@ export default function AddSpotModal({
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="mb-1 block text-sm font-medium">
-              必訪ランク *
-            </label>
-            <select
+            <label className="mb-1 block text-sm font-medium">ランク</label>
+            <input
               value={rank}
               onChange={(e) => setRank(e.target.value as Rank)}
+              list="add-spot-rank-suggestions"
               className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-            >
-              {RANKS.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
+            />
+            <datalist id="add-spot-rank-suggestions">
+              {availableRanks.map((r) => (
+                <option key={r} value={r} />
               ))}
-            </select>
+            </datalist>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">
-              カテゴリ *
-            </label>
-            <select
+            <label className="mb-1 block text-sm font-medium">カテゴリ</label>
+            <input
               value={category}
               onChange={(e) => setCategory(e.target.value as Category)}
+              list="add-spot-category-suggestions"
               className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-            >
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
+            />
+            <datalist id="add-spot-category-suggestions">
+              {availableCategories.map((c) => (
+                <option key={c} value={c} />
               ))}
-            </select>
+            </datalist>
           </div>
         </div>
         <div>

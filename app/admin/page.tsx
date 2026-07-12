@@ -5,16 +5,17 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
 import {
-  CATEGORIES,
   PREFECTURES,
-  RANKS,
   ROLE_LABELS,
+  distinctValues,
   type AppUser,
   type Category,
   type Rank,
   type Role,
   type Spot,
+  type SpotType,
 } from "@/lib/types";
+import { getRankOrder } from "@/lib/rankStyle";
 import RankBadge from "@/components/RankBadge";
 
 const STATUS_LABELS: Record<Spot["status"], string> = {
@@ -51,8 +52,8 @@ const EMPTY_FORM: SpotForm = {
   municipality: "",
   lat: "",
   lng: "",
-  rank: "B",
-  category: "その他",
+  rank: "",
+  category: "",
   description: "",
   official_url: "",
 };
@@ -83,7 +84,7 @@ export default function AdminPage() {
   const [form, setForm] = useState<SpotForm>(EMPTY_FORM);
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [rankFilter, setRankFilter] = useState<Rank | "all">("S");
+  const [rankFilter, setRankFilter] = useState<Rank | "all">("all");
   const [importing, setImporting] = useState(false);
 
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -91,6 +92,12 @@ export default function AdminPage() {
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<Role>("user");
   const [userMessage, setUserMessage] = useState<string | null>(null);
+
+  const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
+  const [activeType, setActiveType] = useState<SpotType | null>(null);
+  const [newTypeKey, setNewTypeKey] = useState("");
+  const [newTypeLabel, setNewTypeLabel] = useState("");
+  const [typeMessage, setTypeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     api.auth.me().then(({ data }) => {
@@ -115,11 +122,21 @@ export default function AdminPage() {
     setUsers(data ?? []);
   }, []);
 
+  const loadSpotTypes = useCallback(async () => {
+    const [{ data: types }, { data: active }] = await Promise.all([
+      api.spotTypes.list(),
+      api.appSettings.get(),
+    ]);
+    setSpotTypes(types ?? []);
+    setActiveType(active ?? null);
+  }, []);
+
   useEffect(() => {
     if (!isAdmin) return;
     load();
     loadUsers();
-  }, [isAdmin, load, loadUsers]);
+    loadSpotTypes();
+  }, [isAdmin, load, loadUsers, loadSpotTypes]);
 
   const pendingSpots = useMemo(
     () => spots.filter((s) => s.status === "pending"),
@@ -176,6 +193,46 @@ export default function AdminPage() {
     loadUsers();
   };
 
+  const handleSwitchType = async (type: SpotType) => {
+    const { error } = await api.appSettings.setActive(type.id);
+    if (error) {
+      setTypeMessage("切替に失敗しました: " + error.message);
+      return;
+    }
+    setTypeMessage(`「${type.label}」に切り替えました。`);
+    setActiveType(type);
+    load();
+  };
+
+  const handleCreateType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTypeMessage(null);
+    const { error } = await api.spotTypes.create(
+      newTypeKey.trim(),
+      newTypeLabel.trim()
+    );
+    if (error) {
+      setTypeMessage("追加に失敗しました: " + error.message);
+      return;
+    }
+    setTypeMessage(`「${newTypeLabel}」を追加しました。`);
+    setNewTypeKey("");
+    setNewTypeLabel("");
+    loadSpotTypes();
+  };
+
+  const availableRanks = useMemo(
+    () =>
+      distinctValues(spots.map((s) => s.rank)).sort(
+        (a, b) => getRankOrder(a) - getRankOrder(b)
+      ),
+    [spots]
+  );
+  const availableCategories = useMemo(
+    () => distinctValues(spots.map((s) => s.category)),
+    [spots]
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim();
     return spots.filter((s) => {
@@ -204,8 +261,8 @@ export default function AdminPage() {
       municipality: spot.municipality ?? "",
       lat: String(spot.lat),
       lng: String(spot.lng),
-      rank: spot.rank,
-      category: spot.category,
+      rank: spot.rank ?? "",
+      category: spot.category ?? "",
       description: spot.description ?? "",
       official_url: spot.official_url ?? "",
     });
@@ -221,8 +278,8 @@ export default function AdminPage() {
       municipality: form.municipality.trim() || null,
       lat: Number(form.lat),
       lng: Number(form.lng),
-      rank: form.rank,
-      category: form.category,
+      rank: form.rank.trim() || null,
+      category: form.category.trim() || null,
       description: form.description.trim() || null,
       official_url: form.official_url.trim() || null,
     };
@@ -264,7 +321,7 @@ export default function AdminPage() {
       const idx = Object.fromEntries(
         CSV_COLUMNS.map((c) => [c, header.indexOf(c)])
       ) as Record<(typeof CSV_COLUMNS)[number], number>;
-      for (const required of ["name", "prefecture", "lat", "lng", "rank", "category"] as const) {
+      for (const required of ["name", "prefecture", "lat", "lng"] as const) {
         if (idx[required] === -1) {
           setMessage(`CSVヘッダーに ${required} 列がありません。`);
           return;
@@ -276,15 +333,11 @@ export default function AdminPage() {
       for (let i = 1; i < rows.length; i++) {
         const get = (c: (typeof CSV_COLUMNS)[number]) =>
           idx[c] === -1 ? "" : (rows[i][idx[c]] ?? "").trim();
-        const rank = get("rank") as Rank;
-        const category = get("category") as Category;
+        const rank = get("rank") || null;
+        const category = get("category") || null;
         const lat = Number(get("lat"));
         const lng = Number(get("lng"));
         if (!get("name")) errors.push(`${i + 1}行目: name が空`);
-        else if (!RANKS.includes(rank))
-          errors.push(`${i + 1}行目: rank は S/A/B/C/D のいずれか`);
-        else if (!CATEGORIES.includes(category))
-          errors.push(`${i + 1}行目: category が不正 (${category})`);
         else if (Number.isNaN(lat) || Number.isNaN(lng))
           errors.push(`${i + 1}行目: lat/lng が数値でない`);
         else
@@ -324,6 +377,67 @@ export default function AdminPage() {
   return (
     <main className="mx-auto max-w-6xl p-4">
       <h1 className="mb-4 text-lg font-bold">管理画面</h1>
+
+      {/* スポットの種類(アプリ全体のモード切替) */}
+      <section className="mb-6 rounded-xl border border-gray-200 bg-white p-3">
+        <h2 className="mb-2 text-base font-bold">スポットの種類</h2>
+        <p className="mb-3 text-xs text-gray-500">
+          今アプリ全体で表示・追加対象になっている種類を切り替える(全ユーザーの
+          地図・一覧に反映される)。
+        </p>
+        {typeMessage && (
+          <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+            {typeMessage}
+          </p>
+        )}
+        <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+          {spotTypes.map((t) => (
+            <li key={t.id} className="flex items-center gap-3 px-3 py-2">
+              <input
+                type="radio"
+                name="active-spot-type"
+                checked={activeType?.id === t.id}
+                onChange={() => handleSwitchType(t)}
+              />
+              <span className="flex-1 text-sm">{t.label}</span>
+              <span className="text-xs text-gray-400">{t.key}</span>
+            </li>
+          ))}
+        </ul>
+        <form
+          onSubmit={handleCreateType}
+          className="flex flex-wrap items-end gap-2"
+        >
+          <div>
+            <label className="mb-1 block text-xs font-medium">
+              キー(英数字)
+            </label>
+            <input
+              required
+              value={newTypeKey}
+              onChange={(e) => setNewTypeKey(e.target.value)}
+              placeholder="post_office"
+              className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium">表示名</label>
+            <input
+              required
+              value={newTypeLabel}
+              onChange={(e) => setNewTypeLabel(e.target.value)}
+              placeholder="郵便局"
+              className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+            />
+          </div>
+          <button
+            type="submit"
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
+          >
+            + 種類を追加
+          </button>
+        </form>
+      </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
         {/* 左カラム: ユーザー管理 */}
@@ -504,26 +618,27 @@ export default function AdminPage() {
         />
       </div>
 
-      {/* ランク絞り込み */}
-      <div className="mb-3 flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
-        {(["all", ...RANKS] as const).map((r) => (
-          <button
-            key={r}
-            onClick={() => setRankFilter(r)}
-            className={`flex-1 px-3 py-1.5 font-medium ${
-              rankFilter === r
-                ? "bg-blue-600 text-white"
-                : "text-gray-500 hover:bg-gray-50"
-            }`}
-          >
-            {r === "all" ? "すべて" : r}
-          </button>
-        ))}
-      </div>
+      {/* ランク絞り込み(現在のスポット種類に実在するランクのみ表示) */}
+      {availableRanks.length > 0 && (
+        <div className="mb-3 flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
+          {(["all", ...availableRanks] as const).map((r) => (
+            <button
+              key={r}
+              onClick={() => setRankFilter(r)}
+              className={`flex-1 px-3 py-1.5 font-medium ${
+                rankFilter === r
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-500 hover:bg-gray-50"
+              }`}
+            >
+              {r === "all" ? "すべて" : r}
+            </button>
+          ))}
+        </div>
+      )}
 
       <p className="mb-2 text-xs text-gray-400">
-        CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng, rank,
-        category は必須)
+        CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。rank/categoryは自由入力で空でも可)
       </p>
 
       {message && (
@@ -676,39 +791,40 @@ export default function AdminPage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="mb-1 block text-sm font-medium">
-                  必訪ランク *
+                  ランク
                 </label>
-                <select
+                <input
                   value={form.rank}
                   onChange={(e) =>
                     setForm({ ...form, rank: e.target.value as Rank })
                   }
+                  list="rank-suggestions"
+                  placeholder="種類による(観光地はS〜D)"
                   className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-                >
-                  {RANKS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
+                />
+                <datalist id="rank-suggestions">
+                  {availableRanks.map((r) => (
+                    <option key={r} value={r} />
                   ))}
-                </select>
+                </datalist>
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">
-                  カテゴリ *
+                  カテゴリ
                 </label>
-                <select
+                <input
                   value={form.category}
                   onChange={(e) =>
                     setForm({ ...form, category: e.target.value as Category })
                   }
+                  list="category-suggestions"
                   className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
+                />
+                <datalist id="category-suggestions">
+                  {availableCategories.map((c) => (
+                    <option key={c} value={c} />
                   ))}
-                </select>
+                </datalist>
               </div>
             </div>
             <div>

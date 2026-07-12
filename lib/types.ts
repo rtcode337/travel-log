@@ -1,15 +1,22 @@
-export type Rank = "S" | "A" | "B" | "C" | "D";
-
-export const RANKS: Rank[] = ["S", "A", "B", "C", "D"];
+/**
+ * rank/categoryはスポットの「種類(SpotType)」ごとに意味が異なりうるため、
+ * DB上は自由入力(nullable text)。以下は観光地(spot_type='tourist')が実際に
+ * 使っている値で、UIのサジェスト(datalist)用の参考値として残している。
+ * 他の種類(郵便局・御朱印など)は独自のrank/categoryを使うか、全く使わなくてよい。
+ */
+export type Rank = string;
+export type Category = string;
 
 /**
- * ランクはWikipedia(ja)月次ページビュー数を知名度の指標とし、
+ * 観光地(tourist)のランクはWikipedia(ja)月次ページビュー数を知名度の指標とし、
  * 全スポット中の相対順位(パーセンタイル)で機械的に区分している
  * (世界遺産・国宝等の指定がある場所は目視で格上げする例外あり)。
  * S: 上位5%(全国的に絶対外せない) / A: 次15%(全国区で有名) /
  * B: 次30%(地方の定番) / C: 次30%(地元で知られている) / D: 残り20%(穴場)
  */
-export const RANK_LABELS: Record<Rank, string> = {
+export const RANKS: Rank[] = ["S", "A", "B", "C", "D"];
+
+export const RANK_LABELS: Record<string, string> = {
   S: "S: 絶対外せない",
   A: "A: 全国区で有名",
   B: "B: 地方の定番",
@@ -27,7 +34,10 @@ export const CATEGORIES = [
   "その他",
 ] as const;
 
-export type Category = (typeof CATEGORIES)[number];
+/** values配列から null/空文字を除いた重複なしリストを返す(rank/categoryのサジェスト用) */
+export function distinctValues(values: (string | null | undefined)[]): string[] {
+  return Array.from(new Set(values.filter((v): v is string => !!v))).sort();
+}
 
 export type DatePrecision = "day" | "month" | "year" | "unknown";
 
@@ -40,14 +50,15 @@ export const DATE_PRECISIONS: { value: DatePrecision; label: string }[] = [
 
 export interface Spot {
   id: string;
+  spot_type_id: string;
   name: string;
   name_kana: string | null;
   prefecture: string;
   municipality: string | null;
   lat: number;
   lng: number;
-  rank: Rank;
-  category: Category;
+  rank: Rank | null;
+  category: Category | null;
   description: string | null;
   official_url: string | null;
   source: "manual" | "opendata" | "user_submitted";
@@ -55,6 +66,14 @@ export interface Spot {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** スポットの種類(観光地/郵便局/御朱印など)。管理者が新規追加できる */
+export interface SpotType {
+  id: string;
+  key: string;
+  label: string;
+  created_at: string;
 }
 
 /**

@@ -1,11 +1,32 @@
 -- 観光地訪問記録アプリ 初期スキーマ(ローカル Postgres 版)
--- spots(観光地マスタ)/ visits(訪問記録)/ reviews(口コミ・フェーズ3用)を厳密に分離する
+-- スポットは spot_types で「種類」を持ち、app_settings.active_spot_type_id で
+-- アプリ全体が今どの種類を対象にするか(観光地/郵便局/御朱印...)を管理者が切り替えられる。
 
 create extension if not exists pgcrypto;
 
 -- =============================================================
+-- spot_types: スポットの種類マスタ。管理者が新しい種類を追加できる
+-- =============================================================
+create table spot_types (
+  id         uuid primary key default gen_random_uuid(),
+  key        text not null unique,   -- 機械可読キー(例: 'tourist', 'post_office', 'goshuin')
+  label      text not null,          -- 表示名(例: '観光地', '郵便局', '御朱印')
+  created_at timestamptz not null default now()
+);
+
+-- =============================================================
+-- app_settings: アプリ全体の設定。今アクティブなスポット種類を1行だけ保持する
+-- singleton列のPKトリックで常に1行に制約する(切替は常にUPDATE)
+-- =============================================================
+create table app_settings (
+  singleton           boolean primary key default true check (singleton),
+  active_spot_type_id uuid not null references spot_types (id),
+  updated_at          timestamptz not null default now()
+);
+
+-- =============================================================
 -- users: ログイン用アカウント
--- role: admin(承認・削除・ユーザー管理) / moderator(スポットをpendingで追加) / user(一般)
+-- role: admin(承認・削除・ユーザー管理・種類切替) / moderator(スポットをpendingで追加) / user(一般)
 -- 新規アカウントは管理者が /admin から作成する(自由サインアップなし)。
 -- 最初の1アカウントのみ例外的にセットアップ画面(/login)から作成でき、自動的にadminになる。
 -- =============================================================
@@ -20,37 +41,37 @@ create table users (
 );
 
 -- =============================================================
--- spots: 観光地マスタ
--- 必訪ランク(S/A/B/C/D)はキュレーション項目。口コミ評価とは別軸で管理する
--- Wikipedia(ja)月次ページビュー数を知名度指標としたパーセンタイル区分(lib/types.tsのコメント参照)
+-- spots: スポットマスタ(種類はspot_type_idで区別)
+-- rank/categoryは種類ごとに意味が異なりうるため自由入力(観光地では
+-- 必訪ランクS〜D・カテゴリ7種を使うが、他の種類では未使用でもよい)
 -- =============================================================
 create table spots (
-  id           uuid primary key default gen_random_uuid(),
-  name         text not null,
-  name_kana    text,
-  prefecture   text not null,
-  municipality text,
-  lat          double precision not null,
-  lng          double precision not null,
-  rank         text not null check (rank in ('S', 'A', 'B', 'C', 'D')),
-  category     text not null check (
-    category in ('神社仏閣', '自然', '城', '温泉', '街並み', '美術館博物館', 'その他')
-  ),
-  description  text,
-  official_url text,
-  source       text not null default 'manual' check (
+  id            uuid primary key default gen_random_uuid(),
+  spot_type_id  uuid not null references spot_types (id),
+  name          text not null,
+  name_kana     text,
+  prefecture    text not null,
+  municipality  text,
+  lat           double precision not null,
+  lng           double precision not null,
+  rank          text,
+  category      text,
+  description   text,
+  official_url  text,
+  source        text not null default 'manual' check (
     source in ('manual', 'opendata', 'user_submitted')
   ),
-  status       text not null default 'published' check (
+  status        text not null default 'published' check (
     status in ('published', 'pending', 'rejected')
   ),
-  created_by   uuid references users (id) on delete set null,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+  created_by    uuid references users (id) on delete set null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 
 create index spots_prefecture_idx on spots (prefecture);
 create index spots_rank_idx on spots (rank);
+create index spots_spot_type_id_idx on spots (spot_type_id);
 
 -- updated_at 自動更新
 create or replace function set_updated_at()
@@ -101,3 +122,14 @@ create table reviews (
 );
 
 create index reviews_spot_id_idx on reviews (spot_id);
+
+-- =============================================================
+-- 参考データ: スポットの種類3つ(観光地のみデータあり。郵便局・御朱印は今後用の空の種類)
+-- =============================================================
+insert into spot_types (key, label) values
+  ('tourist', '観光地'),
+  ('post_office', '郵便局'),
+  ('goshuin', '御朱印');
+
+insert into app_settings (active_spot_type_id)
+  select id from spot_types where key = 'tourist';

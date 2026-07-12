@@ -96,16 +96,38 @@ export default function SpotDetailModal({
 
             <MiniMap lat={spot.lat} lng={spot.lng} rank={spot.rank} />
 
-            {spot.official_url && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
               <a
-                href={spot.official_url}
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                  `${spot.name} ${spot.lat},${spot.lng}`
+                )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-3 inline-block text-sm text-blue-600 underline"
+                className="inline-block text-sm text-blue-600 underline"
               >
-                公式サイト ↗
+                Google マップで開く ↗
               </a>
-            )}
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                  `${spot.lat},${spot.lng}`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block text-sm text-blue-600 underline"
+              >
+                Google マップで経路を表示 ↗
+              </a>
+              {spot.official_url && (
+                <a
+                  href={spot.official_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-sm text-blue-600 underline"
+                >
+                  公式サイト ↗
+                </a>
+              )}
+            </div>
 
             {/* 訪問履歴 */}
             <div className="mt-4 border-t border-gray-100 pt-4">

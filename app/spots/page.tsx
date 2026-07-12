@@ -10,10 +10,9 @@ import FilterBar, {
 } from "@/components/FilterBar";
 import RankBadge from "@/components/RankBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
+import { getRankOrder } from "@/lib/rankStyle";
 
 type SortKey = "rank" | "name" | "visited";
-
-const RANK_ORDER = { S: 0, A: 1, B: 2, C: 3, D: 4 } as const;
 
 export default function SpotsPage() {
   const [spots, setSpots] = useState<Spot[]>([]);
@@ -82,7 +81,7 @@ export default function SpotsPage() {
       switch (sortKey) {
         case "rank":
           return (
-            RANK_ORDER[a.rank] - RANK_ORDER[b.rank] ||
+            getRankOrder(a.rank) - getRankOrder(b.rank) ||
             (a.name_kana ?? a.name).localeCompare(b.name_kana ?? b.name, "ja")
           );
         case "name":
@@ -154,7 +153,11 @@ export default function SpotsPage() {
       </div>
 
       <div className="mb-3 space-y-2">
-        <FilterBar filters={filters} onChange={setFilters} />
+        <FilterBar
+          spots={spots.filter((s) => s.prefecture === selectedPref)}
+          filters={filters}
+          onChange={setFilters}
+        />
         <select
           value={sortKey}
           onChange={(e) => setSortKey(e.target.value as SortKey)}

@@ -1,4 +1,4 @@
-import type { AppUser, PublicReview, Review, Role, Spot, Visit } from "@/lib/types";
+import type { AppUser, PublicReview, Review, Role, Spot, SpotType, Visit } from "@/lib/types";
 
 interface Result<T> {
   data: T | null;
@@ -58,6 +58,28 @@ export const api = {
       }),
     bulkApprove: () =>
       request<Spot[]>("/api/spots/bulk-approve", { method: "POST" }),
+  },
+  geocode: {
+    search: (q: string) =>
+      request<{ name: string; lat: number; lng: number }[]>(
+        `/api/geocode?q=${encodeURIComponent(q)}`
+      ),
+  },
+  spotTypes: {
+    list: () => request<SpotType[]>("/api/spot-types"),
+    create: (key: string, label: string) =>
+      request<SpotType>("/api/spot-types", {
+        method: "POST",
+        body: JSON.stringify({ key, label }),
+      }),
+  },
+  appSettings: {
+    get: () => request<SpotType>("/api/app-settings"),
+    setActive: (spotTypeId: string) =>
+      request<SpotType>("/api/app-settings", {
+        method: "PATCH",
+        body: JSON.stringify({ spot_type_id: spotTypeId }),
+      }),
   },
   admin: {
     users: {
