@@ -179,6 +179,7 @@ export default function AddSpotModal({
           <label className="mb-1 block text-sm font-medium">名前 *</label>
           <input
             required
+            autoComplete="off"
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
@@ -187,6 +188,7 @@ export default function AddSpotModal({
         <div>
           <label className="mb-1 block text-sm font-medium">よみがな</label>
           <input
+            autoComplete="off"
             value={nameKana}
             onChange={(e) => setNameKana(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
