@@ -14,7 +14,13 @@ interface Result<T> {
   error: { message: string } | null;
 }
 
-async function request<T>(
+// ページ(/map ↔ /spots など)を行き来するたびに同じGETを取り直さないための
+// タブ内キャッシュ。pathをキーに、進行中/完了済みのリクエストをそのまま保持する
+// (同時に同じpathへ複数箇所からリクエストが飛んでも1回にまとまる副次効果もある)。
+// 書き込み系(GET以外)が成功したら、鮮度を個別に追うより丸ごと破棄する方が単純で安全。
+const getCache = new Map<string, Promise<Result<unknown>>>();
+
+async function fetchAndParse<T>(
   path: string,
   init?: RequestInit
 ): Promise<Result<T>> {
@@ -31,6 +37,29 @@ async function request<T>(
   // ラッパーオブジェクトごと返してしまうため、"data"キーの有無で判定する
   const data = body && typeof body === "object" && "data" in body ? body.data : body;
   return { data: data as T, error: null };
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit
+): Promise<Result<T>> {
+  const method = (init?.method ?? "GET").toUpperCase();
+
+  if (method === "GET") {
+    const cached = getCache.get(path);
+    if (cached) return cached as Promise<Result<T>>;
+
+    const promise = fetchAndParse<T>(path, init);
+    getCache.set(path, promise);
+    promise.then((result) => {
+      if (result.error) getCache.delete(path); // 失敗はキャッシュに残さず、次回また取り直せるようにする
+    });
+    return promise;
+  }
+
+  const result = await fetchAndParse<T>(path, init);
+  if (!result.error) getCache.clear();
+  return result;
 }
 
 export const api = {
