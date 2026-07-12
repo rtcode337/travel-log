@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api-client";
 import {
   formatVisitedOn,
@@ -220,6 +221,12 @@ export default function SpotDetailModal({
               >
                 Google マップで経路を表示 ↗
               </a>
+              <Link
+                href={`/map?spot=${spot.id}`}
+                className="inline-block text-sm text-blue-600 underline"
+              >
+                アプリの地図で開く
+              </Link>
               {spot.official_url && (
                 <a
                   href={spot.official_url}
