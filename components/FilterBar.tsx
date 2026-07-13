@@ -55,6 +55,7 @@ export default function FilterBar({
   filters,
   onChange,
   hiddenRanks = [],
+  stacked = false,
 }: {
   /** 現在アクティブなスポット種類の実データから、ランク・カテゴリの選択肢を動的に作る */
   spots: Spot[];
@@ -63,6 +64,8 @@ export default function FilterBar({
   /** アクティブなスポット種類のspot_types.hidden_ranks。未取得でもボタンは出せるよう
    * distinctValues(spots)とは別に渡す */
   hiddenRanks?: string[];
+  /** trueならモーダル内表示向けに、ラベル付きで縦一列・幅いっぱいに並べる */
+  stacked?: boolean;
 }) {
   const availableRanks = useMemo(
     () =>
@@ -79,54 +82,95 @@ export default function FilterBar({
   // <select>は単一選択なので、既に複数選択された状態(過去互換)は「すべて」扱いにする
   const selectedRank = filters.ranks.length === 1 ? filters.ranks[0] : "all";
 
+  const selectClassName = stacked
+    ? "w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5"
+    : "rounded-lg border border-gray-300 bg-white px-2 py-1.5";
+
+  const rankSelect = availableRanks.length > 0 && (
+    <select
+      value={selectedRank}
+      onChange={(e) =>
+        onChange({
+          ...filters,
+          ranks: e.target.value === "all" ? [] : [e.target.value],
+        })
+      }
+      className={selectClassName}
+    >
+      <option value="all">すべてのランク</option>
+      {availableRanks.map((rank) => (
+        <option key={rank} value={rank}>
+          {rank}
+        </option>
+      ))}
+    </select>
+  );
+
+  const visitedSelect = (
+    <select
+      value={filters.visited}
+      onChange={(e) =>
+        onChange({ ...filters, visited: e.target.value as VisitedFilter })
+      }
+      className={selectClassName}
+    >
+      {visitedOptions.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+  );
+
+  const categorySelect = availableCategories.length > 0 && (
+    <select
+      value={filters.category}
+      onChange={(e) => onChange({ ...filters, category: e.target.value })}
+      className={selectClassName}
+    >
+      <option value="all">全カテゴリ</option>
+      {availableCategories.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </select>
+  );
+
+  if (stacked) {
+    return (
+      <div className="space-y-3 text-sm">
+        {rankSelect && (
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">
+              ランク
+            </span>
+            {rankSelect}
+          </label>
+        )}
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-500">
+            訪問状況
+          </span>
+          {visitedSelect}
+        </label>
+        {categorySelect && (
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500">
+              カテゴリ
+            </span>
+            {categorySelect}
+          </label>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      {availableRanks.length > 0 && (
-        <select
-          value={selectedRank}
-          onChange={(e) =>
-            onChange({
-              ...filters,
-              ranks: e.target.value === "all" ? [] : [e.target.value],
-            })
-          }
-          className="rounded-lg border border-gray-300 bg-white px-2 py-1.5"
-        >
-          <option value="all">すべてのランク</option>
-          {availableRanks.map((rank) => (
-            <option key={rank} value={rank}>
-              {rank}
-            </option>
-          ))}
-        </select>
-      )}
-      <select
-        value={filters.visited}
-        onChange={(e) =>
-          onChange({ ...filters, visited: e.target.value as VisitedFilter })
-        }
-        className="rounded-lg border border-gray-300 bg-white px-2 py-1.5"
-      >
-        {visitedOptions.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      {availableCategories.length > 0 && (
-        <select
-          value={filters.category}
-          onChange={(e) => onChange({ ...filters, category: e.target.value })}
-          className="rounded-lg border border-gray-300 bg-white px-2 py-1.5"
-        >
-          <option value="all">全カテゴリ</option>
-          {availableCategories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      )}
+      {rankSelect}
+      {visitedSelect}
+      {categorySelect}
     </div>
   );
 }

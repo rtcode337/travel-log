@@ -17,6 +17,7 @@ import {
 export default function AddSpotModal({
   lat,
   lng,
+  spotTypeKey,
   spot,
   spots,
   role,
@@ -27,6 +28,8 @@ export default function AddSpotModal({
   /** 新規作成時の座標(spotが指定された編集モードでは使わない) */
   lat?: number;
   lng?: number;
+  /** 新規作成先のスポット種類キー(新規作成時のみ必須。編集モードでは種類を変えないので不要) */
+  spotTypeKey?: string;
   /** 指定すると編集モードになり、フォームに既存の値を読み込む。非公開スポットの
    * 作成者本人のみがこのモードで開ける想定(呼び出し元で権限チェック済み) */
   spot?: Spot;
@@ -103,7 +106,7 @@ export default function AddSpotModal({
     };
     const { data, error } = isEdit
       ? await api.spots.update(spot!.id, payload)
-      : await api.spots.create({ ...payload, status });
+      : await api.spots.create({ ...payload, status }, spotTypeKey!);
     setSaving(false);
     if (error || !data) {
       setError("送信に失敗しました: " + (error?.message ?? "unknown error"));
@@ -137,16 +140,22 @@ export default function AddSpotModal({
         className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
       >
         <h2 className="font-bold">
-          {isEdit ? "非公開スポットを編集" : "この場所にスポットを追加"}
+          {isEdit ? "スポットを編集" : "この場所にスポットを追加"}
         </h2>
-        {!isEdit && (
+        {!isEdit && lat != null && lng != null && (
           <p className="text-xs text-gray-500">
-            緯度 {lat!.toFixed(5)} ・ 経度 {lng!.toFixed(5)}
+            緯度 {lat.toFixed(5)} ・ 経度 {lng.toFixed(5)}
           </p>
         )}
         {isEdit ? (
           <p className="rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
-            非公開スポットです。承認待ち・公開になると編集・削除はできなくなります。
+            {spot?.status === "private" &&
+              "非公開スポットです。自分にだけ表示されます。"}
+            {spot?.status === "pending" &&
+              "承認待ちスポットです。承認されると本人でも編集できなくなります。"}
+            {spot?.status === "rejected" && "却下されたスポットです。"}
+            {spot?.status === "published" &&
+              "公開中のスポットです。編集内容はすぐに全員の地図に反映されます。"}
           </p>
         ) : allowedStatuses.length > 1 ? (
           <div>
@@ -166,7 +175,7 @@ export default function AddSpotModal({
               {status === "private" &&
                 "非公開: 自分にだけ表示されます。口コミは使えません。"}
               {status === "pending" &&
-                "承認待ち: 管理者が承認すると地図に公開されます。"}
+                "承認待ち: スポット管理者・管理者が承認すると地図に公開されます。"}
               {status === "published" && "公開: すぐに全員の地図に表示されます。"}
             </p>
           </div>
@@ -227,7 +236,7 @@ export default function AddSpotModal({
             />
           </div>
         </div>
-        {isEdit && (
+        {(isEdit || lat == null) && (
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="mb-1 block text-sm font-medium">緯度 *</label>

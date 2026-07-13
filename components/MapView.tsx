@@ -298,9 +298,9 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
 export default function MapView({
   spotTypeKey,
 }: {
-  /** 指定すると管理画面の既定(app_settings)ではなく、このキーのスポット種類を表示する */
-  spotTypeKey?: string;
-} = {}) {
+  /** 表示対象のスポット種類キー(常に /[type]/map から渡される) */
+  spotTypeKey: string;
+}) {
   const searchParams = useSearchParams();
   const focusSpotId = searchParams.get("spot");
 
@@ -333,6 +333,7 @@ export default function MapView({
   >([]);
   const pendingMarkersRef = useRef<maplibregl.Marker[]>([]);
 
+  const [showFilterModal, setShowFilterModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
     { name: string; lat: number; lng: number }[]
@@ -604,12 +605,7 @@ export default function MapView({
     // next/navigationのrouter.replaceだとuseSearchParams経由でSuspense境界が
     // 再評価され、MapView自体が再マウントされてspotsが空に戻ってしまうことが
     // あったため、ブラウザ標準のHistory APIで直接URLだけ書き換える
-    // (種類キー付きのURLで開いていた場合はそのキーを保つ)
-    window.history.replaceState(
-      null,
-      "",
-      spotTypeKey ? `/${spotTypeKey}/map` : "/map"
-    );
+    window.history.replaceState(null, "", `/${spotTypeKey}/map`);
   }, [focusSpotId, spots, spotTypeKey]);
 
   // マーカーの生成・フィルタ反映。
@@ -689,33 +685,35 @@ export default function MapView({
     <div className="relative h-[calc(100dvh-4rem)]">
       <div ref={containerRef} className="h-full w-full" />
 
-      {/* フィルタバー・検索バー(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
+      {/* 検索バー・絞り込みボタン(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
       <div className="absolute left-0 right-14 top-0 z-10 space-y-2 p-2">
         <div className="rounded-xl bg-white/95 p-2 shadow">
-          <FilterBar
-            spots={spots}
-            filters={filters}
-            onChange={setFilters}
-            hiddenRanks={hiddenRanks}
-          />
-        </div>
-        <div className="rounded-xl bg-white/95 p-2 shadow">
-          <form onSubmit={handleSearch} className="flex gap-2">
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="住所・建物名で検索"
-              className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-            />
+          <div className="flex gap-2">
+            <form onSubmit={handleSearch} className="flex min-w-0 flex-1 gap-2">
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="住所・建物名で検索"
+                className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+              />
+              <button
+                type="submit"
+                disabled={searching}
+                className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {searching ? "検索中…" : "検索"}
+              </button>
+            </form>
             <button
-              type="submit"
-              disabled={searching}
-              className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              type="button"
+              onClick={() => setShowFilterModal(true)}
+              aria-label="絞り込み"
+              className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
             >
-              {searching ? "検索中…" : "検索"}
+              ⚙️
             </button>
-          </form>
+          </div>
           {searchError && (
             <p className="mt-1.5 text-xs text-red-600">{searchError}</p>
           )}
@@ -736,6 +734,38 @@ export default function MapView({
           )}
         </div>
       </div>
+
+      {/* 絞り込みモーダル */}
+      {showFilterModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+          onClick={() => setShowFilterModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold">絞り込み</h2>
+              <button
+                type="button"
+                onClick={() => setShowFilterModal(false)}
+                aria-label="閉じる"
+                className="text-xl leading-none text-gray-400"
+              >
+                ✕
+              </button>
+            </div>
+            <FilterBar
+              spots={spots}
+              filters={filters}
+              onChange={setFilters}
+              hiddenRanks={hiddenRanks}
+              stacked
+            />
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60">
@@ -776,6 +806,7 @@ export default function MapView({
         <AddSpotModal
           lat={addSpotAt.lat}
           lng={addSpotAt.lng}
+          spotTypeKey={spotTypeKey}
           spots={spots}
           role={role}
           onClose={() => setAddSpotAt(null)}

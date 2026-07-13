@@ -38,7 +38,7 @@ export async function GET(request: Request) {
   if (!user) return failure;
 
   const token = await createSessionToken(user.id);
-  const response = NextResponse.redirect(new URL("/map", origin));
+  const response = NextResponse.redirect(new URL("/", origin));
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",

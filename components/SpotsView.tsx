@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import {
   PREFECTURES,
+  distinctValues,
   formatVisitedOn,
+  type Rank,
+  type Role,
   type Spot,
   type Visit,
   type VisitPlan,
@@ -16,19 +19,27 @@ import FilterBar, {
 } from "@/components/FilterBar";
 import RankBadge from "@/components/RankBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
+import AddSpotModal from "@/components/AddSpotModal";
 import { getRankOrder } from "@/lib/rankStyle";
 import { resolveActiveType } from "@/lib/spotType";
 
 type SortKey = "rank" | "name" | "visited";
+type BrowseMode = "prefecture" | "rank";
+
+const STATUS_LABELS: Partial<Record<Spot["status"], string>> = {
+  private: "非公開",
+  pending: "承認待ち",
+  rejected: "却下",
+};
 
 const UNKNOWN_MUNICIPALITY = "(市区町村不明)";
 
 export default function SpotsView({
   spotTypeKey,
 }: {
-  /** 指定すると管理画面の既定(app_settings)ではなく、このキーのスポット種類を表示する */
-  spotTypeKey?: string;
-} = {}) {
+  /** 表示対象のスポット種類キー(常に /[type]/spots から渡される) */
+  spotTypeKey: string;
+}) {
   const [spots, setSpots] = useState<Spot[]>([]);
   const [hiddenRanks, setHiddenRanks] = useState<string[]>([]);
   const [hiddenLoaded, setHiddenLoaded] = useState(false);
@@ -40,6 +51,52 @@ export default function SpotsView({
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
+
+  const [role, setRole] = useState<Role | null>(null);
+  const [browseMode, setBrowseMode] = useState<BrowseMode>("prefecture");
+  const [managementSpots, setManagementSpots] = useState<Spot[]>([]);
+  const [managementLoaded, setManagementLoaded] = useState(false);
+  const [managementSearch, setManagementSearch] = useState("");
+  const [managementRank, setManagementRank] = useState<Rank | "all">("all");
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  useEffect(() => {
+    api.auth.me().then(({ data }) => setRole(data?.role ?? null));
+  }, []);
+
+  const loadManagementSpots = useCallback(async () => {
+    const { data } = await api.spots.list(undefined, {
+      type: spotTypeKey,
+      includeHidden: true,
+    });
+    setManagementSpots(data ?? []);
+    setManagementLoaded(true);
+  }, [spotTypeKey]);
+
+  useEffect(() => {
+    if (browseMode === "rank" && !managementLoaded) loadManagementSpots();
+  }, [browseMode, managementLoaded, loadManagementSpots]);
+
+  const managementAvailableRanks = useMemo(
+    () =>
+      distinctValues(managementSpots.map((s) => s.rank)).sort(
+        (a, b) => getRankOrder(a) - getRankOrder(b)
+      ),
+    [managementSpots]
+  );
+
+  const managementFiltered = useMemo(() => {
+    const q = managementSearch.trim();
+    return managementSpots.filter((s) => {
+      if (managementRank !== "all" && s.rank !== managementRank) return false;
+      if (!q) return true;
+      return (
+        s.name.includes(q) ||
+        (s.name_kana ?? "").includes(q) ||
+        s.prefecture.includes(q)
+      );
+    });
+  }, [managementSpots, managementSearch, managementRank]);
 
   const loadVisits = useCallback(async () => {
     const { data } = await api.visits.list();
@@ -59,6 +116,12 @@ export default function SpotsView({
     ]);
     setSpots([...(pub ?? []), ...(priv ?? [])]);
   }, [hiddenLoaded, spotTypeKey]);
+
+  /** スポットの詳細画面での編集・削除・承認・却下後、表示中のモードに応じて取り直す */
+  const refreshAfterSpotChange = useCallback(() => {
+    loadSpots();
+    if (managementLoaded) loadManagementSpots();
+  }, [loadSpots, managementLoaded, loadManagementSpots]);
 
   // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
   useEffect(() => {
@@ -320,29 +383,131 @@ export default function SpotsView({
           </section>
 
           <section>
-            <h1 className="mb-4 text-lg font-bold">都道府県から探す</h1>
-            <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-              {prefectureRows.map((row) => (
-                <li key={row.prefecture}>
+            <div className="mb-4 flex items-center justify-between">
+              <h1 className="text-lg font-bold">
+                {browseMode === "prefecture" ? "都道府県から探す" : "ランクから探す"}
+              </h1>
+              <div className="flex overflow-hidden rounded-lg border border-gray-300 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setBrowseMode("prefecture")}
+                  className={`px-2.5 py-1 font-medium ${
+                    browseMode === "prefecture"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-500"
+                  }`}
+                >
+                  都道府県
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBrowseMode("rank")}
+                  className={`px-2.5 py-1 font-medium ${
+                    browseMode === "rank"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-500"
+                  }`}
+                >
+                  ランク
+                </button>
+              </div>
+            </div>
+
+            {browseMode === "prefecture" ? (
+              <>
+                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  {prefectureRows.map((row) => (
+                    <li key={row.prefecture}>
+                      <button
+                        onClick={() => setSelectedPref(row.prefecture)}
+                        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+                      >
+                        <span className="font-medium">{row.prefecture}</span>
+                        <span className="text-sm text-gray-500">
+                          <span className="mr-2 text-green-600">
+                            ✓ {row.visited}
+                          </span>
+                          / {row.total} 件
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {prefectureRows.length === 0 && (
+                  <p className="text-sm text-gray-500">
+                    スポットが未登録です。地図から追加してください。
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <input
+                    type="search"
+                    value={managementSearch}
+                    onChange={(e) => setManagementSearch(e.target.value)}
+                    placeholder="名前・都道府県で検索"
+                    className="min-w-40 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                  />
                   <button
-                    onClick={() => setSelectedPref(row.prefecture)}
-                    className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+                    type="button"
+                    onClick={() => setShowAddModal(true)}
+                    className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
                   >
-                    <span className="font-medium">{row.prefecture}</span>
-                    <span className="text-sm text-gray-500">
-                      <span className="mr-2 text-green-600">
-                        ✓ {row.visited}
-                      </span>
-                      / {row.total} 件
-                    </span>
+                    + スポット追加
                   </button>
-                </li>
-              ))}
-            </ul>
-            {prefectureRows.length === 0 && (
-              <p className="text-sm text-gray-500">
-                スポットが未登録です。管理画面から追加してください。
-              </p>
+                </div>
+                {managementAvailableRanks.length > 0 && (
+                  <div className="mb-2 flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
+                    {([...managementAvailableRanks, "all"] as const).map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setManagementRank(r)}
+                        className={`flex-1 px-2 py-1.5 font-medium ${
+                          managementRank === r
+                            ? "bg-blue-600 text-white"
+                            : "text-gray-500 hover:bg-gray-50"
+                        }`}
+                      >
+                        {r === "all" ? "すべて" : r}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!managementLoaded ? (
+                  <p className="text-sm text-gray-500">読み込み中…</p>
+                ) : (
+                  <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                    {managementFiltered.map((spot) => (
+                      <li key={spot.id}>
+                        <button
+                          onClick={() => setDetailSpotId(spot.id)}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                        >
+                          <RankBadge rank={spot.rank} size="sm" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{spot.name}</p>
+                            <p className="text-xs text-gray-500">
+                              {spot.prefecture} ・ {spot.category}
+                            </p>
+                          </div>
+                          {spot.status !== "published" && (
+                            <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                              {STATUS_LABELS[spot.status]}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {managementLoaded && managementFiltered.length === 0 && (
+                  <p className="mt-2 text-sm text-gray-500">
+                    条件に合うスポットがありません。
+                  </p>
+                )}
+              </>
             )}
           </section>
         </div>
@@ -350,12 +515,25 @@ export default function SpotsView({
         {detailSpotId && (
           <SpotDetailModal
             spotId={detailSpotId}
-            spots={spots}
+            spots={browseMode === "rank" ? managementSpots : spots}
             onClose={() => setDetailSpotId(null)}
             onVisitChange={loadVisits}
-            onSpotChange={loadSpots}
-            onSpotDeleted={loadSpots}
+            onSpotChange={refreshAfterSpotChange}
+            onSpotDeleted={refreshAfterSpotChange}
             onVisitPlanChange={loadVisitPlans}
+          />
+        )}
+
+        {showAddModal && (
+          <AddSpotModal
+            spotTypeKey={spotTypeKey}
+            spots={managementSpots}
+            role={role}
+            onClose={() => setShowAddModal(false)}
+            onSaved={() => {
+              setShowAddModal(false);
+              refreshAfterSpotChange();
+            }}
           />
         )}
       </main>

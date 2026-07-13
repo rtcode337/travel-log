@@ -79,19 +79,24 @@ export const api = {
     me: () => request<{ id: string; role: Role; email: string }>("/api/auth/me"),
   },
   spots: {
-    list: (status?: string, opts?: { includeHidden?: boolean; type?: string }) => {
+    list: (status: string | undefined, opts: { includeHidden?: boolean; type: string }) => {
       const qs = new URLSearchParams();
       if (status) qs.set("status", status);
-      if (opts?.includeHidden) qs.set("includeHidden", "1");
-      if (opts?.type) qs.set("type", opts.type);
-      const q = qs.toString();
-      return request<Spot[]>(`/api/spots${q ? `?${q}` : ""}`);
+      if (opts.includeHidden) qs.set("includeHidden", "1");
+      qs.set("type", opts.type);
+      return request<Spot[]>(`/api/spots?${qs.toString()}`);
     },
     get: (id: string) => request<Spot>(`/api/spots/${id}`),
-    create: (spot: unknown) =>
-      request<Spot>("/api/spots", { method: "POST", body: JSON.stringify(spot) }),
-    createMany: (spots: unknown[]) =>
-      request<Spot[]>("/api/spots", { method: "POST", body: JSON.stringify(spots) }),
+    create: (spot: unknown, type: string) =>
+      request<Spot>(`/api/spots?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+        body: JSON.stringify(spot),
+      }),
+    createMany: (spots: unknown[], type: string) =>
+      request<Spot[]>(`/api/spots?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+        body: JSON.stringify(spots),
+      }),
     update: (id: string, spot: unknown) =>
       request<Spot>(`/api/spots/${id}`, {
         method: "PATCH",
@@ -104,8 +109,10 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ status }),
       }),
-    bulkApprove: () =>
-      request<Spot[]>("/api/spots/bulk-approve", { method: "POST" }),
+    bulkApprove: (type: string) =>
+      request<Spot[]>(`/api/spots/bulk-approve?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+      }),
   },
   geocode: {
     search: (q: string) =>
