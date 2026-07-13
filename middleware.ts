@@ -15,7 +15,7 @@ export async function middleware(request: NextRequest) {
 
   if (session && isLoginPage) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/map";
+    redirectUrl.pathname = "/";
     return NextResponse.redirect(redirectUrl);
   }
 

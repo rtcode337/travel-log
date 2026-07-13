@@ -1,6 +1,8 @@
 -- 観光地訪問記録アプリ 初期スキーマ(ローカル Postgres 版)
--- スポットは spot_types で「種類」を持ち、app_settings.active_spot_type_id で
--- アプリ全体が今どの種類を対象にするか(観光地/郵便局/御朱印...)を管理者が切り替えられる。
+-- スポットは spot_types で「種類」を持つ。地図・一覧・管理画面は必ず /[type]/... の
+-- URLキー経由で対象の種類を指定し(キー無しのURL・APIリクエストは404/400)、
+-- app_settings.active_spot_type_id は「ログイン後に自動で開く種類の既定値」としてのみ使う。
+-- 'tourist'はアプリ初期化時(このファイル)で必ず作成される既定の種類。
 
 create extension if not exists pgcrypto;
 
@@ -20,7 +22,9 @@ create table spot_types (
 );
 
 -- =============================================================
--- app_settings: アプリ全体の設定。今アクティブなスポット種類を1行だけ保持する
+-- app_settings: アプリ全体の設定。ログイン後に自動で開くスポット種類(既定値)を
+-- 1行だけ保持する。地図・一覧・APIの対象種類はURLキーで決まるため、ここでの値は
+-- ルート("/")のリダイレクト先を決めるためだけに使う。
 -- singleton列のPKトリックで常に1行に制約する(切替は常にUPDATE)
 -- =============================================================
 create table app_settings (
@@ -31,7 +35,9 @@ create table app_settings (
 
 -- =============================================================
 -- users: ログイン用アカウント
--- role: admin(承認・削除・ユーザー管理・種類切替) / moderator(スポットをpendingで追加) / user(一般)
+-- role: admin(承認・削除・ユーザー管理・スポットの種類設定) /
+--       spot_admin(ユーザー管理・種類設定を除き、スポットについてはadminと同じ権限) /
+--       moderator(スポットをpendingで追加、承認待ちは全件閲覧のみ) / user(一般)
 -- 新規アカウントは管理者が /admin から作成する(自由サインアップなし)。
 -- 最初の1アカウントのみ例外的にセットアップ画面(/login)から作成でき、自動的にadminになる。
 -- =============================================================
@@ -40,7 +46,7 @@ create table users (
   email         text not null unique,
   password_hash text,
   google_id     text unique,
-  role          text not null default 'user' check (role in ('admin', 'moderator', 'user')),
+  role          text not null default 'user' check (role in ('admin', 'spot_admin', 'moderator', 'user')),
   nickname      text, -- 口コミ等に表示する表示名(未設定ならメールアドレスを使う)
   created_at    timestamptz not null default now(),
   constraint users_has_login_method check (password_hash is not null or google_id is not null)
