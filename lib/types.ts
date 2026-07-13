@@ -95,14 +95,24 @@ export interface SpotType {
 }
 
 /**
- * admin: 承認・削除・ユーザー管理・公開スポットの直接作成ができる /
- * moderator: スポットを非公開・承認待ちで追加できる /
+ * admin: 承認・削除・ユーザー管理・スポットの種類設定・公開スポットの直接作成ができる /
+ * spot_admin: ユーザー管理・スポットの種類設定はできないが、スポットについてはadminと同じ
+ *   権限を持つ(承認待ち→公開/却下への変更、公開スポットの直接作成・編集・削除) /
+ * moderator: スポットを非公開・承認待ちで追加できる。承認待ちスポットは全員分閲覧できるが、
+ *   承認・却下はできない /
  * user: 一般ユーザー(訪問記録の閲覧・記録に加え、非公開スポットの追加ができる)
+ *
+ * スポットのstatus別の閲覧・編集ルール(roleに関わらず共通):
+ * - private: 追加した本人のみ閲覧・編集(削除含む)可能
+ * - pending/rejected: 追加した本人のみ編集可能。admin/spot_admin/moderatorは全件閲覧可能。
+ *   pending→published/rejectedへの変更はadmin/spot_adminのみ(本人以外の分も可)
+ * - published: 誰でも閲覧可能。編集(削除含む)・新規作成はadmin/spot_adminのみ
  */
-export type Role = "admin" | "moderator" | "user";
+export type Role = "admin" | "spot_admin" | "moderator" | "user";
 
 export const ROLE_LABELS: Record<Role, string> = {
   admin: "管理者",
+  spot_admin: "スポット管理者",
   moderator: "モデレーター",
   user: "一般ユーザー",
 };
@@ -111,8 +121,15 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const ALLOWED_STATUS_BY_ROLE: Record<Role, SpotStatus[]> = {
   user: ["private"],
   moderator: ["private", "pending"],
+  spot_admin: ["private", "pending", "published"],
   admin: ["private", "pending", "published"],
 };
+
+/** 承認待ち・却下スポットを(投稿者以外も含めて)全件閲覧できるロール */
+export const MODERATION_ROLES: Role[] = ["admin", "spot_admin", "moderator"];
+
+/** 公開スポットの直接作成・編集・削除と、承認待ち→公開/却下への変更ができるロール */
+export const SPOT_ADMIN_ROLES: Role[] = ["admin", "spot_admin"];
 
 export interface AppUser {
   id: string;

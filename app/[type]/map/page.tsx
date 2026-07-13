@@ -1,11 +1,17 @@
-"use client";
-
+import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { useParams } from "next/navigation";
+import { query } from "@/lib/db";
 import MapView from "@/components/MapView";
 
-export default function TypedMapPage() {
-  const { type } = useParams<{ type: string }>();
+export default async function TypedMapPage({
+  params,
+}: {
+  params: Promise<{ type: string }>;
+}) {
+  const { type } = await params;
+  const { rows } = await query("select 1 from spot_types where key = $1", [type]);
+  if (!rows[0]) notFound();
+
   return (
     <Suspense fallback={null}>
       <MapView spotTypeKey={type} />

@@ -1,42 +1,43 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { getCurrentUser, getCurrentUserId } from "@/lib/auth/current-user";
-import { ALLOWED_STATUS_BY_ROLE, type Spot } from "@/lib/types";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { ALLOWED_STATUS_BY_ROLE, MODERATION_ROLES, SPOT_ADMIN_ROLES, type Spot } from "@/lib/types";
 
 export async function GET(request: Request) {
-  const userId = await getCurrentUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
   const includeHidden = searchParams.get("includeHidden") === "1";
-  // typeを指定すると、app_settingsの既定(管理画面で選んだ種類)ではなく
-  // そのキーのスポット種類を対象にする(例: /tourist/map からの呼び出し)
+  // URL(/[type]/map・/[type]/spots)のスポット種類キーを常に必須にする
+  // (app_settingsの既定はログイン後リダイレクト先の決定にのみ使う。GET /api/spots自体では見ない)
   const typeKey = searchParams.get("type");
+  if (!typeKey) {
+    return NextResponse.json({ error: "type is required" }, { status: 400 });
+  }
 
   const { rows: typeRows } = await query<{ id: string; hidden_ranks: string[] }>(
-    typeKey
-      ? "select id, hidden_ranks from spot_types where key = $1"
-      : `select t.id, t.hidden_ranks from spot_types t
-         join app_settings s on s.active_spot_type_id = t.id`,
-    typeKey ? [typeKey] : []
+    "select id, hidden_ranks from spot_types where key = $1",
+    [typeKey]
   );
   const activeType = typeRows[0];
   if (!activeType) {
-    return NextResponse.json(
-      typeKey ? { error: "存在しない種類です。" } : { data: [] },
-      typeKey ? { status: 404 } : undefined
-    );
+    return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
   }
 
-  const conditions = [
-    "spot_type_id = $2",
-    // privateは作成者本人にのみ見える
-    "(status != 'private' or created_by = $1)",
-  ];
-  const params: unknown[] = [userId, activeType.id];
+  const conditions = ["spot_type_id = $2"];
+  const params: unknown[] = [user.id, activeType.id];
+
+  // private(非公開)は常に本人のみ。moderator以上は承認待ち・却下も全件見えるが、
+  // それ以外(一般ユーザー)は公開または本人の分しか見えない
+  conditions.push(
+    MODERATION_ROLES.includes(user.role)
+      ? "(status != 'private' or created_by = $1)"
+      : "(status = 'published' or created_by = $1)"
+  );
 
   if (status) {
     params.push(status);
@@ -72,6 +73,7 @@ interface SpotInput {
 }
 
 async function insertSpot(
+  spotTypeId: string,
   spot: SpotInput,
   source: "manual" | "user_submitted",
   status: string,
@@ -80,9 +82,10 @@ async function insertSpot(
   const { rows } = await query<Spot>(
     `insert into spots
       (spot_type_id, name, name_kana, prefecture, municipality, lat, lng, rank, category, description, official_url, source, status, created_by)
-     values ((select active_spot_type_id from app_settings), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      returning *`,
     [
+      spotTypeId,
       spot.name,
       spot.name_kana,
       spot.prefecture,
@@ -107,11 +110,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // 新規登録先のスポット種類も、参照(GET)と同じくURLのキーで必ず明示させる
+  // (app_settingsの既定には依存しない)
+  const typeKey = new URL(request.url).searchParams.get("type");
+  if (!typeKey) {
+    return NextResponse.json({ error: "type is required" }, { status: 400 });
+  }
+  const { rows: typeRows } = await query<{ id: string }>(
+    "select id from spot_types where key = $1",
+    [typeKey]
+  );
+  const spotType = typeRows[0];
+  if (!spotType) {
+    return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
+  }
+
   // 一般ユーザーは非公開スポットのみ、モデレーターは非公開/承認待ち、管理者は
   // それに加えて公開も選べる(いずれも未指定なら user以外は承認待ち、userは非公開)
   const allowedStatuses = ALLOWED_STATUS_BY_ROLE[user.role];
   const defaultStatus = user.role === "user" ? "private" : "pending";
-  const source = user.role === "admin" ? "manual" : "user_submitted";
+  const source = SPOT_ADMIN_ROLES.includes(user.role) ? "manual" : "user_submitted";
 
   const body = await request.json();
   const records: (SpotInput & { status?: string })[] = Array.isArray(body)
@@ -132,7 +150,9 @@ export async function POST(request: Request) {
   try {
     const inserted = [];
     for (let i = 0; i < records.length; i++) {
-      inserted.push(await insertSpot(records[i], source, statuses[i], user.id));
+      inserted.push(
+        await insertSpot(spotType.id, records[i], source, statuses[i], user.id)
+      );
     }
     return NextResponse.json({ data: Array.isArray(body) ? inserted : inserted[0] });
   } catch (err) {

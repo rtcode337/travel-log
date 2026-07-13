@@ -51,7 +51,7 @@ function LoginForm() {
       );
       return;
     }
-    router.push("/map");
+    router.push("/");
     router.refresh();
   };
 

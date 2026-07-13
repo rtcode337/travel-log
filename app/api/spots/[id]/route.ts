@@ -1,42 +1,55 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { getCurrentUser, getCurrentUserId } from "@/lib/auth/current-user";
-import type { Spot } from "@/lib/types";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { MODERATION_ROLES, SPOT_ADMIN_ROLES, type Role, type Spot } from "@/lib/types";
+
+/**
+ * 閲覧できるのは「公開スポット」「本人が追加したスポット(status問わず)」、
+ * 加えてmoderator以上は承認待ち・却下も本人以外の分を含めて閲覧できる。
+ * 非公開は常に本人のみ(role問わず)。
+ */
+function canView(user: { id: string; role: Role }, spot: Spot): boolean {
+  if (spot.status === "published") return true;
+  if (spot.created_by === user.id) return true;
+  if (spot.status === "private") return false;
+  return MODERATION_ROLES.includes(user.role);
+}
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getCurrentUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const { rows } = await query<Spot>("select * from spots where id = $1", [id]);
   const spot = rows[0];
-  // privateは作成者本人にのみ見える
-  if (spot && spot.status === "private" && spot.created_by !== userId) {
+  if (spot && !canView(user, spot)) {
     return NextResponse.json({ data: null });
   }
   return NextResponse.json({ data: spot ?? null });
 }
 
 /**
- * 編集・削除できるのは admin、または「非公開スポットの作成者本人」のみ。
- * 承認待ち・公開になった時点で、作成者本人でも編集・削除はできなくなる。
+ * 編集・削除できるのは、
+ * - 公開スポット: admin/spot_adminのみ(投稿者本人かどうかは問わない)
+ * - それ以外(非公開・承認待ち・却下): 追加した本人のみ(roleは問わない)
  */
 async function canEditOrDelete(
-  user: { id: string; role: string },
+  user: { id: string; role: Role },
   id: string
 ): Promise<boolean> {
-  if (user.role === "admin") return true;
   const { rows } = await query<{ status: string; created_by: string | null }>(
     "select status, created_by from spots where id = $1",
     [id]
   );
   const spot = rows[0];
-  return !!spot && spot.status === "private" && spot.created_by === user.id;
+  if (!spot) return false;
+  if (spot.status === "published") return SPOT_ADMIN_ROLES.includes(user.role);
+  return spot.created_by === user.id;
 }
 
 export async function PATCH(

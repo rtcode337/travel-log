@@ -3,6 +3,11 @@ import { query } from "@/lib/db";
 import { getCurrentUser, getCurrentUserId } from "@/lib/auth/current-user";
 import type { SpotType } from "@/lib/types";
 
+/**
+ * ここで返す/更新する値は「ログイン後に自動で開くスポット種類の既定値」のみ。
+ * 地図・一覧・スポットAPIの対象種類はURLキー(/[type]/...)で必ず指定するため、
+ * この値では絞り込まない。
+ */
 export async function GET() {
   const userId = await getCurrentUserId();
   if (!userId) {

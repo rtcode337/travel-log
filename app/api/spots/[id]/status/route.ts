@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import type { Spot } from "@/lib/types";
+import { SPOT_ADMIN_ROLES, type Spot } from "@/lib/types";
 
 const ALLOWED_STATUSES = ["published", "rejected", "pending"] as const;
 
@@ -13,7 +13,7 @@ export async function PATCH(
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (user.role !== "admin") {
+  if (!SPOT_ADMIN_ROLES.includes(user.role)) {
     return NextResponse.json({ error: "権限がありません。" }, { status: 403 });
   }
 

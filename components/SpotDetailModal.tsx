@@ -7,7 +7,9 @@ import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import {
   formatVisitedOn,
   REVIEWS_PAGE_SIZE,
+  SPOT_ADMIN_ROLES,
   type PublicReview,
+  type Role,
   type Spot,
   type SpotType,
   type Visit,
@@ -60,8 +62,11 @@ export default function SpotDetailModal({
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
+  const [myRole, setMyRole] = useState<Role | null>(null);
   const [planned, setPlanned] = useState(false);
   const [planUpdating, setPlanUpdating] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [moderating, setModerating] = useState(false);
 
   const load = useCallback(async () => {
     const [
@@ -88,7 +93,10 @@ export default function SpotDetailModal({
   }, [load]);
 
   useEffect(() => {
-    api.auth.me().then(({ data }) => setMyId(data?.id ?? null));
+    api.auth.me().then(({ data }) => {
+      setMyId(data?.id ?? null);
+      setMyRole(data?.role ?? null);
+    });
   }, []);
 
   const toggleVisitPlan = async () => {
@@ -102,8 +110,16 @@ export default function SpotDetailModal({
     onVisitPlanChange?.();
   };
 
-  // 非公開スポットの作成者本人だけが編集・削除できる
-  const canEdit = !!spot && spot.status === "private" && spot.created_by === myId;
+  const isSpotAdmin = !!myRole && SPOT_ADMIN_ROLES.includes(myRole);
+
+  // 編集・削除できるのは、公開スポットはspot_admin/admin、それ以外(非公開・承認待ち・
+  // 却下)は追加した本人のみ(APIのcanEditOrDeleteと同じルール)
+  const canManage =
+    !!spot &&
+    (spot.status === "published" ? isSpotAdmin : spot.created_by === myId);
+
+  // 承認待ち→公開/却下の変更はspot_admin/adminのみ(投稿者本人かどうかは問わない)
+  const canModerate = !!spot && spot.status === "pending" && isSpotAdmin;
 
   // 非公開スポットは口コミの表示・投稿ともに不可
   const reviewsEnabled = useMemo(
@@ -139,6 +155,35 @@ export default function SpotDetailModal({
     onVisitChange?.();
   };
 
+  const handleDeleteSpot = async () => {
+    if (!spot) return;
+    if (!confirm(`「${spot.name}」を削除しますか?(訪問記録も消えます)`)) return;
+    setActionError(null);
+    const { error } = await api.spots.delete(spot.id);
+    if (error) {
+      setActionError("削除に失敗しました: " + error.message);
+      return;
+    }
+    onSpotDeleted?.();
+    onClose();
+  };
+
+  const handleModerate = async (status: "published" | "rejected") => {
+    if (!spot) return;
+    setModerating(true);
+    setActionError(null);
+    const { error } = await api.spots.setStatus(spot.id, status);
+    setModerating(false);
+    if (error) {
+      setActionError(
+        (status === "published" ? "承認" : "却下") + "に失敗しました: " + error.message
+      );
+      return;
+    }
+    await load();
+    onSpotChange?.();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
@@ -165,16 +210,58 @@ export default function SpotDetailModal({
                         非公開
                       </span>
                     )}
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => setShowEditForm(true)}
-                        className="ml-2 text-xs font-normal text-blue-600 underline"
-                      >
-                        編集
-                      </button>
+                    {spot.status === "pending" && (
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-700">
+                        承認待ち
+                      </span>
+                    )}
+                    {spot.status === "rejected" && (
+                      <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-xs font-normal text-red-600">
+                        却下
+                      </span>
+                    )}
+                    {canManage && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setShowEditForm(true)}
+                          className="ml-2 text-xs font-normal text-blue-600 underline"
+                        >
+                          編集
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDeleteSpot}
+                          className="ml-2 text-xs font-normal text-red-500 underline"
+                        >
+                          削除
+                        </button>
+                      </>
+                    )}
+                    {canModerate && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={moderating}
+                          onClick={() => handleModerate("published")}
+                          className="ml-2 text-xs font-normal text-green-600 underline disabled:opacity-50"
+                        >
+                          承認
+                        </button>
+                        <button
+                          type="button"
+                          disabled={moderating}
+                          onClick={() => handleModerate("rejected")}
+                          className="ml-2 text-xs font-normal text-red-500 underline disabled:opacity-50"
+                        >
+                          却下
+                        </button>
+                      </>
                     )}
                   </h2>
+                  {actionError && (
+                    <p className="mt-1 text-xs text-red-600">{actionError}</p>
+                  )}
                   <p className="text-xs text-gray-500">
                     {spot.prefecture}
                     {spot.municipality && ` ${spot.municipality}`} ・{" "}

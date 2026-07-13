@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { query } from "@/lib/db";
-import SpotsView from "@/components/SpotsView";
+import AdminView from "@/components/AdminView";
 
-export default async function TypedSpotsPage({
+export default async function TypedAdminPage({
   params,
 }: {
   params: Promise<{ type: string }>;
@@ -11,5 +11,5 @@ export default async function TypedSpotsPage({
   const { rows } = await query("select 1 from spot_types where key = $1", [type]);
   if (!rows[0]) notFound();
 
-  return <SpotsView spotTypeKey={type} />;
+  return <AdminView typeKey={type} />;
 }
