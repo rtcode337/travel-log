@@ -42,6 +42,9 @@ export async function PATCH(request: Request) {
   if (!typeRows[0]) {
     return NextResponse.json({ error: "存在しない種類です。" }, { status: 400 });
   }
+  if (!typeRows[0].enabled) {
+    return NextResponse.json({ error: "無効化されている種類は既定にできません。" }, { status: 400 });
+  }
 
   await query(
     "update app_settings set active_spot_type_id = $1, updated_at = now()",

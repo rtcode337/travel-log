@@ -89,6 +89,8 @@ export interface SpotType {
   key: string;
   label: string;
   reviews_enabled: boolean;
+  /** falseの場合、/[key]/map・/[key]/spots・アカウントページのリンクは404/非表示になる(/[key]/adminは再有効化のため常にアクセス可) */
+  enabled: boolean;
   created_at: string;
 }
 
