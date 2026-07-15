@@ -13,7 +13,6 @@ import {
 } from "@/lib/mapStyle";
 import type { Role, Spot } from "@/lib/types";
 import { getRankPinStyle, getRankPinTextColor } from "@/lib/rankStyle";
-import { resolveActiveType } from "@/lib/spotType";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -310,8 +309,6 @@ export default function MapView({
   const locationDotRef = useRef<maplibregl.Marker | null>(null);
 
   const [spots, setSpots] = useState<Spot[]>([]);
-  const [hiddenRanks, setHiddenRanks] = useState<string[]>([]);
-  const [hiddenLoaded, setHiddenLoaded] = useState(false);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
@@ -549,41 +546,20 @@ export default function MapView({
 
   const loadSpots = useCallback(async () => {
     const [{ data: pub }, { data: priv }] = await Promise.all([
-      api.spots.list("published", { includeHidden: hiddenLoaded, type: spotTypeKey }),
-      api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
+      api.spots.list("published", { type: spotTypeKey }),
+      api.spots.list("private", { type: spotTypeKey }),
     ]);
     setSpots([...(pub ?? []), ...(priv ?? [])]);
-  }, [hiddenLoaded, spotTypeKey]);
-
-  // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
-  useEffect(() => {
-    (async () => {
-      const [{ data: spotsData }, { data: privateData }, activeType] =
-        await Promise.all([
-          api.spots.list("published", { type: spotTypeKey }),
-          // 自分の非公開スポットは常に(hidden_ranks設定に関わらず)表示する
-          api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
-          resolveActiveType(spotTypeKey),
-          loadVisits(),
-        ]);
-      setSpots([...(spotsData ?? []), ...(privateData ?? [])]);
-      setHiddenRanks(activeType?.hidden_ranks ?? []);
-      setLoading(false);
-    })();
   }, [spotTypeKey]);
 
-  // ランクフィルタで非表示ランクが明示的に選ばれたら、まだ取得していなければ全件取り直す
+  // データ取得
   useEffect(() => {
-    if (hiddenLoaded || hiddenRanks.length === 0) return;
-    if (!filters.ranks.some((r) => hiddenRanks.includes(r))) return;
-    setHiddenLoaded(true);
-    Promise.all([
-      api.spots.list("published", { includeHidden: true, type: spotTypeKey }),
-      api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
-    ]).then(([{ data: pub }, { data: priv }]) => {
-      setSpots([...(pub ?? []), ...(priv ?? [])]);
-    });
-  }, [filters.ranks, hiddenRanks, hiddenLoaded, spotTypeKey]);
+    (async () => {
+      await Promise.all([loadSpots(), loadVisits()]);
+      setLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spotTypeKey]);
 
   // /map?spot=<id> で開かれたら、そのスポットの位置にズームする
   // (詳細モーダルは開かない: モーダルがピンの真上に重なりどこが開かれたか分からなくなるため)
@@ -617,13 +593,7 @@ export default function MapView({
     if (!map) return;
 
     const filteredSpots = spots.filter((spot) =>
-      passesFilters(
-        filters,
-        spot.rank,
-        spot.category,
-        visitedIds.has(spot.id),
-        hiddenRanks
-      )
+      passesFilters(filters, spot.rank, spot.category, visitedIds.has(spot.id))
     );
     const publicSpots = filteredSpots.filter((s) => s.status !== "private");
     const myPrivateSpots = filteredSpots.filter((s) => s.status === "private");
@@ -654,7 +624,7 @@ export default function MapView({
         .addTo(map);
       markersRef.current.set(spot.id, marker);
     }
-  }, [spots, visitedIds, filters, hiddenRanks]);
+  }, [spots, visitedIds, filters]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
   // (通常の取得はpublishedのみなので、それ以外は一覧に反映されるまでこれで見せる)
@@ -760,7 +730,6 @@ export default function MapView({
               spots={spots}
               filters={filters}
               onChange={setFilters}
-              hiddenRanks={hiddenRanks}
               stacked
             />
           </div>
