@@ -175,6 +175,18 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     loadSpotTypes();
   };
 
+  const handleToggleEnabled = async (type: SpotType) => {
+    const { error } = await api.spotTypes.setEnabled(type.id, !type.enabled);
+    if (error) {
+      setTypeMessage("有効/無効の変更に失敗しました: " + error.message);
+      return;
+    }
+    setTypeMessage(
+      `「${type.label}」を${!type.enabled ? "有効" : "無効"}にしました。`
+    );
+    loadSpotTypes();
+  };
+
   const handleSetDefaultType = async (type: SpotType) => {
     const { error } = await api.appSettings.setActive(type.id);
     if (error) {
@@ -431,6 +443,17 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                     />
                     <span className="flex-1 text-sm">{t.label}</span>
                     <span className="text-xs text-gray-400">{t.key}</span>
+                    <label
+                      className="flex items-center gap-1 text-xs text-gray-500"
+                      title="OFFにすると地図/一覧/アカウントページのリンクが消え、直接アクセスも404になる"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={t.enabled}
+                        onChange={() => handleToggleEnabled(t)}
+                      />
+                      有効
+                    </label>
                     {t.key === typeKey ? (
                       <span className="text-xs font-medium text-blue-600">
                         管理中
@@ -500,7 +523,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
             </section>
           )}
 
-          <section>
+          <section className="rounded-xl border border-gray-200 bg-white p-3">
             <h2 className="mb-2 text-base font-bold">
               CSVインポート({currentTypeLabel})
             </h2>

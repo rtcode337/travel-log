@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { query } from "@/lib/db";
-import SpotsView from "@/components/SpotsView";
+import AccountView from "@/components/AccountView";
 
-export default async function TypedSpotsPage({
+export default async function TypedAccountPage({
   params,
 }: {
   params: Promise<{ type: string }>;
@@ -14,5 +14,5 @@ export default async function TypedSpotsPage({
   );
   if (!rows[0]) notFound();
 
-  return <SpotsView spotTypeKey={type} />;
+  return <AccountView typeKey={type} />;
 }

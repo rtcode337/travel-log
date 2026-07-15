@@ -9,7 +9,10 @@ export default async function TypedMapPage({
   params: Promise<{ type: string }>;
 }) {
   const { type } = await params;
-  const { rows } = await query("select 1 from spot_types where key = $1", [type]);
+  const { rows } = await query(
+    "select 1 from spot_types where key = $1 and enabled",
+    [type]
+  );
   if (!rows[0]) notFound();
 
   return (

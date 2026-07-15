@@ -14,6 +14,7 @@ create table spot_types (
   key             text not null unique,   -- 機械可読キー(例: 'tourist', 'post_office', 'goshuin')
   label           text not null,          -- 表示名(例: '観光地', '郵便局', '御朱印')
   reviews_enabled boolean not null default true, -- この種類のスポットで口コミ機能を使うか
+  enabled         boolean not null default true, -- falseなら/[key]/map・/[key]/spots・アカウントページのリンクを404/非表示にする(/[key]/adminは再有効化のため常にアクセス可)
   created_at      timestamptz not null default now()
 );
 
