@@ -135,6 +135,11 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ reviews_enabled: reviewsEnabled }),
       }),
+    setEnabled: (id: string, enabled: boolean) =>
+      request<SpotType>(`/api/spot-types/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      }),
   },
   appSettings: {
     get: () => request<SpotType>("/api/app-settings"),
