@@ -89,8 +89,6 @@ export interface SpotType {
   key: string;
   label: string;
   reviews_enabled: boolean;
-  /** 既定では取得・表示しないランク(GET /api/spotsはincludeHidden指定がない限りこれらを返さない) */
-  hidden_ranks: string[];
   created_at: string;
 }
 

@@ -21,22 +21,15 @@ export const DEFAULT_FILTERS: SpotFilters = {
 
 /**
  * フィルタを通過するか判定する(地図・リスト共通ロジック)。
- * hiddenRanks(現在アクティブなスポット種類のspot_types.hidden_ranks)に含まれるランクは、
- * ランクフィルタで明示的に選んだときだけ表示する(既定では除外)。
- * サーバー側(GET /api/spots)でも同じ既定除外をしているので、hiddenRanksを明示的に
- * 選んでいない限りそもそも該当スポットはfetchされない想定だが、二重に防御している。
  */
 export function passesFilters(
   filters: SpotFilters,
   rank: Rank | null,
   category: string | null,
-  isVisited: boolean,
-  hiddenRanks: string[] = []
+  isVisited: boolean
 ): boolean {
   if (filters.ranks.length > 0) {
     if (rank === null || !filters.ranks.includes(rank)) return false;
-  } else if (rank !== null && hiddenRanks.includes(rank)) {
-    return false;
   }
   if (filters.visited === "visited" && !isVisited) return false;
   if (filters.visited === "unvisited" && isVisited) return false;
@@ -54,25 +47,21 @@ export default function FilterBar({
   spots,
   filters,
   onChange,
-  hiddenRanks = [],
   stacked = false,
 }: {
   /** 現在アクティブなスポット種類の実データから、ランク・カテゴリの選択肢を動的に作る */
   spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;
-  /** アクティブなスポット種類のspot_types.hidden_ranks。未取得でもボタンは出せるよう
-   * distinctValues(spots)とは別に渡す */
-  hiddenRanks?: string[];
   /** trueならモーダル内表示向けに、ラベル付きで縦一列・幅いっぱいに並べる */
   stacked?: boolean;
 }) {
   const availableRanks = useMemo(
     () =>
-      distinctValues([...spots.map((s) => s.rank), ...hiddenRanks]).sort(
+      distinctValues(spots.map((s) => s.rank)).sort(
         (a, b) => getRankOrder(a) - getRankOrder(b)
       ),
-    [spots, hiddenRanks]
+    [spots]
   );
   const availableCategories = useMemo(
     () => distinctValues(spots.map((s) => s.category)),

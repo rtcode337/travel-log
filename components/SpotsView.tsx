@@ -21,7 +21,6 @@ import RankBadge from "@/components/RankBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import { getRankOrder } from "@/lib/rankStyle";
-import { resolveActiveType } from "@/lib/spotType";
 
 type SortKey = "rank" | "name" | "visited";
 type BrowseMode = "prefecture" | "rank";
@@ -41,8 +40,6 @@ export default function SpotsView({
   spotTypeKey: string;
 }) {
   const [spots, setSpots] = useState<Spot[]>([]);
-  const [hiddenRanks, setHiddenRanks] = useState<string[]>([]);
-  const [hiddenLoaded, setHiddenLoaded] = useState(false);
   const [visits, setVisits] = useState<Visit[]>([]);
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,10 +62,7 @@ export default function SpotsView({
   }, []);
 
   const loadManagementSpots = useCallback(async () => {
-    const { data } = await api.spots.list(undefined, {
-      type: spotTypeKey,
-      includeHidden: true,
-    });
+    const { data } = await api.spots.list(undefined, { type: spotTypeKey });
     setManagementSpots(data ?? []);
     setManagementLoaded(true);
   }, [spotTypeKey]);
@@ -110,12 +104,11 @@ export default function SpotsView({
 
   const loadSpots = useCallback(async () => {
     const [{ data: pub }, { data: priv }] = await Promise.all([
-      api.spots.list("published", { includeHidden: hiddenLoaded, type: spotTypeKey }),
-      // 自分の非公開スポットは常に(hidden_ranks設定に関わらず)表示する
-      api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
+      api.spots.list("published", { type: spotTypeKey }),
+      api.spots.list("private", { type: spotTypeKey }),
     ]);
     setSpots([...(pub ?? []), ...(priv ?? [])]);
-  }, [hiddenLoaded, spotTypeKey]);
+  }, [spotTypeKey]);
 
   /** スポットの詳細画面での編集・削除・承認・却下後、表示中のモードに応じて取り直す */
   const refreshAfterSpotChange = useCallback(() => {
@@ -123,35 +116,13 @@ export default function SpotsView({
     if (managementLoaded) loadManagementSpots();
   }, [loadSpots, managementLoaded, loadManagementSpots]);
 
-  // データ取得(既定では hidden_ranks に該当するスポットは取得しない)
+  // データ取得
   useEffect(() => {
     (async () => {
-      const [{ data: spotsData }, { data: privateData }, activeType] =
-        await Promise.all([
-          api.spots.list("published", { type: spotTypeKey }),
-          api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
-          resolveActiveType(spotTypeKey),
-          loadVisits(),
-          loadVisitPlans(),
-        ]);
-      setSpots([...(spotsData ?? []), ...(privateData ?? [])]);
-      setHiddenRanks(activeType?.hidden_ranks ?? []);
+      await Promise.all([loadSpots(), loadVisits(), loadVisitPlans()]);
       setLoading(false);
     })();
-  }, [loadVisits, loadVisitPlans, spotTypeKey]);
-
-  // ランクフィルタで非表示ランクが明示的に選ばれたら、まだ取得していなければ全件取り直す
-  useEffect(() => {
-    if (hiddenLoaded || hiddenRanks.length === 0) return;
-    if (!filters.ranks.some((r) => hiddenRanks.includes(r))) return;
-    setHiddenLoaded(true);
-    Promise.all([
-      api.spots.list("published", { includeHidden: true, type: spotTypeKey }),
-      api.spots.list("private", { includeHidden: true, type: spotTypeKey }),
-    ]).then(([{ data: pub }, { data: priv }]) => {
-      setSpots([...(pub ?? []), ...(priv ?? [])]);
-    });
-  }, [filters.ranks, hiddenRanks, hiddenLoaded, spotTypeKey]);
+  }, [loadSpots, loadVisits, loadVisitPlans, spotTypeKey]);
 
   const spotById = useMemo(() => {
     const m = new Map<string, Spot>();
@@ -244,13 +215,7 @@ export default function SpotsView({
     const list = spots.filter((s) => {
       if (s.prefecture !== selectedPref) return false;
       if ((s.municipality ?? UNKNOWN_MUNICIPALITY) !== selectedMuni) return false;
-      return passesFilters(
-        filters,
-        s.rank,
-        s.category,
-        visitedIds.has(s.id),
-        hiddenRanks
-      );
+      return passesFilters(filters, s.rank, s.category, visitedIds.has(s.id));
     });
     list.sort((a, b) => {
       switch (sortKey) {
@@ -280,7 +245,6 @@ export default function SpotsView({
     visitedIds,
     sortKey,
     latestVisitDate,
-    hiddenRanks,
   ]);
 
   if (loading) {
@@ -595,7 +559,6 @@ export default function SpotsView({
           )}
           filters={filters}
           onChange={setFilters}
-          hiddenRanks={hiddenRanks}
         />
         <select
           value={sortKey}

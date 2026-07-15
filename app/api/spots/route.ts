@@ -11,7 +11,6 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
-  const includeHidden = searchParams.get("includeHidden") === "1";
   // URL(/[type]/map・/[type]/spots)のスポット種類キーを常に必須にする
   // (app_settingsの既定はログイン後リダイレクト先の決定にのみ使う。GET /api/spots自体では見ない)
   const typeKey = searchParams.get("type");
@@ -19,8 +18,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
   }
 
-  const { rows: typeRows } = await query<{ id: string; hidden_ranks: string[] }>(
-    "select id, hidden_ranks from spot_types where key = $1",
+  const { rows: typeRows } = await query<{ id: string }>(
+    "select id from spot_types where key = $1",
     [typeKey]
   );
   const activeType = typeRows[0];
@@ -42,13 +41,6 @@ export async function GET(request: Request) {
   if (status) {
     params.push(status);
     conditions.push(`status = $${params.length}`);
-  }
-
-  if (!includeHidden && activeType.hidden_ranks.length > 0) {
-    // hidden_ranksに含まれるランクは、明示的にincludeHidden=1が指定されない
-    // 限り返さない(大量の未整理データの遅延ロード用)
-    params.push(activeType.hidden_ranks);
-    conditions.push(`(rank is null or not (rank = any($${params.length})))`);
   }
 
   const { rows } = await query<Spot>(

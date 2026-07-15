@@ -14,10 +14,6 @@ create table spot_types (
   key             text not null unique,   -- 機械可読キー(例: 'tourist', 'post_office', 'goshuin')
   label           text not null,          -- 表示名(例: '観光地', '郵便局', '御朱印')
   reviews_enabled boolean not null default true, -- この種類のスポットで口コミ機能を使うか
-  -- ランクごとの既定非表示設定。ここに含まれるrank値のスポットは、GET /api/spots で
-  -- includeHidden指定がない限り返さない(地図・一覧では未取得=非表示)。
-  -- ランクフィルタで明示的に選んだときだけ includeHidden 付きで取得する(遅延ロード)。
-  hidden_ranks    text[] not null default '{}',
   created_at      timestamptz not null default now()
 );
 
@@ -154,13 +150,11 @@ create index reviews_spot_id_idx on reviews (spot_id);
 
 -- =============================================================
 -- 参考データ: スポットの種類3つ(観光地のみデータあり。郵便局・御朱印は今後用の空の種類)
--- 御朱印はOverpass一括取得のうちWikipedia情報がなく未整理なものをrank='Z'として大量に
--- 抱えているため、既定では非表示(hidden_ranks)にしている
 -- =============================================================
-insert into spot_types (key, label, reviews_enabled, hidden_ranks) values
-  ('tourist', '観光地', true, '{}'),
-  ('post_office', '郵便局', false, '{}'),
-  ('goshuin', '御朱印', true, '{Z}');
+insert into spot_types (key, label, reviews_enabled) values
+  ('tourist', '観光地', true),
+  ('post_office', '郵便局', false),
+  ('goshuin', '御朱印', true);
 
 insert into app_settings (active_spot_type_id)
   select id from spot_types where key = 'tourist';
