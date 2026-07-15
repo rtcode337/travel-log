@@ -79,10 +79,9 @@ export const api = {
     me: () => request<{ id: string; role: Role; email: string }>("/api/auth/me"),
   },
   spots: {
-    list: (status: string | undefined, opts: { includeHidden?: boolean; type: string }) => {
+    list: (status: string | undefined, opts: { type: string }) => {
       const qs = new URLSearchParams();
       if (status) qs.set("status", status);
-      if (opts.includeHidden) qs.set("includeHidden", "1");
       qs.set("type", opts.type);
       return request<Spot[]>(`/api/spots?${qs.toString()}`);
     },
@@ -135,11 +134,6 @@ export const api = {
       request<SpotType>(`/api/spot-types/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ reviews_enabled: reviewsEnabled }),
-      }),
-    setHiddenRanks: (id: string, hiddenRanks: string[]) =>
-      request<SpotType>(`/api/spot-types/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ hidden_ranks: hiddenRanks }),
       }),
   },
   appSettings: {

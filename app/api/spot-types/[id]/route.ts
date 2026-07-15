@@ -16,7 +16,7 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const { reviews_enabled, hidden_ranks } = await request.json();
+  const { reviews_enabled } = await request.json();
 
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -27,17 +27,6 @@ export async function PATCH(
     }
     values.push(reviews_enabled);
     sets.push(`reviews_enabled = $${values.length}`);
-  }
-
-  if (hidden_ranks !== undefined) {
-    if (
-      !Array.isArray(hidden_ranks) ||
-      !hidden_ranks.every((r) => typeof r === "string")
-    ) {
-      return NextResponse.json({ error: "invalid request" }, { status: 400 });
-    }
-    values.push(hidden_ranks);
-    sets.push(`hidden_ranks = $${values.length}`);
   }
 
   if (sets.length === 0) {

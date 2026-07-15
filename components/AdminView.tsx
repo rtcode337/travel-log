@@ -8,7 +8,6 @@ import { parseCsv } from "@/lib/csv";
 import {
   ROLE_LABELS,
   SPOT_ADMIN_ROLES,
-  distinctValues,
   type AppUser,
   type Role,
   type Spot,
@@ -57,10 +56,11 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [newTypeLabel, setNewTypeLabel] = useState("");
   const [typeMessage, setTypeMessage] = useState<string | null>(null);
 
-  const currentTypeLabel = useMemo(
-    () => spotTypes.find((t) => t.key === typeKey)?.label ?? typeKey,
+  const currentType = useMemo(
+    () => spotTypes.find((t) => t.key === typeKey) ?? null,
     [spotTypes, typeKey]
   );
+  const currentTypeLabel = currentType?.label ?? typeKey;
 
   useEffect(() => {
     api.auth.me().then(({ data }) => {
@@ -76,10 +76,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   }, [router, typeKey]);
 
   const load = useCallback(async () => {
-    const { data } = await api.spots.list(undefined, {
-      type: typeKey,
-      includeHidden: true,
-    });
+    const { data } = await api.spots.list(undefined, { type: typeKey });
     setSpots(data ?? []);
   }, [typeKey]);
 
@@ -178,23 +175,6 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     loadSpotTypes();
   };
 
-  const handleToggleHiddenRank = async (type: SpotType, rank: string) => {
-    const nextHidden = type.hidden_ranks.includes(rank)
-      ? type.hidden_ranks.filter((r) => r !== rank)
-      : [...type.hidden_ranks, rank];
-    const { error } = await api.spotTypes.setHiddenRanks(type.id, nextHidden);
-    if (error) {
-      setTypeMessage("非表示ランク設定の変更に失敗しました: " + error.message);
-      return;
-    }
-    setTypeMessage(
-      `「${type.label}」のランク${rank}を既定${
-        nextHidden.includes(rank) ? "非表示" : "表示"
-      }にしました。`
-    );
-    loadSpotTypes();
-  };
-
   const handleSetDefaultType = async (type: SpotType) => {
     const { error } = await api.appSettings.setActive(type.id);
     if (error) {
@@ -221,11 +201,6 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     setNewTypeLabel("");
     loadSpotTypes();
   };
-
-  const availableRanks = useMemo(
-    () => distinctValues(spots.map((s) => s.rank)),
-    [spots]
-  );
 
   const handleCsvFile = async (file: File) => {
     setImporting(true);
@@ -299,108 +274,6 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
       <h1 className="mb-4 text-lg font-bold">管理画面</h1>
 
       {/* スポットの種類(ログイン後の既定・種類マスタ) */}
-      {isAdmin && (
-        <section className="mb-6 rounded-xl border border-gray-200 bg-white p-3">
-          <h2 className="mb-2 text-base font-bold">スポットの種類</h2>
-          <p className="mb-3 text-xs text-gray-500">
-            ここでの選択は、ログイン後に自動で開く地図/リストの既定を切り替えるだけ
-            (全ユーザー共通)。スポットの追加・編集・承認は、このページのURL(現在は
-            「{currentTypeLabel}」)で対象の種類が決まる — 他の種類を扱いたい場合は
-            種類ごとの「管理する」リンクから移動する。
-          </p>
-          {typeMessage && (
-            <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-              {typeMessage}
-            </p>
-          )}
-          <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-            {spotTypes.map((t) => (
-              <li key={t.id} className="px-3 py-2">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name="default-spot-type"
-                    checked={defaultType?.id === t.id}
-                    onChange={() => handleSetDefaultType(t)}
-                    title="ログイン後に自動で開く既定にする"
-                  />
-                  <span className="flex-1 text-sm">{t.label}</span>
-                  <span className="text-xs text-gray-400">{t.key}</span>
-                  {t.key === typeKey ? (
-                    <span className="text-xs font-medium text-blue-600">
-                      管理中
-                    </span>
-                  ) : (
-                    <Link
-                      href={`/${t.key}/admin`}
-                      className="text-xs text-blue-600 underline"
-                    >
-                      この種類を管理
-                    </Link>
-                  )}
-                  <label className="flex items-center gap-1 text-xs text-gray-500">
-                    <input
-                      type="checkbox"
-                      checked={t.reviews_enabled}
-                      onChange={() => handleToggleReviewsEnabled(t)}
-                    />
-                    口コミ
-                  </label>
-                </div>
-                {t.key === typeKey && availableRanks.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-6 text-xs text-gray-500">
-                    <span>既定で非表示にするランク(地図・一覧では未取得。フィルタで選ぶと取得):</span>
-                    {availableRanks.map((r) => (
-                      <label key={r} className="flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={t.hidden_ranks.includes(r)}
-                          onChange={() => handleToggleHiddenRank(t, r)}
-                        />
-                        {r}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-          <form
-            onSubmit={handleCreateType}
-            className="flex flex-wrap items-end gap-2"
-          >
-            <div>
-              <label className="mb-1 block text-xs font-medium">
-                キー(英数字)
-              </label>
-              <input
-                required
-                value={newTypeKey}
-                onChange={(e) => setNewTypeKey(e.target.value)}
-                placeholder="tourist"
-                className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium">表示名</label>
-              <input
-                required
-                value={newTypeLabel}
-                onChange={(e) => setNewTypeLabel(e.target.value)}
-                placeholder="観光地"
-                className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-              />
-            </div>
-            <button
-              type="submit"
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
-            >
-              + 種類を追加
-            </button>
-          </form>
-        </section>
-      )}
-
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
         {/* 左カラム: ユーザー管理(admin専用) */}
         {isAdmin && (
@@ -530,51 +403,148 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
           </section>
         )}
 
-        {/* 右カラム(またはadminでない場合は唯一のカラム): CSV一括作成 */}
-        <section>
-          <h2 className="mb-2 text-base font-bold">
-            CSVインポート({currentTypeLabel})
-          </h2>
-          <p className="mb-3 text-xs text-gray-500">
-            個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
-            ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは承認待ちになる)。
-          </p>
-
-          {message && (
-            <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-              {message}
-            </p>
+        {/* 右カラム(またはadminでない場合は唯一のカラム): スポットの管理 */}
+        <div className="flex flex-col gap-6">
+          {isAdmin && (
+            <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <h2 className="mb-2 text-base font-bold">スポットの種類</h2>
+              <p className="mb-3 text-xs text-gray-500">
+                ここでの選択は、ログイン後に自動で開く地図/リストの既定を切り替えるだけ
+                (全ユーザー共通)。スポットの追加・編集・承認は、このページのURL(現在は
+                「{currentTypeLabel}」)で対象の種類が決まる — 他の種類を扱いたい場合は
+                種類ごとの「この種類を管理」リンクから移動する。
+              </p>
+              {typeMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                  {typeMessage}
+                </p>
+              )}
+              <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                {spotTypes.map((t) => (
+                  <li key={t.id} className="flex items-center gap-3 px-3 py-2">
+                    <input
+                      type="radio"
+                      name="default-spot-type"
+                      checked={defaultType?.id === t.id}
+                      onChange={() => handleSetDefaultType(t)}
+                      title="ログイン後に自動で開く既定にする"
+                    />
+                    <span className="flex-1 text-sm">{t.label}</span>
+                    <span className="text-xs text-gray-400">{t.key}</span>
+                    {t.key === typeKey ? (
+                      <span className="text-xs font-medium text-blue-600">
+                        管理中
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/${t.key}/admin`}
+                        className="text-xs text-blue-600 underline"
+                      >
+                        この種類を管理
+                      </Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <form
+                onSubmit={handleCreateType}
+                className="flex flex-wrap items-end gap-2"
+              >
+                <div>
+                  <label className="mb-1 block text-xs font-medium">
+                    キー(英数字)
+                  </label>
+                  <input
+                    required
+                    value={newTypeKey}
+                    onChange={(e) => setNewTypeKey(e.target.value)}
+                    placeholder="tourist"
+                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium">
+                    表示名
+                  </label>
+                  <input
+                    required
+                    value={newTypeLabel}
+                    onChange={(e) => setNewTypeLabel(e.target.value)}
+                    placeholder="観光地"
+                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
+                >
+                  + 種類を追加
+                </button>
+              </form>
+            </section>
           )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
-              {importing ? "インポート中…" : "CSVインポート"}
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                disabled={importing}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) handleCsvFile(file);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            {pendingCount > 0 && (
-              <button
-                onClick={handleBulkApprove}
-                className="rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-700"
-              >
-                承認待ち{pendingCount}件をすべて承認
-              </button>
-            )}
-          </div>
+          {isAdmin && currentType && (
+            <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <h2 className="mb-2 text-base font-bold">
+                口コミ設定({currentTypeLabel})
+              </h2>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={currentType.reviews_enabled}
+                  onChange={() => handleToggleReviewsEnabled(currentType)}
+                />
+                この種類で口コミを有効にする
+              </label>
+            </section>
+          )}
 
-          <p className="mt-2 text-xs text-gray-400">
-            CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。rank/categoryは自由入力で空でも可)
-          </p>
-        </section>
+          <section>
+            <h2 className="mb-2 text-base font-bold">
+              CSVインポート({currentTypeLabel})
+            </h2>
+            <p className="mb-3 text-xs text-gray-500">
+              個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
+              ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは承認待ちになる)。
+            </p>
+
+            {message && (
+              <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                {message}
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                {importing ? "インポート中…" : "CSVインポート"}
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  disabled={importing}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleCsvFile(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {pendingCount > 0 && (
+                <button
+                  onClick={handleBulkApprove}
+                  className="rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-700"
+                >
+                  承認待ち{pendingCount}件をすべて承認
+                </button>
+              )}
+            </div>
+
+            <p className="mt-2 text-xs text-gray-400">
+              CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。rank/categoryは自由入力で空でも可)
+            </p>
+          </section>
+        </div>
       </div>
     </main>
   );
