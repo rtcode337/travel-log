@@ -10,8 +10,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
 
-  const { rows } = await query<{ id: string }>(
-    "select id from users where email = $1 and password_hash = crypt($2, password_hash)",
+  const { rows } = await query<{ id: string; has_google: boolean }>(
+    `select id, google_id is not null as has_google
+     from users where email = $1 and password_hash = crypt($2, password_hash)`,
     [email, password]
   );
 
@@ -20,6 +21,16 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "メールアドレスまたはパスワードが正しくありません。" },
       { status: 401 }
+    );
+  }
+  // Googleログインを設定済みのアカウントはパスワードログイン不可
+  if (user.has_google) {
+    return NextResponse.json(
+      {
+        error:
+          "このアカウントはGoogleログインが設定されているため、パスワードではログインできません。「Googleでログイン」をご利用ください。",
+      },
+      { status: 403 }
     );
   }
 
