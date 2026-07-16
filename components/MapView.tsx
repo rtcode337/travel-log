@@ -481,7 +481,7 @@ export default function MapView({
     setSearchResults([]);
   };
 
-  // 公開スポットはlocalStorageの明示ダウンロードキャッシュ(spotCache)から得るため、
+  // 公開スポットはIndexedDBの明示ダウンロードキャッシュ(spotCache)から得るため、
   // ここでは自分の非公開スポットだけをAPIから取り直す
   const loadPrivateSpots = useCallback(async () => {
     const { data } = await api.spots.list("private", { type: spotTypeKey });
