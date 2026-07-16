@@ -110,6 +110,9 @@ create table visits (
     date_precision in ('day', 'month', 'year', 'unknown')
   ),
   memo           text,
+  -- photosフォルダ(docker-composeでbindマウント)内の相対パス
+  -- 「<ユーザーID>/<年>/<月>/<uuid>.<拡張子>」を保存する(lib/photos.ts参照)。
+  -- 旧方式のBase64 data URLが残っている場合はscripts/migrate-photos-to-files.mjsで移行する
   photos         text[] not null default '{}',
   created_at     timestamptz not null default now()
 );

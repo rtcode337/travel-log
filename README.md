@@ -106,9 +106,42 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
   他ユーザーにも公開され、スポット詳細モーダルに一覧表示される。ロールに関わらず
   全ログインユーザーが投稿可能。スポット1件につきユーザー1人1件(再度投稿すると上書き)
 - **写真(非公開)**: 自分の訪問記録にのみ添付され、他ユーザーには見えない。選択した画像は
-  ブラウザ側で縮小・JPEG圧縮した上でBase64文字列として`visits.photos`列(text[])に
-  直接保存している(別途ファイルストレージは用意していないため、枚数や解像度が多いと
-  DBが肥大化する点に注意。本格運用する場合はS3等の外部ストレージへの切り出しを検討)
+  ブラウザ側で縮小・JPEG圧縮した上でサーバーに送られ、リポジトリ直下の `photos/`
+  フォルダ(Docker では bind マウント)にファイルとして保存される。DB の
+  `visits.photos`列(text[])にはフォルダ内の相対パスだけが入る
+  (詳細は下記「写真の保存先とデータ移行」)
+
+## 写真の保存先とデータ移行
+
+訪問写真は `photos/<ユーザーID>/<年>/<月>/<uuid>.jpg` に保存される(`lib/photos.ts`)。
+ユーザー×年月でサブフォルダに振り分けるため、1フォルダに大量のファイルが溜まって
+一覧表示が重くなることがない。配信は認証付きの `/api/photos/...` 経由で、
+本人以外はアクセスできない(写真は非公開のため)。
+
+- `photos/` フォルダは `.gitkeep` だけをコミットしてあり、中身は `.gitignore` 対象
+  (実際の写真=個人情報をコミットしないため)。clone した時点でフォルダが存在するので、
+  マウント先を自動作成しない環境(Synology Container Manager 等)でもそのまま起動できる
+- 本番用 `docker-compose.yml` は `./photos` をコンテナの `/app/photos` に bind マウント
+  する。開発用 `docker-compose.dev.yml` はリポジトリ全体を `/app` にマウントするため
+  追加設定は不要。Docker を使わない場合は環境変数 `PHOTOS_DIR` で保存先を変えられる
+  (既定はカレントディレクトリ直下の `photos`)
+
+### 旧方式(DB直接保存)からの移行
+
+以前は写真を Base64 文字列として `visits.photos` に直接保存していた。旧データが
+残っていても表示はそのまま動くが(`data:` で始まる値はそのまま表示される)、DB が
+肥大化したままになるので、`scripts/migrate-photos-to-files.mjs` でファイルへ移行できる
+(data URL の要素だけを変換するため何度実行しても安全)。
+
+```bash
+# 開発環境(docker-compose.dev.yml)の場合
+docker compose -f docker-compose.dev.yml exec app node scripts/migrate-photos-to-files.mjs
+
+# 本番環境(docker-compose.yml)の場合: scriptsフォルダだけを一時的にマウントして実行
+docker compose run --rm -v ./scripts:/app/scripts app node scripts/migrate-photos-to-files.mjs
+```
+
+移行後は `vacuum full visits;` を実行すると DB ファイルの肥大が実際に解消される。
 
 ## スポットの種類とモード切替
 

@@ -8,6 +8,7 @@ import {
   formatVisitedOn,
   REVIEWS_PAGE_SIZE,
   SPOT_ADMIN_ROLES,
+  visitPhotoSrc,
   type PublicReview,
   type Role,
   type Spot,
@@ -387,7 +388,7 @@ export default function SpotDetailModal({
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                   key={i}
-                                  src={photo}
+                                  src={visitPhotoSrc(photo)}
                                   alt=""
                                   className="h-14 w-14 rounded-lg object-cover"
                                 />
