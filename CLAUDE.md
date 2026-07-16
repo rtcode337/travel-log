@@ -38,7 +38,7 @@ docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d travel
 
 **スポットの新規登録は地図上での右クリック追加、`/admin`の追加フォーム、CSVインポート(`lib/csv.ts`+`/admin`)いずれも`app/api/spots/route.ts`の同じ挿入ロジックを通る。** status未指定時の既定はroleにより`user`は`private`、それ以外(moderator/spot_admin/admin)は`pending`(`ALLOWED_STATUS_BY_ROLE`が許す範囲でstatusを明示すれば`published`等も選べる)。CSVインポートは`/admin`(spot_admin/admin専用)からのみ行える経路のため、`AdminView`側で常に`status: 'published'`を明示し、承認待ちを経由せず即座に公開する。それ以外の経路(右クリック追加・追加フォームでの既定)は引き続き承認待ちを通り、承認・却下は`/admin`側の別ステップで行う。
 
-**`reviews`と`visits`は意図的に非対称な設計。** `reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、必訪ランクの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可、`photos`はブラウザ側で縮小・圧縮したBase64文字列を`text[]`カラムに直接保存(外部ストレージ連携なし、枚数が多いとDBが肥大化する点はREADME参照)。
+**`reviews`と`visits`は意図的に非対称な設計。** `reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、必訪ランクの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`photos`(text[])にはBase64ではなく、`photos/`フォルダ(docker-composeでbindマウント、`lib/photos.ts`)へ保存したファイルの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。旧方式のBase64 data URLがDBに残っていても表示は動く(`visitPhotoSrc`参照)が、`scripts/migrate-photos-to-files.mjs`で移行できる。
 
 **tourist spotsの`rank`はこのリポジトリの外で一度だけ計算されたパイプラインの成果物であり、アプリ側が動的に計算するものではない。** Wikipedia(ja)月次ページビュー数に基づく相対順位(パーセンタイル)の機械分類(README「ランクの決め方」および`db/init/02_tourist_spots.sql`冒頭のコメント参照)。手動でスポットを追加する場合も、この基準に沿ったランクを付けること。
 

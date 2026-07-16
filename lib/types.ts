@@ -152,6 +152,15 @@ export interface Visit {
   created_at: string;
 }
 
+/**
+ * visits.photosの1要素を<img src>用のURLにする。現行データはphotosフォルダ内の
+ * 相対パス(認証付きの/api/photos/経由で配信)。ファイル保存方式へ移行する前の
+ * 旧データ(Base64のdata URL)がDBに残っていることがあり、それはそのまま使う
+ */
+export function visitPhotoSrc(photo: string): string {
+  return photo.startsWith("data:") ? photo : `/api/photos/${photo}`;
+}
+
 /** 訪問予定(行きたい場所のブックマーク)。訪問を記録すると自動で消える */
 export interface VisitPlan {
   id: string;
