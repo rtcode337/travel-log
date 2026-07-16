@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { query } from "@/lib/db";
+import { canViewSpotType } from "@/lib/spot-type-access";
 import SpotsView from "@/components/SpotsView";
 
 export default async function TypedSpotsPage({
@@ -8,11 +8,7 @@ export default async function TypedSpotsPage({
   params: Promise<{ type: string }>;
 }) {
   const { type } = await params;
-  const { rows } = await query(
-    "select 1 from spot_types where key = $1 and enabled",
-    [type]
-  );
-  if (!rows[0]) notFound();
+  if (!(await canViewSpotType(type))) notFound();
 
   return <SpotsView spotTypeKey={type} />;
 }

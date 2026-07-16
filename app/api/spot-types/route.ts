@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { getCurrentUser, getCurrentUserId } from "@/lib/auth/current-user";
-import type { SpotType } from "@/lib/types";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { SPOT_ADMIN_ROLES, type SpotType } from "@/lib/types";
 
 export async function GET() {
-  const userId = await getCurrentUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // admin_only・disabledの種類はadmin/spot_admin以外には存在自体を見せない
   const { rows } = await query<SpotType>(
-    "select * from spot_types order by created_at asc"
+    SPOT_ADMIN_ROLES.includes(user.role)
+      ? "select * from spot_types order by created_at asc"
+      : "select * from spot_types where visibility = 'public' order by created_at asc"
   );
   return NextResponse.json({ data: rows });
 }

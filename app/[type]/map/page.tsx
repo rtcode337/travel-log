@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { query } from "@/lib/db";
+import { canViewSpotType } from "@/lib/spot-type-access";
 import MapView from "@/components/MapView";
 
 export default async function TypedMapPage({
@@ -9,11 +9,7 @@ export default async function TypedMapPage({
   params: Promise<{ type: string }>;
 }) {
   const { type } = await params;
-  const { rows } = await query(
-    "select 1 from spot_types where key = $1 and enabled",
-    [type]
-  );
-  if (!rows[0]) notFound();
+  if (!(await canViewSpotType(type))) notFound();
 
   return (
     <Suspense fallback={null}>
