@@ -1,8 +1,22 @@
 name: travel-log-prod
 
 services:
+  # NASのbindマウント(./db/data)の所有者がホスト側の任意ユーザーになっている場合に備え、
+  # postgresコンテナ本体がinitdbを実行する前にrootで所有者をpostgres(uid/gid 70)へ揃える使い捨てコンテナ。
+  # postgres公式イメージのentrypointは$PGDATA配下しかchownしないため、マウントルート自体の権限はここで直す必要がある
+  db-init:
+    image: postgres:16-alpine
+    user: root
+    volumes:
+      - ./db/data:/var/lib/postgresql/data
+    command: chown -R 70:70 /var/lib/postgresql/data
+    restart: "no"
+
   db:
     image: postgres:16-alpine
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
