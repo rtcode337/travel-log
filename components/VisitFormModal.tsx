@@ -174,6 +174,9 @@ export default function VisitFormModal({
             </label>
             <p className="mb-2 text-xs text-gray-400">
               自分だけに表示されます。他のユーザーには公開されません。
+              <br />
+              ※ 保存時に縮小・圧縮されます(長辺1280px・JPEG)。キレイに
+              残したい写真は、元のデータを手元に保管しておいてください。
             </p>
             {photos.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
