@@ -8,10 +8,12 @@ import { parseCsv } from "@/lib/csv";
 import {
   ROLE_LABELS,
   SPOT_ADMIN_ROLES,
+  SPOT_TYPE_VISIBILITY_LABELS,
   type AppUser,
   type Role,
   type Spot,
   type SpotType,
+  type SpotTypeVisibility,
 } from "@/lib/types";
 
 const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
@@ -175,14 +177,17 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     loadSpotTypes();
   };
 
-  const handleToggleEnabled = async (type: SpotType) => {
-    const { error } = await api.spotTypes.setEnabled(type.id, !type.enabled);
+  const handleChangeVisibility = async (
+    type: SpotType,
+    visibility: SpotTypeVisibility
+  ) => {
+    const { error } = await api.spotTypes.setVisibility(type.id, visibility);
     if (error) {
-      setTypeMessage("有効/無効の変更に失敗しました: " + error.message);
+      setTypeMessage("公開範囲の変更に失敗しました: " + error.message);
       return;
     }
     setTypeMessage(
-      `「${type.label}」を${!type.enabled ? "有効" : "無効"}にしました。`
+      `「${type.label}」を「${SPOT_TYPE_VISIBILITY_LABELS[visibility]}」にしました。`
     );
     loadSpotTypes();
   };
@@ -446,17 +451,28 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                     />
                     <span className="flex-1 text-sm">{t.label}</span>
                     <span className="text-xs text-gray-400">{t.key}</span>
-                    <label
-                      className="flex items-center gap-1 text-xs text-gray-500"
-                      title="OFFにすると地図/一覧/アカウントページのリンクが消え、直接アクセスも404になる"
+                    <select
+                      value={t.visibility}
+                      onChange={(e) =>
+                        handleChangeVisibility(
+                          t,
+                          e.target.value as SpotTypeVisibility
+                        )
+                      }
+                      title="「管理者のみ」はadmin/スポット管理者だけが地図/一覧を見られる(公開前の準備用)。「無効」は全員に対してリンクが消え、直接アクセスも404になる"
+                      className="rounded-lg border border-gray-300 px-1.5 py-1 text-xs text-gray-600"
                     >
-                      <input
-                        type="checkbox"
-                        checked={t.enabled}
-                        onChange={() => handleToggleEnabled(t)}
-                      />
-                      有効
-                    </label>
+                      {(
+                        Object.entries(SPOT_TYPE_VISIBILITY_LABELS) as [
+                          SpotTypeVisibility,
+                          string,
+                        ][]
+                      ).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
                     {t.key === typeKey ? (
                       <span className="text-xs font-medium text-blue-600">
                         管理中

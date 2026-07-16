@@ -83,14 +83,28 @@ export interface Spot {
   updated_at: string;
 }
 
+/**
+ * スポット種類の公開範囲。
+ * public: 全ユーザーに表示 /
+ * admin_only: admin・spot_adminのみ/[key]/map・/[key]/spots等を閲覧できる(公開前の準備用) /
+ * disabled: 全ユーザーに対して/[key]/map・/[key]/spots・アカウントページのリンクを404/非表示にする
+ * いずれの場合も/[key]/adminは再有効化のため常にアクセス可。
+ */
+export type SpotTypeVisibility = "public" | "admin_only" | "disabled";
+
+export const SPOT_TYPE_VISIBILITY_LABELS: Record<SpotTypeVisibility, string> = {
+  public: "有効",
+  admin_only: "管理者のみ",
+  disabled: "無効",
+};
+
 /** スポットの種類(観光地/郵便局/御朱印など)。管理者が新規追加できる */
 export interface SpotType {
   id: string;
   key: string;
   label: string;
   reviews_enabled: boolean;
-  /** falseの場合、/[key]/map・/[key]/spots・アカウントページのリンクは404/非表示になる(/[key]/adminは再有効化のため常にアクセス可) */
-  enabled: boolean;
+  visibility: SpotTypeVisibility;
   created_at: string;
 }
 

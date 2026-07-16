@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api-client";
 import type { Spot } from "@/lib/types";
 
 const CACHE_PREFIX = "travel-log:public-spots:";
@@ -37,6 +36,12 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
+export interface DownloadProgress {
+  loadedBytes: number;
+  /** Content-Lengthから割合を出せる場合のみ(圧縮転送時は受信バイト数と比較できないためnull) */
+  totalBytes: number | null;
+}
+
 export function formatDownloadedAt(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", {
     year: "numeric",
@@ -61,8 +66,13 @@ export function useSpotCache(typeKey: string) {
     { sizeBytes: number; data: Spot[] } | null
   >(null);
   const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoPromptedRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // アンマウント時(ダイアログごと画面が消えるページ遷移等)は進行中のダウンロードを打ち切る
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     setEntry(readSpotCache(typeKey));
@@ -76,17 +86,75 @@ export function useSpotCache(typeKey: string) {
     setShowMissingPrompt(true);
   }, [ready, entry]);
 
+  /**
+   * 公開スポットを取得する。進捗ダイアログに受信バイト数を出すため、api-clientではなく
+   * fetchのReadableStreamを直接読む(レスポンスが大きく数MBになりうるため)。
+   * キャンセル時はエラー扱いにせずnullを返す。
+   */
   const fetchPublished = useCallback(async (): Promise<Spot[] | null> => {
+    const controller = new AbortController();
+    abortRef.current = controller;
     setDownloading(true);
+    setProgress({ loadedBytes: 0, totalBytes: null });
     setError(null);
-    const { data, error: err } = await api.spots.list("published", { type: typeKey });
-    setDownloading(false);
-    if (err || !data) {
-      setError(err?.message ?? "取得に失敗しました");
+    try {
+      const qs = new URLSearchParams({ status: "published", type: typeKey });
+      const res = await fetch(`/api/spots?${qs.toString()}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.error ?? res.statusText);
+        return null;
+      }
+
+      // gzip等の圧縮転送ではContent-Lengthは圧縮後サイズで、reader側で数える
+      // 展開後バイト数とは比較できないため、その場合は割合なし(バイト数のみ)で表示する
+      const contentLength = Number(res.headers.get("content-length"));
+      const totalBytes =
+        contentLength > 0 && !res.headers.get("content-encoding")
+          ? contentLength
+          : null;
+
+      let text: string;
+      if (res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        const chunks: string[] = [];
+        let loadedBytes = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          loadedBytes += value.byteLength;
+          chunks.push(decoder.decode(value, { stream: true }));
+          setProgress({ loadedBytes, totalBytes });
+        }
+        chunks.push(decoder.decode());
+        text = chunks.join("");
+      } else {
+        text = await res.text();
+      }
+
+      const data = (JSON.parse(text) as { data?: Spot[] }).data;
+      if (!data) {
+        setError("取得に失敗しました");
+        return null;
+      }
+      return data;
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        setError(err instanceof Error ? err.message : "取得に失敗しました");
+      }
       return null;
+    } finally {
+      abortRef.current = null;
+      setDownloading(false);
+      setProgress(null);
     }
-    return data;
   }, [typeKey]);
+
+  /** 進捗ダイアログの「キャンセル」ボタン: 進行中のダウンロードを打ち切る */
+  const cancelDownload = useCallback(() => abortRef.current?.abort(), []);
 
   /** 歯車メニューの「ダウンロード」ボタン: 先に取得してサイズを確認ダイアログに出す */
   const startManualDownload = useCallback(async () => {
@@ -108,7 +176,12 @@ export function useSpotCache(typeKey: string) {
   const confirmMissingDownload = useCallback(async () => {
     setShowMissingPrompt(false);
     const data = await fetchPublished();
-    if (data) setEntry(writeSpotCache(typeKey, data));
+    if (data) {
+      setEntry(writeSpotCache(typeKey, data));
+    } else {
+      // 失敗・キャンセル時は確認ダイアログに戻す(エラーはそのダイアログ内に表示される)
+      setShowMissingPrompt(true);
+    }
   }, [fetchPublished, typeKey]);
 
   const dismissMissingPrompt = useCallback(() => setShowMissingPrompt(false), []);
@@ -155,10 +228,12 @@ export function useSpotCache(typeKey: string) {
     downloadedAt: entry?.downloadedAt ?? null,
     ready,
     downloading,
+    progress,
     error,
     showMissingPrompt,
     manualConfirm,
     startManualDownload,
+    cancelDownload,
     confirmManualDownload,
     cancelManualDownload,
     confirmMissingDownload,
