@@ -36,7 +36,7 @@ docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d travel
 
 **単一の`spots`テーブルを`spot_types`により複数の「種類」で使い回す設計。** `app_settings`は`active_spot_type_id`を保持するsingleton行で、ほとんどのspotsクエリは`where spot_type_id = (select active_spot_type_id from app_settings)`で絞り込む。現状データがあるのは`tourist`種類のみ(`post_office`/`goshuin`は今後用の空の種類)。`spots.rank`/`category`は自由入力で、`spot_type = 'tourist'`のときのみ意味を持つ(値の一覧は`lib/types.ts`の`RANKS`/`CATEGORIES`とそのコメントを参照)。
 
-**スポットの新規登録は経路を問わず必ず承認待ちを通る。** 地図上での右クリック追加、`/admin`の追加フォーム、CSVインポート(`lib/csv.ts`+`/admin`)はすべて`app/api/spots/route.ts`の同じ挿入ロジックを通り、投稿者が管理者であっても常に`status = 'pending'`になる。承認・却下は`/admin`側の別ステップ。
+**スポットの新規登録は地図上での右クリック追加、`/admin`の追加フォーム、CSVインポート(`lib/csv.ts`+`/admin`)いずれも`app/api/spots/route.ts`の同じ挿入ロジックを通る。** status未指定時の既定はroleにより`user`は`private`、それ以外(moderator/spot_admin/admin)は`pending`(`ALLOWED_STATUS_BY_ROLE`が許す範囲でstatusを明示すれば`published`等も選べる)。CSVインポートは`/admin`(spot_admin/admin専用)からのみ行える経路のため、`AdminView`側で常に`status: 'published'`を明示し、承認待ちを経由せず即座に公開する。それ以外の経路(右クリック追加・追加フォームでの既定)は引き続き承認待ちを通り、承認・却下は`/admin`側の別ステップで行う。
 
 **`reviews`と`visits`は意図的に非対称な設計。** `reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、必訪ランクの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可、`photos`はブラウザ側で縮小・圧縮したBase64文字列を`text[]`カラムに直接保存(外部ストレージ連携なし、枚数が多いとDBが肥大化する点はREADME参照)。
 
