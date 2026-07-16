@@ -432,7 +432,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                 ここでの選択は、ログイン後に自動で開く地図/リストの既定を切り替えるだけ
                 (全ユーザー共通)。スポットの追加・編集・承認は、このページのURL(現在は
                 「{currentTypeLabel}」)で対象の種類が決まる — 他の種類を扱いたい場合は
-                種類ごとの「この種類を管理」リンクから移動する。
+                種類名をクリックして移動する。
               </p>
               {typeMessage && (
                 <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
@@ -449,7 +449,16 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                       onChange={() => handleSetDefaultType(t)}
                       title="ログイン後に自動で開く既定にする"
                     />
-                    <span className="flex-1 text-sm">{t.label}</span>
+                    {t.key === typeKey ? (
+                      <span className="flex-1 text-sm">{t.label}</span>
+                    ) : (
+                      <Link
+                        href={`/${t.key}/admin`}
+                        className="flex-1 text-sm text-blue-600 underline"
+                      >
+                        {t.label}
+                      </Link>
+                    )}
                     <span className="text-xs text-gray-400">{t.key}</span>
                     <select
                       value={t.visibility}
@@ -473,18 +482,6 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                         </option>
                       ))}
                     </select>
-                    {t.key === typeKey ? (
-                      <span className="text-xs font-medium text-blue-600">
-                        管理中
-                      </span>
-                    ) : (
-                      <Link
-                        href={`/${t.key}/admin`}
-                        className="text-xs text-blue-600 underline"
-                      >
-                        この種類を管理
-                      </Link>
-                    )}
                   </li>
                 ))}
               </ul>
