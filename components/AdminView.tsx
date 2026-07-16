@@ -259,6 +259,9 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
             category,
             description: get("description") || null,
             official_url: get("official_url") || null,
+            // CSVインポートはこのページ(spot_admin/admin専用)からのみ行えるため、
+            // 承認待ちを経由せずそのまま公開する
+            status: "published",
           });
       }
       if (errors.length > 0) {
@@ -529,7 +532,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
             </h2>
             <p className="mb-3 text-xs text-gray-500">
               個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
-              ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは承認待ちになる)。
+              ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは最初から公開される)。
             </p>
 
             {message && (
