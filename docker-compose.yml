@@ -1,15 +1,16 @@
 name: travel-log-prod
 
 services:
-  # NASのbindマウント(./db/data)の所有者がホスト側の任意ユーザーになっている場合に備え、
-  # postgresコンテナ本体がinitdbを実行する前にrootで所有者をpostgres(uid/gid 70)へ揃える使い捨てコンテナ。
-  # postgres公式イメージのentrypointは$PGDATA配下しかchownしないため、マウントルート自体の権限はここで直す必要がある
+  # db/dataは.gitignore対象でgit管理下になく、cloneした直後は存在しない。dbサービスが
+  # 直接./db/dataをbindマウントすると、環境によってはホスト側にディレクトリがない状態で
+  # コンテナ起動そのものが失敗しうるため、db/init/*.sqlがgit管理下にあり必ず存在する親
+  # ディレクトリ./db経由でmkdirし、postgres(uid/gid 70)に所有者を揃えてからdbを起動する
   db-init:
     image: postgres:16-alpine
     user: root
     volumes:
-      - ./db/data:/var/lib/postgresql/data
-    command: chown -R 70:70 /var/lib/postgresql/data
+      - ./db:/db
+    command: sh -c "mkdir -p /db/data && chown -R 70:70 /db/data"
     restart: "no"
 
   db:
@@ -21,10 +22,6 @@ services:
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
-      # db/data直下(bindマウントのルート)を直接PGDATAにすると、.gitkeepのような
-      # ドットファイルの存在だけでinitdbが「マウントポイントを直接使うな」と
-      # 初期化を拒否するため、1段掘ったサブディレクトリをPGDATAにする
-      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - ./db/data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
