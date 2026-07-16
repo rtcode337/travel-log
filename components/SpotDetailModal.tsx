@@ -69,6 +69,18 @@ export default function SpotDetailModal({
   const [planUpdating, setPlanUpdating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [moderating, setModerating] = useState(false);
+  // 訪問履歴のサムネイルをタップしたときに拡大表示する写真のURL
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
+  // 拡大表示中はEscキーでも閉じられるようにする
+  useEffect(() => {
+    if (!photoPreview) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPhotoPreview(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [photoPreview]);
 
   const load = useCallback(async () => {
     const [
@@ -385,13 +397,22 @@ export default function SpotDetailModal({
                           {visit.photos.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {visit.photos.map((photo, i) => (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
+                                <button
                                   key={i}
-                                  src={visitPhotoSrc(photo)}
-                                  alt=""
-                                  className="h-14 w-14 rounded-lg object-cover"
-                                />
+                                  type="button"
+                                  onClick={() =>
+                                    setPhotoPreview(visitPhotoSrc(photo))
+                                  }
+                                  className="cursor-zoom-in"
+                                  aria-label="写真を拡大表示"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={visitPhotoSrc(photo)}
+                                    alt=""
+                                    className="h-14 w-14 rounded-lg object-cover"
+                                  />
+                                </button>
                               ))}
                             </div>
                           )}
@@ -490,6 +511,32 @@ export default function SpotDetailModal({
             onVisitPlanChange?.();
           }}
         />
+      )}
+
+      {/* 写真の拡大表示(ライトボックス)。背景・画像どこをタップしても閉じる。
+          親のオーバーレイ(スポット詳細を閉じる)まで伝播させない */}
+      {photoPreview && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPhotoPreview(null);
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={photoPreview}
+            alt=""
+            className="max-h-full max-w-full rounded-lg object-contain"
+          />
+          <button
+            type="button"
+            className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-xl text-white"
+            aria-label="拡大表示を閉じる"
+          >
+            ×
+          </button>
+        </div>
       )}
 
       {showEditForm && spot && (
