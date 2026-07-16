@@ -22,11 +22,9 @@ yarn-error.log*
 .env*.local
 
 # Postgresの実データ(docker-compose.yml/docker-compose.dev.ymlのbindマウント先)
-# 個人情報を含むため絶対にコミットしない。ただしbindマウント先のフォルダ自体は
-# cloneした時点で存在してほしい(Synology Container Manager等はマウント先の
-# ディレクトリを自動作成してくれないため)ので .gitkeep だけは残す
+# 個人情報を含むため絶対にコミットしない。ディレクトリ自体はdb-initサービス
+# (docker-compose.yml)が起動時にmkdirするので.gitkeepは不要
 /db/data/*
-!/db/data/.gitkeep
 
 # 訪問記録の写真ファイル(docker-compose.ymlのbindマウント先、lib/photos.ts参照)
 # db/data と同じ理由で、中身はコミットせずフォルダだけ .gitkeep で残す
