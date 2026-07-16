@@ -527,7 +527,7 @@ export default function MapView({
     if (!map) return;
 
     const filteredSpots = spots.filter((spot) =>
-      passesFilters(filters, spot.rank, spot.category, visitedIds.has(spot.id))
+      passesFilters(filters, spot.rank, visitedIds.has(spot.id))
     );
 
     const renderSpots = () => {
@@ -603,9 +603,9 @@ export default function MapView({
               type="button"
               onClick={() => setShowFilterModal(true)}
               aria-label="絞り込み"
-              className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
+              className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-lg leading-none"
             >
-              ⚙️
+              ☰
             </button>
           </div>
           {searchError && (
@@ -650,12 +650,7 @@ export default function MapView({
                 ✕
               </button>
             </div>
-            <FilterBar
-              spots={spots}
-              filters={filters}
-              onChange={setFilters}
-              stacked
-            />
+            <FilterBar spots={spots} filters={filters} onChange={setFilters} />
 
             <div className="border-t border-gray-100 pt-3">
               <p className="mb-1 text-sm font-medium">公開スポットのダウンロード</p>
