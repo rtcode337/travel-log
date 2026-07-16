@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -13,6 +13,7 @@ import {
 } from "@/lib/mapStyle";
 import type { Role, Spot } from "@/lib/types";
 import { getRankPinStyle, getRankPinTextColor } from "@/lib/rankStyle";
+import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -20,6 +21,7 @@ import FilterBar, {
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotDetailModal from "@/components/SpotDetailModal";
+import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 
 const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
@@ -308,7 +310,12 @@ export default function MapView({
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const locationDotRef = useRef<maplibregl.Marker | null>(null);
 
-  const [spots, setSpots] = useState<Spot[]>([]);
+  const spotCache = useSpotCache(spotTypeKey);
+  const [privateSpots, setPrivateSpots] = useState<Spot[]>([]);
+  const spots = useMemo(
+    () => [...(spotCache.publicSpots ?? []), ...privateSpots],
+    [spotCache.publicSpots, privateSpots]
+  );
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
@@ -544,18 +551,17 @@ export default function MapView({
     setSearchResults([]);
   };
 
-  const loadSpots = useCallback(async () => {
-    const [{ data: pub }, { data: priv }] = await Promise.all([
-      api.spots.list("published", { type: spotTypeKey }),
-      api.spots.list("private", { type: spotTypeKey }),
-    ]);
-    setSpots([...(pub ?? []), ...(priv ?? [])]);
+  // 公開スポットはlocalStorageの明示ダウンロードキャッシュ(spotCache)から得るため、
+  // ここでは自分の非公開スポットだけをAPIから取り直す
+  const loadPrivateSpots = useCallback(async () => {
+    const { data } = await api.spots.list("private", { type: spotTypeKey });
+    setPrivateSpots(data ?? []);
   }, [spotTypeKey]);
 
   // データ取得
   useEffect(() => {
     (async () => {
-      await Promise.all([loadSpots(), loadVisits()]);
+      await Promise.all([loadPrivateSpots(), loadVisits()]);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -732,6 +738,26 @@ export default function MapView({
               onChange={setFilters}
               stacked
             />
+
+            <div className="border-t border-gray-100 pt-3">
+              <p className="mb-1 text-sm font-medium">公開スポットのダウンロード</p>
+              <p className="mb-2 text-xs text-gray-500">
+                {spotCache.downloadedAt
+                  ? `前回ダウンロード: ${formatDownloadedAt(spotCache.downloadedAt)}`
+                  : "まだダウンロードしていません。"}
+              </p>
+              {spotCache.error && (
+                <p className="mb-2 text-xs text-red-600">{spotCache.error}</p>
+              )}
+              <button
+                type="button"
+                onClick={spotCache.startManualDownload}
+                disabled={spotCache.downloading}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                {spotCache.downloading ? "確認中…" : "公開スポットをダウンロード"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -782,7 +808,7 @@ export default function MapView({
           onSaved={(spot) => {
             if (spot.status === "private") {
               // 非公開は自分にだけ常に見えるので、通常のスポットと同じように取り直して表示する
-              loadSpots();
+              loadPrivateSpots();
             } else {
               setPendingSpots((prev) => [
                 ...prev,
@@ -807,10 +833,18 @@ export default function MapView({
           spots={spots}
           onClose={() => setDetailSpotId(null)}
           onVisitChange={loadVisits}
-          onSpotChange={loadSpots}
-          onSpotDeleted={loadSpots}
+          onSpotChange={(spot) => {
+            spotCache.applySpotChange(spot);
+            loadPrivateSpots();
+          }}
+          onSpotDeleted={(id) => {
+            spotCache.applySpotDelete(id);
+            loadPrivateSpots();
+          }}
         />
       )}
+
+      <SpotDownloadDialogs cache={spotCache} />
     </div>
   );
 }

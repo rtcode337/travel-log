@@ -44,10 +44,11 @@ export default function SpotDetailModal({
   onClose: () => void;
   /** 訪問記録の追加・削除があったときに呼ばれる(呼び出し元の一覧・バッジ更新用) */
   onVisitChange?: () => void;
-  /** スポット自体の編集で内容が変わったときに呼ばれる(呼び出し元の一覧の再取得用) */
-  onSpotChange?: () => void;
-  /** スポットが削除されたときに呼ばれる(呼び出し元の一覧の再取得用) */
-  onSpotDeleted?: () => void;
+  /** スポット自体の編集・承認/却下で内容が変わったときに、変更後の内容とともに呼ばれる
+   * (呼び出し元の一覧の再取得・公開スポットキャッシュの更新用) */
+  onSpotChange?: (spot: Spot) => void;
+  /** スポットが削除されたときに、削除されたIDとともに呼ばれる(呼び出し元の一覧の再取得用) */
+  onSpotDeleted?: (spotId: string) => void;
   /** 訪問予定への追加・解除があったときに呼ばれる(呼び出し元の一覧の再取得用) */
   onVisitPlanChange?: () => void;
 }) {
@@ -164,7 +165,7 @@ export default function SpotDetailModal({
       setActionError("削除に失敗しました: " + error.message);
       return;
     }
-    onSpotDeleted?.();
+    onSpotDeleted?.(spot.id);
     onClose();
   };
 
@@ -172,16 +173,16 @@ export default function SpotDetailModal({
     if (!spot) return;
     setModerating(true);
     setActionError(null);
-    const { error } = await api.spots.setStatus(spot.id, status);
+    const { data, error } = await api.spots.setStatus(spot.id, status);
     setModerating(false);
-    if (error) {
+    if (error || !data) {
       setActionError(
-        (status === "published" ? "承認" : "却下") + "に失敗しました: " + error.message
+        (status === "published" ? "承認" : "却下") + "に失敗しました: " + (error?.message ?? "")
       );
       return;
     }
     await load();
-    onSpotChange?.();
+    onSpotChange?.(data);
   };
 
   return (
@@ -496,14 +497,14 @@ export default function SpotDetailModal({
           spots={spots ?? []}
           role={null}
           onClose={() => setShowEditForm(false)}
-          onSaved={() => {
+          onSaved={(updated) => {
             setShowEditForm(false);
             load();
-            onSpotChange?.();
+            onSpotChange?.(updated);
           }}
           onDeleted={() => {
             setShowEditForm(false);
-            onSpotDeleted?.();
+            onSpotDeleted?.(spot.id);
             onClose();
           }}
         />

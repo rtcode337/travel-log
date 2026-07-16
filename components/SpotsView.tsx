@@ -20,7 +20,9 @@ import FilterBar, {
 import RankBadge from "@/components/RankBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import AddSpotModal from "@/components/AddSpotModal";
+import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getRankOrder } from "@/lib/rankStyle";
+import { useSpotCache } from "@/lib/useSpotCache";
 
 type SortKey = "rank" | "name" | "visited";
 type BrowseMode = "prefecture" | "rank";
@@ -39,7 +41,12 @@ export default function SpotsView({
   /** 表示対象のスポット種類キー(常に /[type]/spots から渡される) */
   spotTypeKey: string;
 }) {
-  const [spots, setSpots] = useState<Spot[]>([]);
+  const spotCache = useSpotCache(spotTypeKey);
+  const [privateSpots, setPrivateSpots] = useState<Spot[]>([]);
+  const spots = useMemo(
+    () => [...(spotCache.publicSpots ?? []), ...privateSpots],
+    [spotCache.publicSpots, privateSpots]
+  );
   const [visits, setVisits] = useState<Visit[]>([]);
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,27 +109,41 @@ export default function SpotsView({
     setVisitPlans(data ?? []);
   }, []);
 
-  const loadSpots = useCallback(async () => {
-    const [{ data: pub }, { data: priv }] = await Promise.all([
-      api.spots.list("published", { type: spotTypeKey }),
-      api.spots.list("private", { type: spotTypeKey }),
-    ]);
-    setSpots([...(pub ?? []), ...(priv ?? [])]);
+  // 公開スポットはlocalStorageの明示ダウンロードキャッシュ(spotCache)から得るため、
+  // ここでは自分の非公開スポットだけをAPIから取り直す
+  const loadPrivateSpots = useCallback(async () => {
+    const { data } = await api.spots.list("private", { type: spotTypeKey });
+    setPrivateSpots(data ?? []);
   }, [spotTypeKey]);
 
-  /** スポットの詳細画面での編集・削除・承認・却下後、表示中のモードに応じて取り直す */
-  const refreshAfterSpotChange = useCallback(() => {
-    loadSpots();
-    if (managementLoaded) loadManagementSpots();
-  }, [loadSpots, managementLoaded, loadManagementSpots]);
+  /** スポットの詳細画面での編集・承認・却下後、表示中のモードに応じて取り直す
+   * (公開スポットキャッシュはこの端末で直接変更した1件だけをその場で反映する) */
+  const refreshAfterSpotChange = useCallback(
+    (spot: Spot) => {
+      spotCache.applySpotChange(spot);
+      loadPrivateSpots();
+      if (managementLoaded) loadManagementSpots();
+    },
+    [spotCache, loadPrivateSpots, managementLoaded, loadManagementSpots]
+  );
+
+  /** スポットの詳細画面での削除後、表示中のモードに応じて取り直す */
+  const refreshAfterSpotDelete = useCallback(
+    (spotId: string) => {
+      spotCache.applySpotDelete(spotId);
+      loadPrivateSpots();
+      if (managementLoaded) loadManagementSpots();
+    },
+    [spotCache, loadPrivateSpots, managementLoaded, loadManagementSpots]
+  );
 
   // データ取得
   useEffect(() => {
     (async () => {
-      await Promise.all([loadSpots(), loadVisits(), loadVisitPlans()]);
+      await Promise.all([loadPrivateSpots(), loadVisits(), loadVisitPlans()]);
       setLoading(false);
     })();
-  }, [loadSpots, loadVisits, loadVisitPlans, spotTypeKey]);
+  }, [loadPrivateSpots, loadVisits, loadVisitPlans, spotTypeKey]);
 
   const spotById = useMemo(() => {
     const m = new Map<string, Spot>();
@@ -258,6 +279,7 @@ export default function SpotsView({
   // トップ画面: 2カラム(左=最近の訪問、右=都道府県別)
   if (!selectedPref) {
     return (
+      <>
       <main className="mx-auto max-w-4xl p-4">
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
           <section>
@@ -483,7 +505,7 @@ export default function SpotsView({
             onClose={() => setDetailSpotId(null)}
             onVisitChange={loadVisits}
             onSpotChange={refreshAfterSpotChange}
-            onSpotDeleted={refreshAfterSpotChange}
+            onSpotDeleted={refreshAfterSpotDelete}
             onVisitPlanChange={loadVisitPlans}
           />
         )}
@@ -494,19 +516,23 @@ export default function SpotsView({
             spots={managementSpots}
             role={role}
             onClose={() => setShowAddModal(false)}
-            onSaved={() => {
+            onSaved={(spot) => {
               setShowAddModal(false);
-              refreshAfterSpotChange();
+              refreshAfterSpotChange(spot);
             }}
           />
         )}
       </main>
+
+      <SpotDownloadDialogs cache={spotCache} />
+      </>
     );
   }
 
   // 市区町村一覧(都道府県を選択した直後)
   if (!selectedMuni) {
     return (
+      <>
       <main className="mx-auto max-w-lg p-4">
         <div className="mb-4 flex items-center gap-2">
           <button
@@ -534,11 +560,14 @@ export default function SpotsView({
           ))}
         </ul>
       </main>
+      <SpotDownloadDialogs cache={spotCache} />
+      </>
     );
   }
 
   // スポット一覧(市区町村まで選択した後)
   return (
+    <>
     <main className="mx-auto max-w-lg p-4">
       <div className="mb-3 flex items-center gap-2">
         <button
@@ -607,11 +636,13 @@ export default function SpotsView({
           spots={spots}
           onClose={() => setDetailSpotId(null)}
           onVisitChange={loadVisits}
-          onSpotChange={loadSpots}
-          onSpotDeleted={loadSpots}
+          onSpotChange={refreshAfterSpotChange}
+          onSpotDeleted={refreshAfterSpotDelete}
           onVisitPlanChange={loadVisitPlans}
         />
       )}
     </main>
+    <SpotDownloadDialogs cache={spotCache} />
+    </>
   );
 }
