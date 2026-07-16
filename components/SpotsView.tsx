@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import {
   PREFECTURES,
-  distinctValues,
+  SPOTS_PAGE_SIZE,
   formatVisitedOn,
   type Rank,
   type Spot,
@@ -55,41 +55,55 @@ export default function SpotsView({
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
 
   const [browseMode, setBrowseMode] = useState<BrowseMode>("rank");
-  const [managementSpots, setManagementSpots] = useState<Spot[]>([]);
+  const [managementItems, setManagementItems] = useState<Spot[]>([]);
+  const [managementTotal, setManagementTotal] = useState(0);
+  const [managementAvailableRanks, setManagementAvailableRanks] = useState<Rank[]>([]);
   const [managementLoaded, setManagementLoaded] = useState(false);
+  const [managementLoading, setManagementLoading] = useState(false);
+  const [managementSearchInput, setManagementSearchInput] = useState("");
   const [managementSearch, setManagementSearch] = useState("");
-  const [managementRank, setManagementRank] = useState<Rank | "all">("A");
+  // A〜Eのランク段階はtourist種類専用(CLAUDE.md参照)。それ以外の種類では
+  // 「A」を既定にすると該当スポットが無く常に0件表示になるため、すべて を既定にする
+  const [managementRank, setManagementRank] = useState<Rank | "all">(
+    spotTypeKey === "tourist" ? "A" : "all"
+  );
+  const [managementPage, setManagementPage] = useState(1);
 
   const loadManagementSpots = useCallback(async () => {
-    const { data } = await api.spots.list(undefined, { type: spotTypeKey });
-    setManagementSpots(data ?? []);
+    setManagementLoading(true);
+    const { data } = await api.spots.listPage({
+      type: spotTypeKey,
+      page: managementPage,
+      search: managementSearch || undefined,
+      rank: managementRank === "all" ? undefined : managementRank,
+    });
+    if (data) {
+      setManagementItems(data.items);
+      setManagementTotal(data.total);
+      setManagementAvailableRanks(
+        [...data.availableRanks].sort((a, b) => getRankOrder(a) - getRankOrder(b))
+      );
+    }
     setManagementLoaded(true);
-  }, [spotTypeKey]);
+    setManagementLoading(false);
+  }, [spotTypeKey, managementPage, managementSearch, managementRank]);
 
   useEffect(() => {
-    if (browseMode === "rank" && !managementLoaded) loadManagementSpots();
-  }, [browseMode, managementLoaded, loadManagementSpots]);
+    if (browseMode === "rank") loadManagementSpots();
+  }, [browseMode, loadManagementSpots]);
 
-  const managementAvailableRanks = useMemo(
-    () =>
-      distinctValues(managementSpots.map((s) => s.rank)).sort(
-        (a, b) => getRankOrder(a) - getRankOrder(b)
-      ),
-    [managementSpots]
-  );
+  const handleManagementSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setManagementPage(1);
+    setManagementSearch(managementSearchInput.trim());
+  };
 
-  const managementFiltered = useMemo(() => {
-    const q = managementSearch.trim();
-    return managementSpots.filter((s) => {
-      if (managementRank !== "all" && s.rank !== managementRank) return false;
-      if (!q) return true;
-      return (
-        s.name.includes(q) ||
-        (s.name_kana ?? "").includes(q) ||
-        s.prefecture.includes(q)
-      );
-    });
-  }, [managementSpots, managementSearch, managementRank]);
+  const handleManagementRankChange = (rank: Rank | "all") => {
+    setManagementRank(rank);
+    setManagementPage(1);
+  };
+
+  const managementTotalPages = Math.max(1, Math.ceil(managementTotal / SPOTS_PAGE_SIZE));
 
   const loadVisits = useCallback(async () => {
     const { data } = await api.visits.list();
@@ -422,13 +436,13 @@ export default function SpotsView({
             ) : (
               <>
                 <form
-                  onSubmit={(e) => e.preventDefault()}
+                  onSubmit={handleManagementSearchSubmit}
                   className="mb-2 flex flex-wrap items-center gap-2"
                 >
                   <input
                     type="search"
-                    value={managementSearch}
-                    onChange={(e) => setManagementSearch(e.target.value)}
+                    value={managementSearchInput}
+                    onChange={(e) => setManagementSearchInput(e.target.value)}
                     placeholder="名前・都道府県で検索"
                     className="min-w-40 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
                   />
@@ -445,7 +459,7 @@ export default function SpotsView({
                       <button
                         key={r}
                         type="button"
-                        onClick={() => setManagementRank(r)}
+                        onClick={() => handleManagementRankChange(r)}
                         className={`flex-1 px-2 py-1.5 font-medium ${
                           managementRank === r
                             ? "bg-blue-600 text-white"
@@ -461,7 +475,7 @@ export default function SpotsView({
                   <p className="text-sm text-gray-500">読み込み中…</p>
                 ) : (
                   <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-                    {managementFiltered.map((spot) => (
+                    {managementItems.map((spot) => (
                       <li key={spot.id}>
                         <button
                           onClick={() => setDetailSpotId(spot.id)}
@@ -484,10 +498,36 @@ export default function SpotsView({
                     ))}
                   </ul>
                 )}
-                {managementLoaded && managementFiltered.length === 0 && (
+                {managementLoaded && managementItems.length === 0 && (
                   <p className="mt-2 text-sm text-gray-500">
                     条件に合うスポットがありません。
                   </p>
+                )}
+                {managementLoaded && managementTotal > 0 && (
+                  <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
+                    <button
+                      type="button"
+                      disabled={managementPage <= 1 || managementLoading}
+                      onClick={() => setManagementPage((p) => Math.max(1, p - 1))}
+                      className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 disabled:opacity-40"
+                    >
+                      ← 前へ
+                    </button>
+                    <span>
+                      {managementPage} / {managementTotalPages}ページ(全
+                      {managementTotal}件)
+                    </span>
+                    <button
+                      type="button"
+                      disabled={managementPage >= managementTotalPages || managementLoading}
+                      onClick={() =>
+                        setManagementPage((p) => Math.min(managementTotalPages, p + 1))
+                      }
+                      className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 disabled:opacity-40"
+                    >
+                      次へ →
+                    </button>
+                  </div>
                 )}
               </>
             )}
@@ -497,7 +537,7 @@ export default function SpotsView({
         {detailSpotId && (
           <SpotDetailModal
             spotId={detailSpotId}
-            spots={browseMode === "rank" ? managementSpots : spots}
+            spots={browseMode === "rank" ? managementItems : spots}
             onClose={() => setDetailSpotId(null)}
             onVisitChange={loadVisits}
             onSpotChange={refreshAfterSpotChange}

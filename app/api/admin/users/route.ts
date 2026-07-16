@@ -3,7 +3,7 @@ import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import type { AppUser, Role } from "@/lib/types";
 
-const ROLES: Role[] = ["admin", "moderator", "user"];
+const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
 
 export async function GET() {
   const user = await getCurrentUser();

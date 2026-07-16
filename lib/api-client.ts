@@ -87,6 +87,21 @@ export const api = {
       qs.set("type", opts.type);
       return request<Spot[]>(`/api/spots?${qs.toString()}`);
     },
+    listPage: (opts: {
+      type: string;
+      page: number;
+      search?: string;
+      rank?: string;
+    }) => {
+      const qs = new URLSearchParams();
+      qs.set("type", opts.type);
+      qs.set("page", String(opts.page));
+      if (opts.search) qs.set("search", opts.search);
+      if (opts.rank) qs.set("rank", opts.rank);
+      return request<{ items: Spot[]; total: number; availableRanks: string[] }>(
+        `/api/spots?${qs.toString()}`
+      );
+    },
     get: (id: string) => request<Spot>(`/api/spots/${id}`),
     create: (spot: unknown, type: string) =>
       request<Spot>(`/api/spots?type=${encodeURIComponent(type)}`, {
@@ -168,6 +183,10 @@ export const api = {
         request<AppUser>(`/api/admin/users/${id}`, {
           method: "PATCH",
           body: JSON.stringify({ nickname }),
+        }),
+      delete: (id: string) =>
+        request<{ ok: boolean }>(`/api/admin/users/${id}`, {
+          method: "DELETE",
         }),
     },
   },
