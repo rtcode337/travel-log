@@ -34,6 +34,9 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       NODE_ENV: production
+    volumes:
+      # 訪問記録の写真ファイル置き場(lib/photos.ts)。DBには相対パスのみ保存される
+      - ./photos:/app/photos
     ports:
       - "3000:3000"
     restart: unless-stopped
