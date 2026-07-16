@@ -65,7 +65,8 @@ async function request<T>(
 
 export const api = {
   auth: {
-    status: () => request<{ hasUser: boolean }>("/api/auth/status"),
+    status: () =>
+      request<{ hasUser: boolean; googleEnabled: boolean }>("/api/auth/status"),
     setup: (email: string, password: string) =>
       request("/api/auth/setup", {
         method: "POST",
