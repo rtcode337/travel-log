@@ -19,6 +19,7 @@ import RankBadge from "@/components/RankBadge";
 import MiniMap from "@/components/MiniMap";
 import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
+import SpotInfoModal from "@/components/SpotInfoModal";
 
 function formatReviewDatetime(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", {
@@ -63,6 +64,8 @@ export default function SpotDetailModal({
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
+  // Wikipediaから取得したスポット情報(写真+概要)のモーダル表示
+  const [showInfo, setShowInfo] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [planned, setPlanned] = useState(false);
@@ -303,43 +306,54 @@ export default function SpotDetailModal({
 
             <MiniMap lat={spot.lat} lng={spot.lng} rank={spot.rank} />
 
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                  `${spot.name} ${spot.lat},${spot.lng}`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-block text-sm text-blue-600 underline"
-              >
-                Google マップで開く ↗
-              </a>
-              <a
-                href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-                  `${spot.lat},${spot.lng}`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-block text-sm text-blue-600 underline"
-              >
-                Google マップで経路を表示 ↗
-              </a>
-              <Link
-                href={`${typeKey ? `/${typeKey}` : ""}/map?spot=${spot.id}`}
-                className="inline-block text-sm text-blue-600 underline"
-              >
-                アプリの地図で開く
-              </Link>
-              {spot.official_url && (
+            <div className="mt-3 space-y-1">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <Link
+                  href={`${typeKey ? `/${typeKey}` : ""}/map?spot=${spot.id}`}
+                  className="inline-block text-sm text-blue-600 underline"
+                >
+                  アプリの地図で開く
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setShowInfo(true)}
+                  className="inline-block text-sm text-blue-600 underline"
+                >
+                  スポット詳細を開く
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <a
-                  href={spot.official_url}
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                    `${spot.name} ${spot.lat},${spot.lng}`
+                  )}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-block text-sm text-blue-600 underline"
                 >
-                  公式サイト ↗
+                  Google マップで開く ↗
                 </a>
-              )}
+                <a
+                  href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                    `${spot.lat},${spot.lng}`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-sm text-blue-600 underline"
+                >
+                  Google マップで経路を表示 ↗
+                </a>
+                {spot.official_url && (
+                  <a
+                    href={spot.official_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block text-sm text-blue-600 underline"
+                  >
+                    公式サイト ↗
+                  </a>
+                )}
+              </div>
             </div>
 
             {/* 訪問履歴 */}
@@ -510,6 +524,15 @@ export default function SpotDetailModal({
             // 訪問記録時、サーバー側で訪問予定からも自動的に外れる
             onVisitPlanChange?.();
           }}
+        />
+      )}
+
+      {showInfo && spot && (
+        <SpotInfoModal
+          spotName={spot.name}
+          prefecture={spot.prefecture}
+          municipality={spot.municipality}
+          onClose={() => setShowInfo(false)}
         />
       )}
 
