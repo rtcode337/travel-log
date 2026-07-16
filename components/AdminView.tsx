@@ -46,6 +46,10 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [importing, setImporting] = useState(false);
 
   const [users, setUsers] = useState<AppUser[]>([]);
+  // ロール・ニックネームは選択/入力しただけでは保存せず、ユーザーごとの
+  // 「変更」ボタンを押した時だけAPIに反映する下書き
+  const [roleDrafts, setRoleDrafts] = useState<Record<string, Role>>({});
+  const [nicknameDrafts, setNicknameDrafts] = useState<Record<string, string>>({});
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<Role>("user");
@@ -140,24 +144,50 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     loadUsers();
   };
 
-  const handleChangeRole = async (user: AppUser, role: Role) => {
-    if (user.id === myId) {
-      setUserMessage("自分自身のロールは変更できません。");
-      return;
+  const handleChangeUser = async (
+    user: AppUser,
+    { nickname, role }: { nickname: string; role: Role }
+  ) => {
+    const errors: string[] = [];
+    if (nickname !== (user.nickname ?? "")) {
+      const { error } = await api.admin.users.setNickname(user.id, nickname);
+      if (error) errors.push("ニックネーム: " + error.message);
     }
-    const { error } = await api.admin.users.setRole(user.id, role);
+    if (role !== user.role) {
+      if (user.id === myId) {
+        errors.push("自分自身のロールは変更できません。");
+      } else {
+        const { error } = await api.admin.users.setRole(user.id, role);
+        if (error) errors.push("ロール: " + error.message);
+      }
+    }
     setUserMessage(
-      error ? "ロール変更に失敗しました: " + error.message : `${user.email} のロールを変更しました。`
+      errors.length > 0
+        ? "変更に失敗しました: " + errors.join(" / ")
+        : `${user.email} を変更しました。`
     );
+    setNicknameDrafts((prev) => {
+      const next = { ...prev };
+      delete next[user.id];
+      return next;
+    });
+    setRoleDrafts((prev) => {
+      const next = { ...prev };
+      delete next[user.id];
+      return next;
+    });
     loadUsers();
   };
 
-  const handleChangeNickname = async (user: AppUser, nickname: string) => {
-    const { error } = await api.admin.users.setNickname(user.id, nickname);
+  const handleDeleteUser = async (user: AppUser) => {
+    if (user.id === myId) {
+      setUserMessage("自分自身は削除できません。");
+      return;
+    }
+    if (!confirm(`${user.email} を削除しますか?この操作は取り消せません。`)) return;
+    const { error } = await api.admin.users.delete(user.id);
     setUserMessage(
-      error
-        ? "ニックネームの変更に失敗しました: " + error.message
-        : `${user.email} のニックネームを変更しました。`
+      error ? "削除に失敗しました: " + error.message : `${user.email} を削除しました。`
     );
     loadUsers();
   };
@@ -305,49 +335,87 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
               </p>
             )}
             <ul className="mb-4 divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-              {users.map((u) => (
-                <li key={u.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {u.email}
-                      {u.id === myId && (
-                        <span className="ml-1 text-xs text-gray-400">(自分)</span>
-                      )}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {u.has_password && "パスワード"}
-                      {u.has_password && u.has_google && " / "}
-                      {u.has_google && "Google"}
-                    </p>
-                    <input
-                      type="text"
-                      autoComplete="off"
-                      defaultValue={u.nickname ?? ""}
-                      placeholder="ニックネーム未設定(口コミ等に表示)"
-                      onBlur={(e) => {
-                        const value = e.target.value.trim();
-                        if (value !== (u.nickname ?? "")) {
-                          handleChangeNickname(u, value);
+              {users.map((u) => {
+                const nicknameDraft = nicknameDrafts[u.id] ?? u.nickname ?? "";
+                const roleDraft = roleDrafts[u.id] ?? u.role;
+                return (
+                  <li key={u.id} className="flex flex-col gap-2 px-4 py-3">
+                    <div>
+                      <p className="truncate text-sm font-medium">
+                        {u.email}
+                        {u.id === myId && (
+                          <span className="ml-1 text-xs text-gray-400">(自分)</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {u.has_password && "パスワード"}
+                        {u.has_password && u.has_google && " / "}
+                        {u.has_google && "Google"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        autoComplete="off"
+                        value={nicknameDraft}
+                        placeholder="ニックネーム未設定(口コミ等に表示)"
+                        onChange={(e) =>
+                          setNicknameDrafts((prev) => ({
+                            ...prev,
+                            [u.id]: e.target.value,
+                          }))
                         }
-                      }}
-                      className="mt-1 w-full rounded border border-gray-200 px-1.5 py-1 text-xs"
-                    />
-                  </div>
-                  <select
-                    value={u.role}
-                    disabled={u.id === myId}
-                    onChange={(e) => handleChangeRole(u, e.target.value as Role)}
-                    title={u.id === myId ? "自分自身のロールは変更できません" : undefined}
-                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {ROLE_LABELS[r]}
-                      </option>
-                    ))}
-                  </select>
-                </li>
-              ))}
+                        className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs"
+                      />
+                      <select
+                        value={roleDraft}
+                        disabled={u.id === myId}
+                        onChange={(e) =>
+                          setRoleDrafts((prev) => ({
+                            ...prev,
+                            [u.id]: e.target.value as Role,
+                          }))
+                        }
+                        title={u.id === myId ? "自分自身のロールは変更できません" : undefined}
+                        className="shrink-0 rounded-lg border border-gray-300 px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        {ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABELS[r]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          nicknameDraft.trim() === (u.nickname ?? "") &&
+                          roleDraft === u.role
+                        }
+                        onClick={() =>
+                          handleChangeUser(u, {
+                            nickname: nicknameDraft.trim(),
+                            role: roleDraft,
+                          })
+                        }
+                        className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        変更
+                      </button>
+                      {u.id !== myId && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteUser(u)}
+                          className="shrink-0 rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-600"
+                        >
+                          削除
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
 
             <form

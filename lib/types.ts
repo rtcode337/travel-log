@@ -11,8 +11,7 @@ export type Category = string;
  * 観光地(tourist)のランクはWikipedia(ja)月次ページビュー数を知名度の指標とし、
  * 全スポット中の相対順位(パーセンタイル)で機械的に区分している
  * (世界遺産・国宝等の指定がある場所は目視で格上げする例外あり)。
- * 最上位をSにすると運用上何かと面倒なため、A〜Eの5段階にしている
- * (旧S〜D表記からの一律シフト。db/init/06_rank_shift.sql参照)。
+ * 最上位をSにすると運用上何かと面倒なため、A〜Eの5段階にしている。
  * A: 上位5%(全国的に絶対外せない) / B: 次15%(全国区で有名) /
  * C: 次30%(地方の定番) / D: 次30%(地元で知られている) / E: 残り20%(穴場)
  */
@@ -203,6 +202,8 @@ export interface PublicReview {
 }
 
 export const REVIEWS_PAGE_SIZE = 10;
+
+export const SPOTS_PAGE_SIZE = 100;
 
 export const PREFECTURES = [
   "北海道",
