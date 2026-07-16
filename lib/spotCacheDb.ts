@@ -64,8 +64,12 @@ export function expandSpot(spot: CachedSpot): Spot {
 }
 
 const DB_NAME = "travel-log";
-const DB_VERSION = 1;
+// 検証中に一時的にストア名を"public-spots-v2"へ切り替える版(DB_VERSION=2)を
+// 配ってしまったことがあるため、それを開いたブラウザより確実に前進するよう3にする
+// (IndexedDBはバージョンを後退できず、既存より低いバージョンでopenすると失敗する)。
+const DB_VERSION = 3;
 const STORE = "public-spots"; // 値のキーはtypeKey
+const TEMP_V2_STORE = "public-spots-v2"; // 上記の一時版が作ったストア(残っていれば削除)
 const LEGACY_PREFIX = "travel-log:public-spots:"; // 旧localStorage方式のキー接頭辞
 
 function idbAvailable(): boolean {
@@ -77,6 +81,9 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
+      if (db.objectStoreNames.contains(TEMP_V2_STORE)) {
+        db.deleteObjectStore(TEMP_V2_STORE);
+      }
       if (!db.objectStoreNames.contains(STORE)) {
         // keyPathは持たせず、typeKeyを外部キーにしてput/getする
         db.createObjectStore(STORE);
