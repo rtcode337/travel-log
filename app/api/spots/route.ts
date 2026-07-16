@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { ALLOWED_STATUS_BY_ROLE, MODERATION_ROLES, SPOT_ADMIN_ROLES, type Spot } from "@/lib/types";
+import {
+  ALLOWED_STATUS_BY_ROLE,
+  MODERATION_ROLES,
+  SPOT_ADMIN_ROLES,
+  SPOTS_PAGE_SIZE,
+  type Spot,
+} from "@/lib/types";
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -32,12 +38,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
   }
 
-  const conditions = ["spot_type_id = $2"];
+  const baseConditions = ["spot_type_id = $2"];
   const params: unknown[] = [user.id, activeType.id];
 
   // private(非公開)は常に本人のみ。moderator以上は承認待ち・却下も全件見えるが、
   // それ以外(一般ユーザー)は公開または本人の分しか見えない
-  conditions.push(
+  baseConditions.push(
     MODERATION_ROLES.includes(user.role)
       ? "(status != 'private' or created_by = $1)"
       : "(status = 'published' or created_by = $1)"
@@ -45,15 +51,77 @@ export async function GET(request: Request) {
 
   if (status) {
     params.push(status);
-    conditions.push(`status = $${params.length}`);
+    baseConditions.push(`status = $${params.length}`);
   }
 
-  const { rows } = await query<Spot>(
-    `select * from spots where ${conditions.join(" and ")} order by prefecture, name`,
-    params
-  );
+  // pageが指定されない呼び出し元(自分の非公開スポット取得・管理画面の件数集計等)は
+  // 従来通り全件返す。ランクから探す画面(重い一覧)のみ検索・ランク絞り込み込みで
+  // ページングする
+  const pageParam = searchParams.get("page");
+  if (!pageParam) {
+    const { rows } = await query<Spot>(
+      `select * from spots where ${baseConditions.join(" and ")} order by prefecture, name`,
+      params
+    );
+    return NextResponse.json({ data: rows });
+  }
 
-  return NextResponse.json({ data: rows });
+  const page = Math.max(1, Number(pageParam) || 1);
+  const conditions = [...baseConditions];
+  const listParams = [...params];
+
+  const search = searchParams.get("search");
+  if (search) {
+    listParams.push(`%${search}%`);
+    const idx = listParams.length;
+    conditions.push(
+      `(name ilike $${idx} or name_kana ilike $${idx} or prefecture ilike $${idx})`
+    );
+  }
+
+  const rank = searchParams.get("rank");
+  if (rank) {
+    listParams.push(rank);
+    conditions.push(`rank = $${listParams.length}`);
+  }
+
+  // ランクの並び順(A〜E→Z→郵便局→その他既知外→null)はlib/rankStyle.tsの
+  // getRankOrderと揃えること(すべてランク表示時にランクが高い順になるように)
+  const RANK_ORDER_SQL = `
+    case
+      when rank = 'A' then 0
+      when rank = 'B' then 1
+      when rank = 'C' then 2
+      when rank = 'D' then 3
+      when rank = 'E' then 4
+      when rank = 'Z' then 5
+      when rank = '郵便局' then 6
+      when rank is null then 8
+      else 7
+    end`;
+
+  const where = conditions.join(" and ");
+  const [{ rows: items }, { rows: countRows }, { rows: rankRows }] = await Promise.all([
+    query<Spot>(
+      `select * from spots where ${where} order by ${RANK_ORDER_SQL}, prefecture, name
+       limit $${listParams.length + 1} offset $${listParams.length + 2}`,
+      [...listParams, SPOTS_PAGE_SIZE, (page - 1) * SPOTS_PAGE_SIZE]
+    ),
+    query<{ count: string }>(`select count(*) from spots where ${where}`, listParams),
+    // ランク選択肢は検索文字列・選択中ランクの影響を受けず、種類全体から出す
+    query<{ rank: string }>(
+      `select distinct rank from spots where ${baseConditions.join(" and ")} and rank is not null`,
+      params
+    ),
+  ]);
+
+  return NextResponse.json({
+    data: {
+      items,
+      total: Number(countRows[0].count),
+      availableRanks: rankRows.map((r) => r.rank),
+    },
+  });
 }
 
 interface SpotInput {
