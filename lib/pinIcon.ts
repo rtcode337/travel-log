@@ -18,26 +18,33 @@ const PIXEL_RATIO = 2;
 export const PIN_ICON_PAD = 3;
 
 /** とんがり部分の高さ(頭の円のサイズに比例、最低5px) */
-export function pinTailHeight(size: number): number {
+function pinTailHeight(size: number): number {
   return Math.max(5, Math.round(size * 0.45));
 }
 
-export function pinIconId(rank: Rank | null, visited: boolean): string {
-  return `pin-${visited ? "visited" : "normal"}-${rank ?? "__null__"}`;
+export function pinIconId(
+  rank: Rank | null,
+  visited: boolean,
+  isPrivate: boolean
+): string {
+  return `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}-${rank ?? "__null__"}`;
 }
 
 /** ピン画像を(未登録なら)生成して登録し、そのIDを返す。冪等 */
 export function ensurePinImage(
   map: maplibregl.Map,
   rank: Rank | null,
-  visited: boolean
+  visited: boolean,
+  /** 自分だけの非公開スポット。公開スポットと見分けられるよう破線で縁取る */
+  isPrivate: boolean
 ): string {
-  const id = pinIconId(rank, visited);
+  const id = pinIconId(rank, visited, isPrivate);
   if (map.hasImage(id)) return id;
 
-  const { size, bg } = getRankPinStyle(rank);
+  const { size, bg, border } = getRankPinStyle(rank);
   // 訪問済みは(ランクの色より視認性を優先し)ピン全体を緑+チェックマークにする
   const fill = visited ? "#16a34a" : bg;
+  const borderColor = visited ? "#15803d" : border;
   const label = visited ? "✓" : rank === "郵便局" ? "〒" : (rank ?? "");
   const textColor = visited ? "#ffffff" : getRankPinTextColor(rank);
 
@@ -68,6 +75,14 @@ export function ensurePinImage(
   ctx.fillStyle = fill;
   ctx.fill();
   ctx.shadowColor = "transparent";
+
+  if (isPrivate) {
+    ctx.setLineDash([3, 2.5]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = borderColor;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   if (label) {
     // rankは自由入力で複数文字もありうるので、その場合は少し小さくして収める
