@@ -7,7 +7,6 @@ import {
   distinctValues,
   formatVisitedOn,
   type Rank,
-  type Role,
   type Spot,
   type Visit,
   type VisitPlan,
@@ -19,7 +18,6 @@ import FilterBar, {
 } from "@/components/FilterBar";
 import RankBadge from "@/components/RankBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
-import AddSpotModal from "@/components/AddSpotModal";
 import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getRankOrder } from "@/lib/rankStyle";
 import { useSpotCache } from "@/lib/useSpotCache";
@@ -56,17 +54,11 @@ export default function SpotsView({
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
 
-  const [role, setRole] = useState<Role | null>(null);
-  const [browseMode, setBrowseMode] = useState<BrowseMode>("prefecture");
+  const [browseMode, setBrowseMode] = useState<BrowseMode>("rank");
   const [managementSpots, setManagementSpots] = useState<Spot[]>([]);
   const [managementLoaded, setManagementLoaded] = useState(false);
   const [managementSearch, setManagementSearch] = useState("");
-  const [managementRank, setManagementRank] = useState<Rank | "all">("all");
-  const [showAddModal, setShowAddModal] = useState(false);
-
-  useEffect(() => {
-    api.auth.me().then(({ data }) => setRole(data?.role ?? null));
-  }, []);
+  const [managementRank, setManagementRank] = useState<Rank | "all">("A");
 
   const loadManagementSpots = useCallback(async () => {
     const { data } = await api.spots.list(undefined, { type: spotTypeKey });
@@ -236,7 +228,7 @@ export default function SpotsView({
     const list = spots.filter((s) => {
       if (s.prefecture !== selectedPref) return false;
       if ((s.municipality ?? UNKNOWN_MUNICIPALITY) !== selectedMuni) return false;
-      return passesFilters(filters, s.rank, s.category, visitedIds.has(s.id));
+      return passesFilters(filters, s.rank, visitedIds.has(s.id));
     });
     list.sort((a, b) => {
       switch (sortKey) {
@@ -307,6 +299,40 @@ export default function SpotsView({
                 </ul>
               </div>
             )}
+            <div className="mb-6">
+              <h1 className="mb-4 text-lg font-bold">最近の訪問場所</h1>
+              {recentVisits.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  まだ訪問記録がありません。
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  {recentVisits.map((visit) => {
+                    const spot = spotById.get(visit.spot_id)!;
+                    return (
+                      <li key={visit.id}>
+                        <button
+                          onClick={() => setDetailSpotId(spot.id)}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                        >
+                          <RankBadge rank={spot.rank} size="sm" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{spot.name}</p>
+                            <p className="text-xs text-gray-500">
+                              {spot.prefecture}
+                              {spot.municipality && ` ${spot.municipality}`}
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-xs text-gray-400">
+                            {formatVisitedOn(visit.visited_on, visit.date_precision)}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
             {myPrivateSpots.length > 0 && (
               <div className="mb-6">
                 <h1 className="mb-4 text-lg font-bold">自分の非公開スポット</h1>
@@ -334,38 +360,6 @@ export default function SpotsView({
                 </ul>
               </div>
             )}
-            <h1 className="mb-4 text-lg font-bold">最近の訪問場所</h1>
-            {recentVisits.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                まだ訪問記録がありません。
-              </p>
-            ) : (
-              <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-                {recentVisits.map((visit) => {
-                  const spot = spotById.get(visit.spot_id)!;
-                  return (
-                    <li key={visit.id}>
-                      <button
-                        onClick={() => setDetailSpotId(spot.id)}
-                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
-                      >
-                        <RankBadge rank={spot.rank} size="sm" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">{spot.name}</p>
-                          <p className="text-xs text-gray-500">
-                            {spot.prefecture}
-                            {spot.municipality && ` ${spot.municipality}`}
-                          </p>
-                        </div>
-                        <span className="shrink-0 text-xs text-gray-400">
-                          {formatVisitedOn(visit.visited_on, visit.date_precision)}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
           </section>
 
           <section>
@@ -376,17 +370,6 @@ export default function SpotsView({
               <div className="flex overflow-hidden rounded-lg border border-gray-300 text-xs">
                 <button
                   type="button"
-                  onClick={() => setBrowseMode("prefecture")}
-                  className={`px-2.5 py-1 font-medium ${
-                    browseMode === "prefecture"
-                      ? "bg-blue-600 text-white"
-                      : "bg-white text-gray-500"
-                  }`}
-                >
-                  都道府県
-                </button>
-                <button
-                  type="button"
                   onClick={() => setBrowseMode("rank")}
                   className={`px-2.5 py-1 font-medium ${
                     browseMode === "rank"
@@ -395,6 +378,17 @@ export default function SpotsView({
                   }`}
                 >
                   ランク
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBrowseMode("prefecture")}
+                  className={`px-2.5 py-1 font-medium ${
+                    browseMode === "prefecture"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-500"
+                  }`}
+                >
+                  都道府県
                 </button>
               </div>
             </div>
@@ -427,7 +421,10 @@ export default function SpotsView({
               </>
             ) : (
               <>
-                <div className="mb-2 flex flex-wrap items-center gap-2">
+                <form
+                  onSubmit={(e) => e.preventDefault()}
+                  className="mb-2 flex flex-wrap items-center gap-2"
+                >
                   <input
                     type="search"
                     value={managementSearch}
@@ -436,13 +433,12 @@ export default function SpotsView({
                     className="min-w-40 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
                   />
                   <button
-                    type="button"
-                    onClick={() => setShowAddModal(true)}
+                    type="submit"
                     className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
                   >
-                    + スポット追加
+                    検索
                   </button>
-                </div>
+                </form>
                 {managementAvailableRanks.length > 0 && (
                   <div className="mb-2 flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
                     {([...managementAvailableRanks, "all"] as const).map((r) => (
@@ -507,19 +503,6 @@ export default function SpotsView({
             onSpotChange={refreshAfterSpotChange}
             onSpotDeleted={refreshAfterSpotDelete}
             onVisitPlanChange={loadVisitPlans}
-          />
-        )}
-
-        {showAddModal && (
-          <AddSpotModal
-            spotTypeKey={spotTypeKey}
-            spots={managementSpots}
-            role={role}
-            onClose={() => setShowAddModal(false)}
-            onSaved={(spot) => {
-              setShowAddModal(false);
-              refreshAfterSpotChange(spot);
-            }}
           />
         )}
       </main>

@@ -2,21 +2,20 @@
 
 import { useMemo } from "react";
 import { distinctValues, type Rank, type Spot } from "@/lib/types";
-import { getRankOrder } from "@/lib/rankStyle";
+import { getRankBadgeStyle, getRankOrder } from "@/lib/rankStyle";
 
-export type VisitedFilter = "all" | "visited" | "unvisited";
+export type VisitedValue = "visited" | "unvisited";
 
 export interface SpotFilters {
-  /** 空配列 = ランクによる絞り込みなし(全件表示) */
+  /** 空配列 = ランクによる絞り込みなし(「すべて」選択中、全件表示) */
   ranks: Rank[];
-  visited: VisitedFilter;
-  category: string; // "all" またはカテゴリ名
+  /** 空配列 = 訪問状況による絞り込みなし(「すべて」選択中、全件表示) */
+  visited: VisitedValue[];
 }
 
 export const DEFAULT_FILTERS: SpotFilters = {
   ranks: [],
-  visited: "all",
-  category: "all",
+  visited: [],
 };
 
 /**
@@ -25,36 +24,69 @@ export const DEFAULT_FILTERS: SpotFilters = {
 export function passesFilters(
   filters: SpotFilters,
   rank: Rank | null,
-  category: string | null,
   isVisited: boolean
 ): boolean {
   if (filters.ranks.length > 0) {
     if (rank === null || !filters.ranks.includes(rank)) return false;
   }
-  if (filters.visited === "visited" && !isVisited) return false;
-  if (filters.visited === "unvisited" && isVisited) return false;
-  if (filters.category !== "all" && filters.category !== category) return false;
+  if (filters.visited.length > 0) {
+    const value: VisitedValue = isVisited ? "visited" : "unvisited";
+    if (!filters.visited.includes(value)) return false;
+  }
   return true;
 }
 
-const visitedOptions: { value: VisitedFilter; label: string }[] = [
-  { value: "all", label: "すべて" },
+/**
+ * 「すべて」(空配列)の状態から特定の1件を選ぶと、それ単独の絞り込みになる
+ * (他をすべて手で外す手間を省くため)。それ以外は通常のトグル(追加/除外)。
+ */
+function toggleSelection<T>(current: T[], clicked: T): T[] {
+  if (current.length === 0) return [clicked];
+  return current.includes(clicked)
+    ? current.filter((v) => v !== clicked)
+    : [...current, clicked];
+}
+
+const VISITED_OPTIONS: { value: VisitedValue; label: string }[] = [
   { value: "visited", label: "訪問済み" },
   { value: "unvisited", label: "未訪問" },
 ];
+
+function Chip({
+  label,
+  active,
+  activeClassName,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  activeClassName: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1 font-medium ${
+        active ? activeClassName : "border-gray-300 bg-white text-gray-400"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+const ALL_CHIP_ACTIVE_CLASS = "border-blue-600 bg-blue-600 text-white";
 
 export default function FilterBar({
   spots,
   filters,
   onChange,
-  stacked = false,
 }: {
-  /** 現在アクティブなスポット種類の実データから、ランク・カテゴリの選択肢を動的に作る */
+  /** 現在アクティブなスポット種類の実データから、ランクの選択肢を動的に作る */
   spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;
-  /** trueならモーダル内表示向けに、ラベル付きで縦一列・幅いっぱいに並べる */
-  stacked?: boolean;
 }) {
   const availableRanks = useMemo(
     () =>
@@ -63,103 +95,66 @@ export default function FilterBar({
       ),
     [spots]
   );
-  const availableCategories = useMemo(
-    () => distinctValues(spots.map((s) => s.category)),
-    [spots]
-  );
-
-  // <select>は単一選択なので、既に複数選択された状態(過去互換)は「すべて」扱いにする
-  const selectedRank = filters.ranks.length === 1 ? filters.ranks[0] : "all";
-
-  const selectClassName = stacked
-    ? "w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5"
-    : "rounded-lg border border-gray-300 bg-white px-2 py-1.5";
-
-  const rankSelect = availableRanks.length > 0 && (
-    <select
-      value={selectedRank}
-      onChange={(e) =>
-        onChange({
-          ...filters,
-          ranks: e.target.value === "all" ? [] : [e.target.value],
-        })
-      }
-      className={selectClassName}
-    >
-      <option value="all">すべてのランク</option>
-      {availableRanks.map((rank) => (
-        <option key={rank} value={rank}>
-          {rank}
-        </option>
-      ))}
-    </select>
-  );
-
-  const visitedSelect = (
-    <select
-      value={filters.visited}
-      onChange={(e) =>
-        onChange({ ...filters, visited: e.target.value as VisitedFilter })
-      }
-      className={selectClassName}
-    >
-      {visitedOptions.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  );
-
-  const categorySelect = availableCategories.length > 0 && (
-    <select
-      value={filters.category}
-      onChange={(e) => onChange({ ...filters, category: e.target.value })}
-      className={selectClassName}
-    >
-      <option value="all">全カテゴリ</option>
-      {availableCategories.map((c) => (
-        <option key={c} value={c}>
-          {c}
-        </option>
-      ))}
-    </select>
-  );
-
-  if (stacked) {
-    return (
-      <div className="space-y-3 text-sm">
-        {rankSelect && (
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-500">
-              ランク
-            </span>
-            {rankSelect}
-          </label>
-        )}
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-500">
-            訪問状況
-          </span>
-          {visitedSelect}
-        </label>
-        {categorySelect && (
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-500">
-              カテゴリ
-            </span>
-            {categorySelect}
-          </label>
-        )}
-      </div>
-    );
-  }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm">
-      {rankSelect}
-      {visitedSelect}
-      {categorySelect}
+    <div className="space-y-3 text-sm">
+      {availableRanks.length > 0 && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-gray-500">
+            ランク
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {availableRanks.map((rank) => (
+              <Chip
+                key={rank}
+                label={rank}
+                active={filters.ranks.includes(rank)}
+                activeClassName={getRankBadgeStyle(rank)}
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    ranks: toggleSelection(filters.ranks, rank),
+                  })
+                }
+              />
+            ))}
+            <Chip
+              label="すべて"
+              active={filters.ranks.length === 0}
+              activeClassName={ALL_CHIP_ACTIVE_CLASS}
+              onClick={() => onChange({ ...filters, ranks: [] })}
+            />
+          </div>
+        </div>
+      )}
+
+      <div>
+        <span className="mb-1 block text-xs font-medium text-gray-500">
+          訪問状況
+        </span>
+        <div className="flex flex-wrap gap-1.5">
+          {VISITED_OPTIONS.map((opt) => (
+            <Chip
+              key={opt.value}
+              label={opt.label}
+              active={filters.visited.includes(opt.value)}
+              activeClassName={ALL_CHIP_ACTIVE_CLASS}
+              onClick={() =>
+                onChange({
+                  ...filters,
+                  visited: toggleSelection(filters.visited, opt.value),
+                })
+              }
+            />
+          ))}
+          <Chip
+            label="すべて"
+            active={filters.visited.length === 0}
+            activeClassName={ALL_CHIP_ACTIVE_CLASS}
+            onClick={() => onChange({ ...filters, visited: [] })}
+          />
+        </div>
+      </div>
     </div>
   );
 }
