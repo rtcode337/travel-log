@@ -23,8 +23,10 @@ yarn-error.log*
 
 # Postgresの実データ(docker-compose.yml/docker-compose.dev.ymlのbindマウント先)
 # 個人情報を含むため絶対にコミットしない。ディレクトリ自体はdb-initサービス
-# (docker-compose.yml)が起動時にmkdirするので.gitkeepは不要
-/db/data/*
+# (docker-compose.yml)が起動時にmkdirするので.gitkeepは不要。中身ではなく
+# ディレクトリごと無視することで、postgresユーザー所有で権限が絞られた
+# 中身をgitが読みに行かず「could not open directory」警告が出ないようにする
+/db/data/
 
 # 訪問記録の写真ファイル(docker-compose.ymlのbindマウント先、lib/photos.ts参照)
 # db/data と同じ理由で、中身はコミットせずフォルダだけ .gitkeep で残す
