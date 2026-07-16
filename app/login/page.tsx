@@ -46,10 +46,10 @@ function LoginForm() {
       : await api.auth.login(email, password);
     setLoading(false);
     if (error) {
+      // サーバーが日本語のエラーメッセージを返すのでそれを優先する
       setError(
-        isSetup
-          ? error.message
-          : "ログインに失敗しました。メールアドレスとパスワードを確認してください。"
+        error.message ||
+          "ログインに失敗しました。メールアドレスとパスワードを確認してください。"
       );
       return;
     }
@@ -134,6 +134,9 @@ function LoginForm() {
               </svg>
               Googleでログイン
             </a>
+            <p className="mt-2 text-xs text-gray-400">
+              Googleログインを設定したアカウントは、パスワードでのログインが無効になります。
+            </p>
           </>
         )}
 
