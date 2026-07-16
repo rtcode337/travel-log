@@ -160,7 +160,7 @@ docker compose run --rm -v ./scripts:/app/scripts app node scripts/migrate-photo
 
 ```csv
 name,name_kana,prefecture,municipality,lat,lng,rank,category,description,official_url
-厳島神社,いつくしまじんじゃ,広島県,廿日市市,34.2959,132.3197,S,神社仏閣,海に浮かぶ大鳥居,https://example.com
+厳島神社,いつくしまじんじゃ,広島県,廿日市市,34.2959,132.3197,A,神社仏閣,海に浮かぶ大鳥居,https://example.com
 ```
 
 - 必須列: `name`, `prefecture`, `lat`, `lng`
@@ -173,6 +173,7 @@ name,name_kana,prefecture,municipality,lat,lng,rank,category,description,officia
 観光地(`tourist`)の必訪ランクは主観ではなく、**Wikipedia(ja)の月次ページビュー数**を
 知名度の客観指標としてパーセンタイル区分している(観光地2,741件中の相対順位)。
 他のスポットの種類は独自のランク基準を使うか、ランクを使わなくてもよい。
+最上位をSにすると運用上何かと面倒なため、A〜Eの5段階にしている(旧S〜D表記から一律シフト)。
 
 データの大半(2,585件)は Overpass API(OpenStreetMap)で全都道府県から
 `tourism`/`historic`/`natural`/神社仏閣タグ等を一括取得し、Wikipedia記事が存在するもの
@@ -183,11 +184,11 @@ name,name_kana,prefecture,municipality,lat,lng,rank,category,description,officia
 
 | ランク | 相対順位 | 目安 |
 |---|---|---|
-| S | 上位5% | 全国的に絶対外せない |
-| A | 次15% | 全国区で有名 |
-| B | 次30% | 地方の定番 |
-| C | 次30% | 地元で知られている |
-| D | 残り20% | 穴場・マニアック向け |
+| A | 上位5% | 全国的に絶対外せない |
+| B | 次15% | 全国区で有名 |
+| C | 次30% | 地方の定番 |
+| D | 次30% | 地元で知られている |
+| E | 残り20% | 穴場・マニアック向け |
 
 世界遺産・国宝等の指定があるがページビューが伸びにくい場所は、目視で格上げする例外を
 許容するハイブリッド方式(完全自動ではない)。手動でスポットを追加する場合も、この基準を
