@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
+import { deleteVisitPhotos } from "@/lib/photos";
 import { MODERATION_ROLES, SPOT_ADMIN_ROLES, type Role, type Spot } from "@/lib/types";
 
 /**
@@ -106,6 +107,13 @@ export async function DELETE(
     return NextResponse.json({ error: "権限がありません。" }, { status: 403 });
   }
 
+  // スポット削除はvisitsへカスケードするため、先に全ユーザー分の写真パスを
+  // 集めておき、削除成功後にファイルも消す(孤児ファイルを残さない)
+  const { rows: photoRows } = await query<{ photos: string[] }>(
+    "select photos from visits where spot_id = $1",
+    [id]
+  );
   await query("delete from spots where id = $1", [id]);
+  await deleteVisitPhotos(photoRows.flatMap((r) => r.photos));
   return NextResponse.json({ ok: true });
 }
