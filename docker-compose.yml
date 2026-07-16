@@ -4,13 +4,15 @@ services:
   # db/dataは.gitignore対象でgit管理下になく、cloneした直後は存在しない。dbサービスが
   # 直接./db/dataをbindマウントすると、環境によってはホスト側にディレクトリがない状態で
   # コンテナ起動そのものが失敗しうるため、db/init/*.sqlがgit管理下にあり必ず存在する親
-  # ディレクトリ./db経由でmkdirし、postgres(uid/gid 70)に所有者を揃えてからdbを起動する
+  # ディレクトリ./db経由でmkdirし、postgres(uid/gid 70)に所有者を揃えてからdbを起動する。
+  # あわせてdb/init配下(:roマウントされる初期化SQL)もホスト側のパーミッション次第では
+  # postgresユーザーから読めないことがあるため、全員読み取り可にしておく
   db-init:
     image: postgres:16-alpine
     user: root
     volumes:
       - ./db:/db
-    command: sh -c "mkdir -p /db/data && chown -R 70:70 /db/data"
+    command: sh -c "mkdir -p /db/data && chown -R 70:70 /db/data && chmod -R a+rX /db/init"
     restart: "no"
 
   db:
