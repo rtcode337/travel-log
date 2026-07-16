@@ -7,22 +7,22 @@ import type { Rank } from "./types";
  * 無難なデフォルトを返すようにしている。
  */
 
-const KNOWN_ORDER: Record<string, number> = { S: 0, A: 1, B: 2, C: 3, D: 4, Z: 5, 郵便局: 6 };
+const KNOWN_ORDER: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4, Z: 5, 郵便局: 6 };
 const UNKNOWN_ORDER = Object.keys(KNOWN_ORDER).length;
 const NULL_ORDER = UNKNOWN_ORDER + 1;
 
-/** ランクの並び順(S〜D→既知の他の値→null の順)。Array.sort用 */
+/** ランクの並び順(A〜E→既知の他の値→null の順)。Array.sort用 */
 export function getRankOrder(rank: Rank | null): number {
   if (rank === null) return NULL_ORDER;
   return KNOWN_ORDER[rank] ?? UNKNOWN_ORDER;
 }
 
 const BADGE_STYLES: Record<string, string> = {
-  S: "bg-[#f59e0b] text-[#451a03]",
-  A: "bg-[#a7f3d0] text-[#065f46]",
-  B: "bg-[#93c5fd] text-[#1e3a8a]",
-  C: "bg-[#fef3c7] text-[#78350f] border border-[#fde68a]",
-  D: "bg-[#e5e7eb] text-gray-700",
+  A: "bg-[#f59e0b] text-[#451a03]",
+  B: "bg-[#a7f3d0] text-[#065f46]",
+  C: "bg-[#93c5fd] text-[#1e3a8a]",
+  D: "bg-[#fef3c7] text-[#78350f] border border-[#fde68a]",
+  E: "bg-[#e5e7eb] text-gray-700",
   Z: "bg-[#6b7280] text-white",
   郵便局: "bg-[#dc2626] text-white",
 };
@@ -35,11 +35,11 @@ export function getRankBadgeStyle(rank: Rank | null): string {
 }
 
 const PIN_COLORS: Record<string, string> = {
-  S: "#f59e0b",
-  A: "#a7f3d0",
-  B: "#93c5fd",
-  C: "#fef3c7",
-  D: "#e5e7eb",
+  A: "#f59e0b",
+  B: "#a7f3d0",
+  C: "#93c5fd",
+  D: "#fef3c7",
+  E: "#e5e7eb",
   Z: "#6b7280",
   郵便局: "#dc2626",
 };
@@ -58,11 +58,11 @@ interface PinStyle {
 }
 
 const PIN_STYLES: Record<string, PinStyle> = {
-  S: { size: 26, bg: "#f59e0b", border: "#b45309" },
-  A: { size: 22, bg: "#a7f3d0", border: "#34d399" },
-  B: { size: 18, bg: "#93c5fd", border: "#60a5fa" },
-  C: { size: 15, bg: "#fef3c7", border: "#fbbf24" },
-  D: { size: 12, bg: "#e5e7eb", border: "#9ca3af" },
+  A: { size: 26, bg: "#f59e0b", border: "#b45309" },
+  B: { size: 22, bg: "#a7f3d0", border: "#34d399" },
+  C: { size: 18, bg: "#93c5fd", border: "#60a5fa" },
+  D: { size: 15, bg: "#fef3c7", border: "#fbbf24" },
+  E: { size: 12, bg: "#e5e7eb", border: "#9ca3af" },
   Z: { size: 10, bg: "#6b7280", border: "#374151" },
   郵便局: { size: 22, bg: "#dc2626", border: "#b91c1c" },
 };
@@ -75,13 +75,13 @@ export function getRankPinStyle(rank: Rank | null): PinStyle {
 }
 
 // PIN_STYLESの背景色に合わせた文字色(BADGE_STYLESのtext-*と同じ配色)。
-// A/B/C/Dは背景が薄いので白文字だと読めないため、濃い色にしている
+// B/C/D/Eは背景が薄いので白文字だと読めないため、濃い色にしている
 const PIN_TEXT_COLORS: Record<string, string> = {
-  S: "#451a03",
-  A: "#065f46",
-  B: "#1e3a8a",
-  C: "#78350f",
-  D: "#374151",
+  A: "#451a03",
+  B: "#065f46",
+  C: "#1e3a8a",
+  D: "#78350f",
+  E: "#374151",
   Z: "#ffffff",
   郵便局: "#ffffff",
 };
