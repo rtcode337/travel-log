@@ -5,6 +5,7 @@ import type {
   Role,
   Spot,
   SpotType,
+  SpotTypeVisibility,
   Visit,
   VisitPlan,
 } from "@/lib/types";
@@ -135,10 +136,10 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ reviews_enabled: reviewsEnabled }),
       }),
-    setEnabled: (id: string, enabled: boolean) =>
+    setVisibility: (id: string, visibility: SpotTypeVisibility) =>
       request<SpotType>(`/api/spot-types/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify({ visibility }),
       }),
   },
   appSettings: {

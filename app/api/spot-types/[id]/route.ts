@@ -16,7 +16,7 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const { reviews_enabled, enabled } = await request.json();
+  const { reviews_enabled, visibility } = await request.json();
 
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -29,26 +29,27 @@ export async function PATCH(
     sets.push(`reviews_enabled = $${values.length}`);
   }
 
-  if (enabled !== undefined) {
-    if (typeof enabled !== "boolean") {
+  if (visibility !== undefined) {
+    if (!["public", "admin_only", "disabled"].includes(visibility)) {
       return NextResponse.json({ error: "invalid request" }, { status: 400 });
     }
-    if (enabled === false) {
+    if (visibility !== "public") {
       // ログイン後の既定(app_settings.active_spot_type_id)がこの種類のままだと
-      // ルート("/")が404するページへリダイレクトし続けてしまうため、無効化を禁止する
+      // 一般ユーザーのルート("/")が404するページへリダイレクトし続けてしまうため、
+      // 公開以外への変更を禁止する
       const { rows: activeRows } = await query(
         "select 1 from app_settings where active_spot_type_id = $1",
         [id]
       );
       if (activeRows[0]) {
         return NextResponse.json(
-          { error: "ログイン後既定の種類は無効にできません。先に既定を変更してください。" },
+          { error: "ログイン後既定の種類は有効以外にできません。先に既定を変更してください。" },
           { status: 400 }
         );
       }
     }
-    values.push(enabled);
-    sets.push(`enabled = $${values.length}`);
+    values.push(visibility);
+    sets.push(`visibility = $${values.length}`);
   }
 
   if (sets.length === 0) {
