@@ -237,24 +237,6 @@ export default function SpotDetailModal({
                         却下
                       </span>
                     )}
-                    {canManage && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setShowEditForm(true)}
-                          className="ml-2 text-xs font-normal text-blue-600 underline"
-                        >
-                          編集
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleDeleteSpot}
-                          className="ml-2 text-xs font-normal text-red-500 underline"
-                        >
-                          削除
-                        </button>
-                      </>
-                    )}
                     {canModerate && (
                       <>
                         <button
@@ -304,7 +286,27 @@ export default function SpotDetailModal({
               <p className="mb-3 text-sm text-gray-700">{spot.description}</p>
             )}
 
-            <MiniMap lat={spot.lat} lng={spot.lng} rank={spot.rank} />
+            <div className="relative">
+              <MiniMap lat={spot.lat} lng={spot.lng} rank={spot.rank} />
+              {canManage && (
+                <div className="absolute right-2 top-2 z-10 flex gap-2 rounded-lg bg-white/90 px-2 py-1 shadow">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditForm(true)}
+                    className="text-xs font-normal text-blue-600 underline"
+                  >
+                    編集
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteSpot}
+                    className="text-xs font-normal text-red-500 underline"
+                  >
+                    削除
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="mt-3 space-y-1">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -359,14 +361,14 @@ export default function SpotDetailModal({
             {/* 訪問履歴 */}
             <div className="mt-4 border-t border-gray-100 pt-4">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-bold">
-                  訪問履歴
+                <div>
+                  <h3 className="font-bold">訪問履歴</h3>
                   {visits.length > 0 && (
-                    <span className="ml-2 text-sm font-normal text-green-600">
+                    <p className="text-sm font-normal text-green-600">
                       ✓ {visits.length}回
-                    </span>
+                    </p>
                   )}
-                </h3>
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={toggleVisitPlan}
