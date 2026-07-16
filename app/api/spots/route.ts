@@ -18,12 +18,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
   }
 
-  const { rows: typeRows } = await query<{ id: string }>(
-    "select id from spot_types where key = $1",
+  const { rows: typeRows } = await query<{ id: string; visibility: string }>(
+    "select id, visibility from spot_types where key = $1",
     [typeKey]
   );
   const activeType = typeRows[0];
-  if (!activeType) {
+  // admin_only・disabledの種類はadmin/spot_admin以外には存在自体を見せない
+  // (ページ側の404と揃える。管理画面が全statusのスポットを読むためadmin側は素通し)
+  if (
+    !activeType ||
+    (activeType.visibility !== "public" && !SPOT_ADMIN_ROLES.includes(user.role))
+  ) {
     return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
   }
 
@@ -108,12 +113,15 @@ export async function POST(request: Request) {
   if (!typeKey) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
   }
-  const { rows: typeRows } = await query<{ id: string }>(
-    "select id from spot_types where key = $1",
+  const { rows: typeRows } = await query<{ id: string; visibility: string }>(
+    "select id, visibility from spot_types where key = $1",
     [typeKey]
   );
   const spotType = typeRows[0];
-  if (!spotType) {
+  if (
+    !spotType ||
+    (spotType.visibility !== "public" && !SPOT_ADMIN_ROLES.includes(user.role))
+  ) {
     return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
   }
 

@@ -21,8 +21,12 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
     api.spotTypes.list().then(({ data }) => setSpotTypes(data ?? []));
   }, []);
 
+  // admin_only・disabledの種類はAPI側でadmin/spot_admin以外には返らない。
+  // 管理者にはadmin_onlyの種類もリンクを出す(無効だけは管理者にも出さない)
   const currentType = spotTypes.find((t) => t.key === typeKey) ?? null;
-  const otherTypes = spotTypes.filter((t) => t.key !== typeKey && t.enabled);
+  const otherTypes = spotTypes.filter(
+    (t) => t.key !== typeKey && t.visibility !== "disabled"
+  );
 
   const handleLogout = async () => {
     await api.auth.logout();
@@ -62,7 +66,14 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
                   href={`/${t.key}/map`}
                   className="flex items-center justify-between py-2 text-sm text-blue-600"
                 >
-                  {t.label}
+                  <span>
+                    {t.label}
+                    {t.visibility === "admin_only" && (
+                      <span className="ml-1.5 text-xs text-gray-400">
+                        (管理者のみ)
+                      </span>
+                    )}
+                  </span>
                   <span className="text-gray-400">›</span>
                 </Link>
               </li>
