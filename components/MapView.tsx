@@ -13,6 +13,12 @@ import {
 } from "@/lib/mapStyle";
 import type { Role, Spot } from "@/lib/types";
 import { getRankPinStyle, getRankPinTextColor } from "@/lib/rankStyle";
+import {
+  ensurePinImage,
+  pinIconId,
+  pinTailHeight,
+  PIN_ICON_PAD,
+} from "@/lib/pinIcon";
 import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
 import FilterBar, {
   DEFAULT_FILTERS,
@@ -27,9 +33,14 @@ const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
 const CLUSTER_COUNT_LAYER_ID = "spots-cluster-count";
 const UNCLUSTERED_LAYER_ID = "spots-unclustered-point";
-const UNCLUSTERED_CHECK_LAYER_ID = "spots-unclustered-check";
 
-type ClusterFeatureProps = { id: string; rank: string | null; visited: boolean };
+type ClusterFeatureProps = {
+  id: string;
+  rank: string | null;
+  visited: boolean;
+  /** ensurePinImageで登録済みのピン画像ID */
+  icon: string;
+};
 
 function buildClusterGeoJSON(
   spots: Spot[],
@@ -44,6 +55,7 @@ function buildClusterGeoJSON(
         id: spot.id,
         rank: spot.rank,
         visited: visitedIds.has(spot.id),
+        icon: pinIconId(spot.rank, visitedIds.has(spot.id)),
       },
     })),
   };
@@ -100,85 +112,21 @@ function ensureClusterLayers(
     },
   });
 
+  // 下がとんがった吹き出し型のピン画像(ランク文字・チェックマーク込みで
+  // lib/pinIcon.tsが生成し、GeoJSON側のiconプロパティでIDを指定する)。
+  // とんがりの先端がスポットの座標を指すようにicon-anchorはbottomにする
   map.addLayer({
     id: UNCLUSTERED_LAYER_ID,
-    type: "circle",
-    source: CLUSTER_SOURCE_ID,
-    filter: ["!", ["has", "point_count"]],
-    paint: {
-      // 訪問済みは(ランクの色より視認性を優先し)緑丸で塗りつぶす
-      "circle-color": [
-        "case",
-        ["get", "visited"],
-        "#16a34a",
-        [
-          "match",
-          ["get", "rank"],
-          "S", "#f59e0b",
-          "A", "#a7f3d0",
-          "B", "#93c5fd",
-          "C", "#fef3c7",
-          "D", "#e5e7eb",
-          "Z", "#6b7280",
-          "郵便局", "#dc2626",
-          "#9ca3af",
-        ],
-      ],
-      // ランクごとのサイズ(lib/rankStyle.tsのPIN_STYLES.size/2に対応)。訪問済みでもサイズは変えない
-      "circle-radius": [
-        "match",
-        ["get", "rank"],
-        "S", 13,
-        "A", 11,
-        "B", 9,
-        "C", 7.5,
-        "D", 6,
-        "Z", 5,
-        "郵便局", 11,
-        8,
-      ],
-      "circle-stroke-width": 1.5,
-      "circle-stroke-color": "#ffffff",
-    },
-  });
-
-  // 訪問済みはチェックマーク、郵便局ランクは〒マーク、それ以外はランクの文字を
-  // 丸の中に重ねて表示する(lib/rankStyle.tsのPIN_TEXT_COLORSと同じ配色)
-  map.addLayer({
-    id: UNCLUSTERED_CHECK_LAYER_ID,
     type: "symbol",
     source: CLUSTER_SOURCE_ID,
     filter: ["!", ["has", "point_count"]],
     layout: {
-      "text-field": [
-        "case",
-        ["get", "visited"], "✓",
-        ["==", ["get", "rank"], "郵便局"], "〒",
-        ["!=", ["get", "rank"], null], ["get", "rank"],
-        "",
-      ],
-      "text-font": ["Noto Sans Regular"],
-      "text-size": ["case", ["get", "visited"], 11, 12],
-      "text-allow-overlap": true,
-      "text-ignore-placement": true,
-    },
-    paint: {
-      "text-color": [
-        "case",
-        ["get", "visited"], "#ffffff",
-        [
-          "match",
-          ["get", "rank"],
-          "S", "#451a03",
-          "A", "#065f46",
-          "B", "#1e3a8a",
-          "C", "#78350f",
-          "D", "#374151",
-          "Z", "#ffffff",
-          "郵便局", "#ffffff",
-          "#ffffff",
-        ],
-      ],
+      "icon-image": ["get", "icon"],
+      "icon-anchor": "bottom",
+      // 画像下端の影用余白の分だけ押し下げ、とんがりの先端を座標に一致させる
+      "icon-offset": [0, PIN_ICON_PAD],
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
     },
   });
 
@@ -219,7 +167,6 @@ function showClusterLayers(map: maplibregl.Map) {
     CLUSTER_LAYER_ID,
     CLUSTER_COUNT_LAYER_ID,
     UNCLUSTERED_LAYER_ID,
-    UNCLUSTERED_CHECK_LAYER_ID,
   ]) {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible");
   }
@@ -269,12 +216,19 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
   // 自分だけの非公開スポットは、公開スポットと見分けられるよう破線の枠にする
   const borderStyle = spot.status === "private" ? "dashed" : "solid";
 
+  // 頭の丸+下向きの三角(とんがり)を縦に積んだ吹き出し型ピン。
+  // 三角の先端がスポットの座標を指すよう、Marker側はanchor: "bottom"で追加する
   const inner = document.createElement("div");
   inner.style.cssText = `
+    display: flex; flex-direction: column; align-items: center;
+    cursor: pointer; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4));
+  `;
+
+  const head = document.createElement("div");
+  head.style.cssText = `
     width: ${size}px; height: ${size}px;
     background: ${fillColor}; border: 2px ${borderStyle} ${borderColor};
-    border-radius: 50%; cursor: pointer; position: relative;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    border-radius: 50%; position: relative;
     display: flex; align-items: center; justify-content: center;
   `;
   // 訪問済みはチェックマーク、非公開は鍵マーク、それ以外はランクの文字
@@ -290,8 +244,21 @@ function createPinElement(spot: Spot, visited: boolean): HTMLDivElement {
       color: ${markColor}; font-weight: bold; line-height: 1;
       font-size: ${Math.max(10, Math.round(size * 0.6))}px;
     `;
-    inner.appendChild(markEl);
+    head.appendChild(markEl);
   }
+  inner.appendChild(head);
+
+  const tailH = pinTailHeight(size);
+  const tailHalfW = Math.max(3, Math.round(size * 0.22));
+  const tail = document.createElement("div");
+  tail.style.cssText = `
+    width: 0; height: 0; margin-top: -1px;
+    border-left: ${tailHalfW}px solid transparent;
+    border-right: ${tailHalfW}px solid transparent;
+    border-top: ${tailH}px solid ${borderColor};
+  `;
+  inner.appendChild(tail);
+
   outer.appendChild(inner);
   return outer;
 }
@@ -307,6 +274,27 @@ export default function MapView({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  /**
+   * スタイル(レイヤー追加等が可能な状態)になったかどうかと、それを待っている処理。
+   * isStyleLoaded()はタイル読み込み中などスタイル適用後でもfalseを返すことがあり、
+   * loadイベントはタイルが読めない環境では発火しないことがあるため、どちらにも
+   * 依存せず「styledataが一度でも発火したか」で判定する(スタイルは同梱のJSONなので
+   * styledataは必ず発火する)。準備完了前に来た描画処理はpendingに積んで発火時に流す
+   */
+  const mapReadyRef = useRef(false);
+  const pendingMapReadyRef = useRef<(() => void)[]>([]);
+
+  /** fnをスタイル準備完了後に(完了済みなら即座に)実行する */
+  const runWhenMapReady = useCallback((fn: () => void) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (mapReadyRef.current || map.isStyleLoaded()) {
+      mapReadyRef.current = true;
+      fn();
+    } else {
+      pendingMapReadyRef.current.push(fn);
+    }
+  }, []);
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const locationDotRef = useRef<maplibregl.Marker | null>(null);
 
@@ -363,6 +351,15 @@ export default function MapView({
       center: lastView?.center ?? JAPAN_CENTER,
       zoom: lastView?.zoom ?? JAPAN_ZOOM,
       attributionControl: { compact: true },
+    });
+    mapReadyRef.current = false;
+    pendingMapReadyRef.current = [];
+    map.on("styledata", () => {
+      if (mapReadyRef.current) return;
+      mapReadyRef.current = true;
+      const pending = pendingMapReadyRef.current;
+      pendingMapReadyRef.current = [];
+      for (const fn of pending) fn();
     });
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     const geolocate = new maplibregl.GeolocateControl({
@@ -580,15 +577,14 @@ export default function MapView({
     const fly = () => {
       map.flyTo({ center: [target.lng, target.lat], zoom: 16 });
     };
-    if (map.isStyleLoaded()) fly();
-    else map.once("load", fly);
+    runWhenMapReady(fly);
 
     // 一度処理したらURLから消す(戻る操作やスポット再取得のたびに再発火しないように)。
     // next/navigationのrouter.replaceだとuseSearchParams経由でSuspense境界が
     // 再評価され、MapView自体が再マウントされてspotsが空に戻ってしまうことが
     // あったため、ブラウザ標準のHistory APIで直接URLだけ書き換える
     window.history.replaceState(null, "", `/${spotTypeKey}/map`);
-  }, [focusSpotId, spots, spotTypeKey]);
+  }, [focusSpotId, spots, spotTypeKey, runWhenMapReady]);
 
   // マーカーの生成・フィルタ反映。
   // 公開スポットは件数が多くても軽いWebGLクラスタ表示で常に描画する。
@@ -607,13 +603,16 @@ export default function MapView({
     const renderPublic = () => {
       ensureClusterLayers(map, setDetailSpotId);
       showClusterLayers(map);
+      // 使われるピン画像(ランク×訪問済み)を先に登録してからデータを流し込む
+      for (const spot of publicSpots) {
+        ensurePinImage(map, spot.rank, visitedIds.has(spot.id));
+      }
       const source = map.getSource(CLUSTER_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
       source?.setData(buildClusterGeoJSON(publicSpots, visitedIds));
     };
-    if (map.isStyleLoaded()) renderPublic();
-    else map.once("load", renderPublic);
+    runWhenMapReady(renderPublic);
 
     markersRef.current.forEach((m) => m.remove());
     markersRef.current.clear();
@@ -625,12 +624,13 @@ export default function MapView({
         e.stopPropagation();
         setDetailSpotId(spot.id);
       });
-      const marker = new maplibregl.Marker({ element: el })
+      // とんがりの先端がスポットの座標を指すよう下端を基準に配置する
+      const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
         .setLngLat([spot.lng, spot.lat])
         .addTo(map);
       markersRef.current.set(spot.id, marker);
     }
-  }, [spots, visitedIds, filters]);
+  }, [spots, visitedIds, filters, runWhenMapReady]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
   // (通常の取得はpublishedのみなので、それ以外は一覧に反映されるまでこれで見せる)
