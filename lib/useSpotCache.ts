@@ -2,33 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Spot } from "@/lib/types";
+import {
+  readSpotCacheDb,
+  writeSpotCacheDb,
+  trimSpot,
+  expandSpot,
+  type CachedSpot,
+  type StoredSpotCache,
+} from "@/lib/spotCacheDb";
 
-const CACHE_PREFIX = "travel-log:public-spots:";
-
+/** アプリ内で扱う公開スポットキャッシュ(spotsは表示用にSpotへ復元済み) */
 export interface SpotCacheEntry {
   downloadedAt: string; // ISO
   spots: Spot[];
 }
 
-function cacheKey(typeKey: string): string {
-  return `${CACHE_PREFIX}${typeKey}`;
-}
-
-export function readSpotCache(typeKey: string): SpotCacheEntry | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(cacheKey(typeKey));
-    return raw ? (JSON.parse(raw) as SpotCacheEntry) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeSpotCache(typeKey: string, spots: Spot[]): SpotCacheEntry {
-  const entry: SpotCacheEntry = { downloadedAt: new Date().toISOString(), spots };
-  window.localStorage.setItem(cacheKey(typeKey), JSON.stringify(entry));
-  return entry;
-}
+const SAVE_ERROR =
+  "スポットデータの保存に失敗しました。次に開いたときは再ダウンロードが必要です。";
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -52,18 +42,32 @@ export function formatDownloadedAt(iso: string): string {
   });
 }
 
+/** ダウンロードした公開スポットをキャッシュ用に間引き、保存用エントリにまとめる */
+function toStored(spots: Spot[]): StoredSpotCache {
+  return { downloadedAt: new Date().toISOString(), spots: spots.map(trimSpot) };
+}
+
+/** 保存用エントリをアプリ内表示用(Spot[])のエントリに戻す */
+function toEntry(stored: StoredSpotCache): SpotCacheEntry {
+  return { downloadedAt: stored.downloadedAt, spots: stored.spots.map(expandSpot) };
+}
+
 /**
  * 公開スポットは頻繁に変わらないため、ページを開くたびにAPIから取り直すのではなく
- * スポット種類ごとにlocalStorageへ明示的にダウンロード・キャッシュする
+ * スポット種類ごとにIndexedDBへ明示的にダウンロード・キャッシュする
  * (/[type]/map・/[type]/spots で共通利用)。未ダウンロードならページを開いたタイミングで
  * 一度だけダウンロード確認ダイアログを出す。
+ *
+ * 郵便局・御朱印など数万件規模の種類でも保存できるよう、保存先はlocalStorage(約5MB上限)
+ * ではなくIndexedDBを使い、かつ地図・一覧で使うフィールドだけに間引いて保存する
+ * (lib/spotCacheDb.ts)。
  */
 export function useSpotCache(typeKey: string) {
   const [entry, setEntry] = useState<SpotCacheEntry | null>(null);
   const [ready, setReady] = useState(false);
   const [showMissingPrompt, setShowMissingPrompt] = useState(false);
   const [manualConfirm, setManualConfirm] = useState<
-    { sizeBytes: number; data: Spot[] } | null
+    { sizeBytes: number; data: CachedSpot[] } | null
   >(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
@@ -74,10 +78,22 @@ export function useSpotCache(typeKey: string) {
   // アンマウント時(ダイアログごと画面が消えるページ遷移等)は進行中のダウンロードを打ち切る
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // 種類が変わったらキャッシュを非同期に読み直す(IndexedDBアクセスは非同期のため、
+  // 読み込み完了までready=falseにして、その間は未ダウンロード扱いのプロンプトを出さない)
   useEffect(() => {
-    setEntry(readSpotCache(typeKey));
-    setReady(true);
+    let cancelled = false;
+    setReady(false);
+    setEntry(null);
     autoPromptedRef.current = false;
+    (async () => {
+      const stored = await readSpotCacheDb(typeKey);
+      if (cancelled) return;
+      setEntry(stored ? toEntry(stored) : null);
+      setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [typeKey]);
 
   useEffect(() => {
@@ -85,6 +101,14 @@ export function useSpotCache(typeKey: string) {
     autoPromptedRef.current = true;
     setShowMissingPrompt(true);
   }, [ready, entry]);
+
+  /** ダウンロード済みデータを保存する。保存に失敗してもこのセッションの表示は続けられる */
+  const persist = useCallback(
+    (stored: StoredSpotCache) => {
+      writeSpotCacheDb(typeKey, stored).catch(() => setError(SAVE_ERROR));
+    },
+    [typeKey]
+  );
 
   /**
    * 公開スポットを取得する。進捗ダイアログに受信バイト数を出すため、api-clientではなく
@@ -156,19 +180,25 @@ export function useSpotCache(typeKey: string) {
   /** 進捗ダイアログの「キャンセル」ボタン: 進行中のダウンロードを打ち切る */
   const cancelDownload = useCallback(() => abortRef.current?.abort(), []);
 
-  /** 歯車メニューの「ダウンロード」ボタン: 先に取得してサイズを確認ダイアログに出す */
+  /** 歯車メニューの「ダウンロード」ボタン: 先に取得して(間引き後の)サイズを確認ダイアログに出す */
   const startManualDownload = useCallback(async () => {
     const data = await fetchPublished();
     if (!data) return;
-    const sizeBytes = new TextEncoder().encode(JSON.stringify(data)).length;
-    setManualConfirm({ sizeBytes, data });
+    const trimmed = data.map(trimSpot);
+    const sizeBytes = new TextEncoder().encode(JSON.stringify(trimmed)).length;
+    setManualConfirm({ sizeBytes, data: trimmed });
   }, [fetchPublished]);
 
   const confirmManualDownload = useCallback(() => {
     if (!manualConfirm) return;
-    setEntry(writeSpotCache(typeKey, manualConfirm.data));
+    const stored: StoredSpotCache = {
+      downloadedAt: new Date().toISOString(),
+      spots: manualConfirm.data,
+    };
+    setEntry(toEntry(stored));
     setManualConfirm(null);
-  }, [manualConfirm, typeKey]);
+    persist(stored);
+  }, [manualConfirm, persist]);
 
   const cancelManualDownload = useCallback(() => setManualConfirm(null), []);
 
@@ -176,13 +206,15 @@ export function useSpotCache(typeKey: string) {
   const confirmMissingDownload = useCallback(async () => {
     setShowMissingPrompt(false);
     const data = await fetchPublished();
-    if (data) {
-      setEntry(writeSpotCache(typeKey, data));
-    } else {
+    if (!data) {
       // 失敗・キャンセル時は確認ダイアログに戻す(エラーはそのダイアログ内に表示される)
       setShowMissingPrompt(true);
+      return;
     }
-  }, [fetchPublished, typeKey]);
+    const stored = toStored(data);
+    setEntry(toEntry(stored));
+    persist(stored);
+  }, [fetchPublished, persist]);
 
   const dismissMissingPrompt = useCallback(() => setShowMissingPrompt(false), []);
 
@@ -203,11 +235,11 @@ export function useSpotCache(typeKey: string) {
               : [...prev.spots, spot]
             : prev.spots.filter((s) => s.id !== spot.id);
         const next = { ...prev, spots };
-        window.localStorage.setItem(cacheKey(typeKey), JSON.stringify(next));
+        persist({ downloadedAt: next.downloadedAt, spots: next.spots.map(trimSpot) });
         return next;
       });
     },
-    [typeKey]
+    [persist]
   );
 
   const applySpotDelete = useCallback(
@@ -216,11 +248,11 @@ export function useSpotCache(typeKey: string) {
         if (!prev) return prev;
         if (!prev.spots.some((s) => s.id === spotId)) return prev;
         const next = { ...prev, spots: prev.spots.filter((s) => s.id !== spotId) };
-        window.localStorage.setItem(cacheKey(typeKey), JSON.stringify(next));
+        persist({ downloadedAt: next.downloadedAt, spots: next.spots.map(trimSpot) });
         return next;
       });
     },
-    [typeKey]
+    [persist]
   );
 
   return {
