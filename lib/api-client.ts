@@ -1,5 +1,6 @@
 import type {
   AppUser,
+  MyReview,
   PublicReview,
   Review,
   Role,
@@ -218,6 +219,8 @@ export const api = {
       request<{ items: PublicReview[]; total: number }>(
         `/api/reviews?spot_id=${spotId}&page=${page}`
       ),
+    listMine: (typeKey: string) =>
+      request<MyReview[]>(`/api/reviews?mine=1&type=${typeKey}`),
     create: (spotId: string, body: string) =>
       request<Review>("/api/reviews", {
         method: "POST",

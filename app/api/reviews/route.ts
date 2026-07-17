@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
-import type { PublicReview, Review } from "@/lib/types";
+import type { MyReview, PublicReview, Review } from "@/lib/types";
 
 const PAGE_SIZE = 10;
 
@@ -12,6 +12,34 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
+
+  // mine=1: 自分が書いた口コミを、投稿先スポットの情報付きで新しい順に全件返す
+  // (一覧画面のトップで使うため、visits/visitPlansと同様にページングはクライアント側で行う)
+  if (searchParams.get("mine") === "1") {
+    const typeKey = searchParams.get("type");
+    if (!typeKey) {
+      return NextResponse.json({ error: "type is required" }, { status: 400 });
+    }
+    const { rows: typeRows } = await query<{ id: string }>(
+      "select id from spot_types where key = $1",
+      [typeKey]
+    );
+    if (!typeRows[0]) {
+      return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
+    }
+    const { rows } = await query<MyReview>(
+      `select r.id, r.spot_id, r.body, r.created_at,
+         s.name as spot_name, s.prefecture as spot_prefecture,
+         s.municipality as spot_municipality, s.rank as spot_rank
+       from reviews r
+       join spots s on s.id = r.spot_id
+       where r.user_id = $1 and s.spot_type_id = $2
+       order by r.created_at desc`,
+      [userId, typeRows[0].id]
+    );
+    return NextResponse.json({ data: rows });
+  }
+
   const spotId = searchParams.get("spot_id");
   if (!spotId) {
     return NextResponse.json({ error: "spot_id is required" }, { status: 400 });

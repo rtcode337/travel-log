@@ -66,6 +66,7 @@ export default function SpotDetailModal({
   onSpotChange,
   onSpotDeleted,
   onVisitPlanChange,
+  onReviewChange,
 }: {
   spotId: string;
   /** 編集モーダルのランク・カテゴリ入力サジェスト用(省略時はサジェストなし) */
@@ -80,6 +81,8 @@ export default function SpotDetailModal({
   onSpotDeleted?: (spotId: string) => void;
   /** 訪問予定への追加・解除があったときに呼ばれる(呼び出し元の一覧の再取得用) */
   onVisitPlanChange?: () => void;
+  /** 口コミの投稿があったときに呼ばれる(呼び出し元の「自分が書いた口コミ」一覧の再取得用) */
+  onReviewChange?: () => void;
 }) {
   const typeKey = useCurrentSpotTypeKey();
   const [spot, setSpot] = useState<Spot | null>(null);
@@ -557,6 +560,7 @@ export default function SpotDetailModal({
             onVisitChange?.();
             // 訪問記録時、サーバー側で訪問予定からも自動的に外れる
             onVisitPlanChange?.();
+            onReviewChange?.();
           }}
         />
       )}
