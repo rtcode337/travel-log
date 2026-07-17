@@ -70,9 +70,11 @@ export async function fetchGoogleProfile(
 }
 
 /**
- * フェーズ1は単一ユーザー運用のため、Googleアカウントの紐付けは
- * 「既存の唯一のユーザーに紐付ける」か「ユーザーが1人もいない場合だけ新規作成する」
- * のいずれかに限定する(setup APIのパスワード登録と同じ制約)。
+ * 自由サインアップは提供しない方針(新規アカウントは管理者が /admin から作成する)のため、
+ * Googleログインで新規ユーザーは作らない。行うのは
+ * 「メールアドレスが一致する既存アカウントへの google_id の紐付け」か、
+ * 「ユーザーが1人もいない初回セットアップ時に限り最初のadminアカウントを作成」のみ
+ * (setup APIのパスワード登録と同じ制約)。
  */
 export async function findOrCreateGoogleUser(
   profile: GoogleProfile
