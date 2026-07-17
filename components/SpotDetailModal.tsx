@@ -21,6 +21,33 @@ import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 
+/** Wikipediaの公式ロゴマーク(Simple Icons、CC0) */
+function WikipediaIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M12.09 13.119c-.936 1.932-2.217 4.548-2.853 5.728-.616 1.074-1.127.931-1.532.029-1.406-3.321-4.293-9.144-5.651-12.409-.251-.601-.441-.987-.619-1.139-.181-.15-.554-.24-1.122-.271C.103 5.033 0 4.982 0 4.898v-.455l.052-.045c.924-.005 5.401 0 5.401 0l.051.045v.434c0 .119-.075.176-.225.176l-.564.031c-.485.029-.727.164-.727.436 0 .135.053.33.166.601 1.082 2.646 4.818 10.521 4.818 10.521l.136.046 2.411-4.81-.482-1.067-1.658-3.264s-.318-.654-.428-.872c-.728-1.443-.712-1.518-1.447-1.617-.207-.023-.313-.05-.313-.149v-.468l.06-.045h4.292l.113.037v.451c0 .105-.076.15-.227.15l-.308.047c-.792.061-.661.381-.136 1.422l1.582 3.252 1.758-3.504c.293-.64.233-.801.111-.947-.07-.084-.305-.22-.812-.24l-.201-.021c-.052 0-.098-.015-.145-.051-.045-.031-.067-.076-.067-.129v-.427l.061-.045c1.247-.008 4.043 0 4.043 0l.059.045v.436c0 .121-.059.178-.193.178-.646.03-.782.095-1.023.439-.12.186-.375.589-.646 1.039l-2.301 4.273-.065.135 2.792 5.712.17.048 4.396-10.438c.154-.422.129-.722-.064-.895-.197-.172-.346-.273-.857-.295l-.42-.016c-.061 0-.105-.014-.152-.045-.043-.029-.072-.075-.072-.119v-.436l.059-.045h4.961l.041.045v.437c0 .119-.074.18-.209.18-.648.03-1.127.18-1.443.421-.314.255-.557.616-.736 1.067 0 0-4.043 9.258-5.426 12.339-.525 1.007-1.053.917-1.503-.031-.571-1.171-1.773-3.786-2.646-5.71l.053-.036z" />
+    </svg>
+  );
+}
+
+/** Google マップの公式ロゴマーク(Simple Icons、CC0) */
+function GoogleMapsIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M19.527 4.799c1.212 2.608.937 5.678-.405 8.173-1.101 2.047-2.744 3.74-4.098 5.614-.619.858-1.244 1.75-1.669 2.727-.141.325-.263.658-.383.992-.121.333-.224.673-.34 1.008-.109.314-.236.684-.627.687h-.007c-.466-.001-.579-.53-.695-.887-.284-.874-.581-1.713-1.019-2.525-.51-.944-1.145-1.817-1.79-2.671L19.527 4.799zM8.545 7.705l-3.959 4.707c.724 1.54 1.821 2.863 2.871 4.18.247.31.494.622.737.936l4.984-5.925-.029.01c-1.741.601-3.691-.291-4.392-1.987a3.377 3.377 0 0 1-.209-.716c-.063-.437-.077-.761-.004-1.198l.001-.007zM5.492 3.149l-.003.004c-1.947 2.466-2.281 5.88-1.117 8.77l4.785-5.689-.058-.05-3.607-3.035zM14.661.436l-3.838 4.563a.295.295 0 0 1 .027-.01c1.6-.551 3.403.15 4.22 1.626.176.319.323.683.377 1.045.068.446.085.773.012 1.22l-.003.016 3.836-4.561A8.382 8.382 0 0 0 14.67.439l-.009-.003zM9.466 5.868L14.162.285l-.047-.012A8.31 8.31 0 0 0 11.986 0a8.439 8.439 0 0 0-6.169 2.766l-.016.018 3.665 3.084z" />
+    </svg>
+  );
+}
+
+/** 経路案内アイコン(Google Material Symbols「directions」、Apache License 2.0) */
+function DirectionsIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M22.43 10.59l-9.01-9.01c-.75-.75-2.07-.76-2.83 0l-9 9c-.78.78-.78 2.04 0 2.82l9 9c.39.39.9.58 1.41.58.51 0 1.02-.19 1.41-.58l8.99-8.99c.79-.76.8-2.02.03-2.82zm-10.42 10.4l-9-9 9-9 9 9-9 9zM8 11v4h2v-3h4v2.5l3.5-3.5L14 7.5V10H9c-.55 0-1 .45-1 1z" />
+    </svg>
+  );
+}
+
 function formatReviewDatetime(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", {
     year: "numeric",
@@ -308,32 +335,35 @@ export default function SpotDetailModal({
               )}
             </div>
 
-            <div className="mt-3 space-y-1">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <Link
-                  href={`${typeKey ? `/${typeKey}` : ""}/map?spot=${spot.id}`}
-                  className="inline-block text-sm text-blue-600 underline"
-                >
-                  アプリの地図で開く
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setShowInfo(true)}
-                  className="inline-block text-sm text-blue-600 underline"
-                >
-                  スポット詳細を開く
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Link
+                href={`${typeKey ? `/${typeKey}` : ""}/map?spot=${spot.id}`}
+                className="inline-block text-sm text-blue-600 underline"
+              >
+                地図で開く
+              </Link>
+              <button
+                type="button"
+                onClick={() => setShowInfo(true)}
+                aria-label="Wikipediaでスポット詳細を開く"
+                title="Wikipediaでスポット詳細を開く"
+                className="rounded p-1 text-blue-600 hover:bg-blue-50"
+              >
+                <WikipediaIcon className="size-5" />
+              </button>
+              <div className="ml-auto flex items-center gap-1 text-sm text-gray-500">
+                Google:
                 <a
                   href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
                     `${spot.name} ${spot.lat},${spot.lng}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block text-sm text-blue-600 underline"
+                  aria-label="Google マップで開く"
+                  title="Google マップで開く"
+                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
                 >
-                  Google マップで開く ↗
+                  <GoogleMapsIcon className="size-5" />
                 </a>
                 <a
                   href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
@@ -341,21 +371,23 @@ export default function SpotDetailModal({
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
+                  aria-label="Google マップで経路を表示"
+                  title="Google マップで経路を表示"
+                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
+                >
+                  <DirectionsIcon className="size-5" />
+                </a>
+              </div>
+              {spot.official_url && (
+                <a
+                  href={spot.official_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="inline-block text-sm text-blue-600 underline"
                 >
-                  Google マップで経路を表示 ↗
+                  公式サイト ↗
                 </a>
-                {spot.official_url && (
-                  <a
-                    href={spot.official_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block text-sm text-blue-600 underline"
-                  >
-                    公式サイト ↗
-                  </a>
-                )}
-              </div>
+              )}
             </div>
 
             {/* 訪問履歴 */}
