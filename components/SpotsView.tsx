@@ -31,7 +31,140 @@ const STATUS_LABELS: Partial<Record<Spot["status"], string>> = {
   rejected: "却下",
 };
 
-const UNKNOWN_MUNICIPALITY = "(市区町村不明)";
+/** 現在ページを中心に、折り返さない範囲でページ番号を間引く(先頭・末尾は常に表示し、
+ * 離れている場合は「…」で省略する) */
+function getPageNumbers(page: number, totalPages: number, siblingCount = 1): (number | "…")[] {
+  const totalNumbers = siblingCount * 2 + 5;
+  if (totalPages <= totalNumbers) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  const leftSibling = Math.max(page - siblingCount, 2);
+  const rightSibling = Math.min(page + siblingCount, totalPages - 1);
+
+  const pages: (number | "…")[] = [1];
+  if (leftSibling > 2) pages.push("…");
+  for (let p = leftSibling; p <= rightSibling; p++) pages.push(p);
+  if (rightSibling < totalPages - 1) pages.push("…");
+  pages.push(totalPages);
+  return pages;
+}
+
+function Pager({
+  page,
+  totalPages,
+  loading,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  loading?: boolean;
+  onChange: (page: number) => void;
+}) {
+  const pageNumbers = useMemo(() => getPageNumbers(page, totalPages), [page, totalPages]);
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between gap-1 text-sm text-gray-500">
+      <button
+        type="button"
+        disabled={page <= 1 || loading}
+        onClick={() => onChange(Math.max(1, page - 1))}
+        className="shrink-0 rounded-lg border border-gray-300 bg-white px-2.5 py-1 disabled:opacity-40"
+      >
+        ← 前へ
+      </button>
+      <div className="flex items-center gap-0.5">
+        {pageNumbers.map((p, i) =>
+          p === "…" ? (
+            <span key={`ellipsis-${i}`} className="px-1 text-gray-400">
+              …
+            </span>
+          ) : (
+            <button
+              key={p}
+              type="button"
+              disabled={loading}
+              onClick={() => onChange(p)}
+              className={`min-w-[1.75rem] rounded-lg px-1.5 py-1 text-xs font-medium ${
+                p === page
+                  ? "bg-blue-600 text-white"
+                  : "border border-gray-300 bg-white hover:bg-gray-50"
+              }`}
+            >
+              {p}
+            </button>
+          )
+        )}
+      </div>
+      <button
+        type="button"
+        disabled={page >= totalPages || loading}
+        onClick={() => onChange(Math.min(totalPages, page + 1))}
+        className="shrink-0 rounded-lg border border-gray-300 bg-white px-2.5 py-1 disabled:opacity-40"
+      >
+        次へ →
+      </button>
+    </div>
+  );
+}
+
+/** 訪問予定・最近の訪問場所・非公開スポット・都道府県別一覧のページング件数
+ * (ランクから探すタブはサーバー側ページング(SPOTS_PAGE_SIZE)を使うため対象外) */
+const CLIENT_PAGE_SIZE = 50;
+
+/** 手元に持っている配列(取得済み・全件)をクライアント側でページ分割する */
+function usePagedItems<T>(items: T[], pageSize: number) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = useMemo(
+    () => items.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [items, safePage, pageSize]
+  );
+  return { page: safePage, setPage, totalPages, pageItems, total: items.length };
+}
+
+/** 一覧の上に置く、件数表示付きのページャー */
+function PagedListHeader({
+  page,
+  totalPages,
+  total,
+  loading,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  loading?: boolean;
+  onChange: (page: number) => void;
+}) {
+  return (
+    <div className="mb-2">
+      <p className="mb-1 text-xs text-gray-500">
+        {page} / {totalPages}ページ (全{total}件)
+      </p>
+      <Pager page={page} totalPages={totalPages} loading={loading} onChange={onChange} />
+    </div>
+  );
+}
+
+/** 一覧の下に置く、件数表示なしのページャー */
+function PagedListFooter({
+  page,
+  totalPages,
+  loading,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  loading?: boolean;
+  onChange: (page: number) => void;
+}) {
+  return (
+    <div className="mt-2">
+      <Pager page={page} totalPages={totalPages} loading={loading} onChange={onChange} />
+    </div>
+  );
+}
 
 export default function SpotsView({
   spotTypeKey,
@@ -49,7 +182,6 @@ export default function SpotsView({
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPref, setSelectedPref] = useState<string | null>(null);
-  const [selectedMuni, setSelectedMuni] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
@@ -101,6 +233,10 @@ export default function SpotsView({
   const handleManagementRankChange = (rank: Rank | "all") => {
     setManagementRank(rank);
     setManagementPage(1);
+  };
+
+  const handleManagementPageChange = (page: number) => {
+    setManagementPage(page);
   };
 
   const managementTotalPages = Math.max(1, Math.ceil(managementTotal / SPOTS_PAGE_SIZE));
@@ -189,7 +325,7 @@ export default function SpotsView({
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [spots]);
 
-  /** 最近訪問した場所(スポット単位で重複排除し、記録日時が新しい順に最大50件) */
+  /** 最近訪問した場所(スポット単位で重複排除し、記録日時が新しい順) */
   const recentVisits = useMemo(() => {
     const latestBySpot = new Map<string, Visit>();
     for (const v of visits) {
@@ -198,8 +334,7 @@ export default function SpotsView({
     }
     return Array.from(latestBySpot.values())
       .filter((v) => spotById.has(v.spot_id))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at))
-      .slice(0, 50);
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [visits, spotById]);
 
   /** 都道府県ごとの件数(登録があるものだけ、JIS順) */
@@ -217,31 +352,9 @@ export default function SpotsView({
     }));
   }, [spots, visitedIds]);
 
-  /** 選択中の都道府県内の市区町村ごとの件数(名前順、市区町村不明は最後) */
-  const municipalityRows = useMemo(() => {
-    if (!selectedPref) return [];
-    const counts = new Map<string, { total: number; visited: number }>();
-    for (const spot of spots) {
-      if (spot.prefecture !== selectedPref) continue;
-      const key = spot.municipality ?? UNKNOWN_MUNICIPALITY;
-      const row = counts.get(key) ?? { total: 0, visited: 0 };
-      row.total += 1;
-      if (visitedIds.has(spot.id)) row.visited += 1;
-      counts.set(key, row);
-    }
-    return Array.from(counts.entries())
-      .map(([municipality, v]) => ({ municipality, ...v }))
-      .sort((a, b) => {
-        if (a.municipality === UNKNOWN_MUNICIPALITY) return 1;
-        if (b.municipality === UNKNOWN_MUNICIPALITY) return -1;
-        return a.municipality.localeCompare(b.municipality, "ja");
-      });
-  }, [spots, selectedPref, visitedIds]);
-
   const filteredSpots = useMemo(() => {
     const list = spots.filter((s) => {
       if (s.prefecture !== selectedPref) return false;
-      if ((s.municipality ?? UNKNOWN_MUNICIPALITY) !== selectedMuni) return false;
       return passesFilters(filters, s.rank, visitedIds.has(s.id));
     });
     list.sort((a, b) => {
@@ -264,15 +377,16 @@ export default function SpotsView({
       }
     });
     return list;
-  }, [
-    spots,
-    selectedPref,
-    selectedMuni,
-    filters,
-    visitedIds,
-    sortKey,
-    latestVisitDate,
-  ]);
+  }, [spots, selectedPref, filters, visitedIds, sortKey, latestVisitDate]);
+
+  const plannedPager = usePagedItems(plannedSpots, CLIENT_PAGE_SIZE);
+  const recentVisitsPager = usePagedItems(recentVisits, CLIENT_PAGE_SIZE);
+  const privateSpotsPager = usePagedItems(myPrivateSpots, CLIENT_PAGE_SIZE);
+  const filteredSpotsPager = usePagedItems(filteredSpots, CLIENT_PAGE_SIZE);
+  const { setPage: setFilteredPage } = filteredSpotsPager;
+  useEffect(() => {
+    setFilteredPage(1);
+  }, [selectedPref, filters, sortKey, setFilteredPage]);
 
   if (loading) {
     return (
@@ -292,8 +406,14 @@ export default function SpotsView({
             {plannedSpots.length > 0 && (
               <div className="mb-6">
                 <h1 className="mb-4 text-lg font-bold">訪問予定</h1>
+                <PagedListHeader
+                  page={plannedPager.page}
+                  totalPages={plannedPager.totalPages}
+                  total={plannedPager.total}
+                  onChange={plannedPager.setPage}
+                />
                 <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-                  {plannedSpots.map(({ plan, spot }) => (
+                  {plannedPager.pageItems.map(({ plan, spot }) => (
                     <li key={plan.id}>
                       <button
                         onClick={() => setDetailSpotId(spot.id)}
@@ -311,6 +431,11 @@ export default function SpotsView({
                     </li>
                   ))}
                 </ul>
+                <PagedListFooter
+                  page={plannedPager.page}
+                  totalPages={plannedPager.totalPages}
+                  onChange={plannedPager.setPage}
+                />
               </div>
             )}
             <div className="mb-6">
@@ -320,38 +445,57 @@ export default function SpotsView({
                   まだ訪問記録がありません。
                 </p>
               ) : (
-                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-                  {recentVisits.map((visit) => {
-                    const spot = spotById.get(visit.spot_id)!;
-                    return (
-                      <li key={visit.id}>
-                        <button
-                          onClick={() => setDetailSpotId(spot.id)}
-                          className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
-                        >
-                          <RankBadge rank={spot.rank} size="sm" />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate font-medium">{spot.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {spot.prefecture}
-                              {spot.municipality && ` ${spot.municipality}`}
-                            </p>
-                          </div>
-                          <span className="shrink-0 text-xs text-gray-400">
-                            {formatVisitedOn(visit.visited_on, visit.date_precision)}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <>
+                  <PagedListHeader
+                    page={recentVisitsPager.page}
+                    totalPages={recentVisitsPager.totalPages}
+                    total={recentVisitsPager.total}
+                    onChange={recentVisitsPager.setPage}
+                  />
+                  <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                    {recentVisitsPager.pageItems.map((visit) => {
+                      const spot = spotById.get(visit.spot_id)!;
+                      return (
+                        <li key={visit.id}>
+                          <button
+                            onClick={() => setDetailSpotId(spot.id)}
+                            className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                          >
+                            <RankBadge rank={spot.rank} size="sm" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium">{spot.name}</p>
+                              <p className="text-xs text-gray-500">
+                                {spot.prefecture}
+                                {spot.municipality && ` ${spot.municipality}`}
+                              </p>
+                            </div>
+                            <span className="shrink-0 text-xs text-gray-400">
+                              {formatVisitedOn(visit.visited_on, visit.date_precision)}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <PagedListFooter
+                    page={recentVisitsPager.page}
+                    totalPages={recentVisitsPager.totalPages}
+                    onChange={recentVisitsPager.setPage}
+                  />
+                </>
               )}
             </div>
             {myPrivateSpots.length > 0 && (
               <div className="mb-6">
                 <h1 className="mb-4 text-lg font-bold">自分の非公開スポット</h1>
+                <PagedListHeader
+                  page={privateSpotsPager.page}
+                  totalPages={privateSpotsPager.totalPages}
+                  total={privateSpotsPager.total}
+                  onChange={privateSpotsPager.setPage}
+                />
                 <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-                  {myPrivateSpots.map((spot) => (
+                  {privateSpotsPager.pageItems.map((spot) => (
                     <li key={spot.id}>
                       <button
                         onClick={() => setDetailSpotId(spot.id)}
@@ -372,6 +516,11 @@ export default function SpotsView({
                     </li>
                   ))}
                 </ul>
+                <PagedListFooter
+                  page={privateSpotsPager.page}
+                  totalPages={privateSpotsPager.totalPages}
+                  onChange={privateSpotsPager.setPage}
+                />
               </div>
             )}
           </section>
@@ -471,6 +620,15 @@ export default function SpotsView({
                     ))}
                   </div>
                 )}
+                {managementLoaded && managementTotal > 0 && (
+                  <PagedListHeader
+                    page={managementPage}
+                    totalPages={managementTotalPages}
+                    total={managementTotal}
+                    loading={managementLoading}
+                    onChange={handleManagementPageChange}
+                  />
+                )}
                 {!managementLoaded ? (
                   <p className="text-sm text-gray-500">読み込み中…</p>
                 ) : (
@@ -504,30 +662,12 @@ export default function SpotsView({
                   </p>
                 )}
                 {managementLoaded && managementTotal > 0 && (
-                  <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
-                    <button
-                      type="button"
-                      disabled={managementPage <= 1 || managementLoading}
-                      onClick={() => setManagementPage((p) => Math.max(1, p - 1))}
-                      className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 disabled:opacity-40"
-                    >
-                      ← 前へ
-                    </button>
-                    <span>
-                      {managementPage} / {managementTotalPages}ページ(全
-                      {managementTotal}件)
-                    </span>
-                    <button
-                      type="button"
-                      disabled={managementPage >= managementTotalPages || managementLoading}
-                      onClick={() =>
-                        setManagementPage((p) => Math.min(managementTotalPages, p + 1))
-                      }
-                      className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 disabled:opacity-40"
-                    >
-                      次へ →
-                    </button>
-                  </div>
+                  <PagedListFooter
+                    page={managementPage}
+                    totalPages={managementTotalPages}
+                    loading={managementLoading}
+                    onChange={handleManagementPageChange}
+                  />
                 )}
               </>
             )}
@@ -552,63 +692,23 @@ export default function SpotsView({
     );
   }
 
-  // 市区町村一覧(都道府県を選択した直後)
-  if (!selectedMuni) {
-    return (
-      <>
-      <main className="mx-auto max-w-lg p-4">
-        <div className="mb-4 flex items-center gap-2">
-          <button
-            onClick={() => setSelectedPref(null)}
-            className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-600"
-          >
-            ← 都道府県
-          </button>
-          <h1 className="text-lg font-bold">{selectedPref}</h1>
-        </div>
-        <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-          {municipalityRows.map((row) => (
-            <li key={row.municipality}>
-              <button
-                onClick={() => setSelectedMuni(row.municipality)}
-                className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
-              >
-                <span className="font-medium">{row.municipality}</span>
-                <span className="text-sm text-gray-500">
-                  <span className="mr-2 text-green-600">✓ {row.visited}</span>
-                  / {row.total} 件
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </main>
-      <SpotDownloadDialogs cache={spotCache} />
-      </>
-    );
-  }
-
-  // スポット一覧(市区町村まで選択した後)
+  // スポット一覧(都道府県を選択した直後)
   return (
     <>
     <main className="mx-auto max-w-lg p-4">
       <div className="mb-3 flex items-center gap-2">
         <button
-          onClick={() => setSelectedMuni(null)}
+          onClick={() => setSelectedPref(null)}
           className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-600"
         >
-          ← {selectedPref}
+          ← 都道府県
         </button>
-        <h1 className="text-lg font-bold">{selectedMuni}</h1>
+        <h1 className="text-lg font-bold">{selectedPref}</h1>
       </div>
 
       <div className="mb-3 space-y-2">
         <FilterBar
-          spots={spots.filter(
-            (s) =>
-              s.prefecture === selectedPref &&
-              (s.municipality ?? UNKNOWN_MUNICIPALITY) === selectedMuni
-          )}
+          spots={spots.filter((s) => s.prefecture === selectedPref)}
           filters={filters}
           onChange={setFilters}
         />
@@ -623,8 +723,16 @@ export default function SpotsView({
         </select>
       </div>
 
+      {filteredSpots.length > 0 && (
+        <PagedListHeader
+          page={filteredSpotsPager.page}
+          totalPages={filteredSpotsPager.totalPages}
+          total={filteredSpotsPager.total}
+          onChange={filteredSpotsPager.setPage}
+        />
+      )}
       <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-        {filteredSpots.map((spot) => (
+        {filteredSpotsPager.pageItems.map((spot) => (
           <li key={spot.id}>
             <button
               onClick={() => setDetailSpotId(spot.id)}
@@ -633,7 +741,10 @@ export default function SpotsView({
               <RankBadge rank={spot.rank} size="sm" />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{spot.name}</p>
-                <p className="text-xs text-gray-500">{spot.category}</p>
+                <p className="text-xs text-gray-500">
+                  {spot.municipality && `${spot.municipality} ・ `}
+                  {spot.category}
+                </p>
               </div>
               {spot.status === "private" && (
                 <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
@@ -647,10 +758,16 @@ export default function SpotsView({
           </li>
         ))}
       </ul>
-      {filteredSpots.length === 0 && (
+      {filteredSpots.length === 0 ? (
         <p className="mt-4 text-sm text-gray-500">
           条件に合うスポットがありません。
         </p>
+      ) : (
+        <PagedListFooter
+          page={filteredSpotsPager.page}
+          totalPages={filteredSpotsPager.totalPages}
+          onChange={filteredSpotsPager.setPage}
+        />
       )}
 
       {detailSpotId && (
