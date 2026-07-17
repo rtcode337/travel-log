@@ -203,7 +203,7 @@ export interface PublicReview {
 
 export const REVIEWS_PAGE_SIZE = 10;
 
-export const SPOTS_PAGE_SIZE = 100;
+export const SPOTS_PAGE_SIZE = 50;
 
 export const PREFECTURES = [
   "北海道",
