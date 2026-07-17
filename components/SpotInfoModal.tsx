@@ -23,9 +23,35 @@ interface WikiLinksResponse {
   query?: { pages?: { links?: { title: string }[] }[] };
 }
 
+interface WikiQueryTitlesResponse {
+  query?: {
+    redirects?: { from: string; to: string }[];
+    normalized?: { from: string; to: string }[];
+    pages?: { title: string; missing?: boolean }[];
+  };
+}
+
 /** タイトル比較用に番地・記号類を除いたコア文字列を作る */
 function coreOf(name: string): string {
   return name.replace(/[0-9０-９]+番館?|[・･、,()（）\s　]/g, "");
+}
+
+/**
+ * スポット名と完全一致する記事(またはそのリダイレクト先)があればタイトルを返す。
+ * 「森戸神社」の正式記事名が「森戸大明神」であるような、通称/正式名称の食い違いは
+ * 全文検索の文字列一致だけでは拾えないため、まずこちらで解決を試みる
+ */
+async function resolveExactTitle(spotName: string): Promise<string | null> {
+  const url =
+    "https://ja.wikipedia.org/w/api.php?action=query&redirects=1&format=json&formatversion=2&origin=*&titles=" +
+    encodeURIComponent(spotName);
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const json = (await res.json()) as WikiQueryTitlesResponse;
+  const normalized = json.query?.normalized?.[0]?.to ?? spotName;
+  const redirected = json.query?.redirects?.[0]?.to ?? normalized;
+  const found = json.query?.pages?.find((p) => !p.missing);
+  return found ? redirected : null;
 }
 
 /**
@@ -109,7 +135,8 @@ export default function SpotInfoModal({
     let cancelled = false;
     (async () => {
       try {
-        const title = await searchWikiTitle(spotName);
+        const title =
+          (await resolveExactTitle(spotName)) ?? (await searchWikiTitle(spotName));
         if (cancelled) return;
         if (!title) {
           setSummary(null);
