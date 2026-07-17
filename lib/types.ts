@@ -201,6 +201,18 @@ export interface PublicReview {
   user_name: string;
 }
 
+/** 自分が書いた口コミ一覧表示用(新しい順、投稿先スポットの情報を含む) */
+export interface MyReview {
+  id: string;
+  spot_id: string;
+  body: string;
+  created_at: string;
+  spot_name: string;
+  spot_prefecture: string;
+  spot_municipality: string | null;
+  spot_rank: Rank | null;
+}
+
 export const REVIEWS_PAGE_SIZE = 10;
 
 export const SPOTS_PAGE_SIZE = 50;

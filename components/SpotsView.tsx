@@ -6,6 +6,7 @@ import {
   PREFECTURES,
   SPOTS_PAGE_SIZE,
   formatVisitedOn,
+  type MyReview,
   type Rank,
   type Spot,
   type Visit,
@@ -180,6 +181,7 @@ export default function SpotsView({
   );
   const [visits, setVisits] = useState<Visit[]>([]);
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
+  const [myReviews, setMyReviews] = useState<MyReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPref, setSelectedPref] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
@@ -251,6 +253,11 @@ export default function SpotsView({
     setVisitPlans(data ?? []);
   }, []);
 
+  const loadMyReviews = useCallback(async () => {
+    const { data } = await api.reviews.listMine(spotTypeKey);
+    setMyReviews(data ?? []);
+  }, [spotTypeKey]);
+
   // 公開スポットはIndexedDBの明示ダウンロードキャッシュ(spotCache)から得るため、
   // ここでは自分の非公開スポットだけをAPIから取り直す
   const loadPrivateSpots = useCallback(async () => {
@@ -282,10 +289,15 @@ export default function SpotsView({
   // データ取得
   useEffect(() => {
     (async () => {
-      await Promise.all([loadPrivateSpots(), loadVisits(), loadVisitPlans()]);
+      await Promise.all([
+        loadPrivateSpots(),
+        loadVisits(),
+        loadVisitPlans(),
+        loadMyReviews(),
+      ]);
       setLoading(false);
     })();
-  }, [loadPrivateSpots, loadVisits, loadVisitPlans, spotTypeKey]);
+  }, [loadPrivateSpots, loadVisits, loadVisitPlans, loadMyReviews, spotTypeKey]);
 
   const spotById = useMemo(() => {
     const m = new Map<string, Spot>();
@@ -325,16 +337,19 @@ export default function SpotsView({
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [spots]);
 
-  /** 最近訪問した場所(スポット単位で重複排除し、記録日時が新しい順) */
+  /** 最近訪問した場所(スポット単位で重複排除し、訪問日時が新しい順。訪問日時が
+   * 「覚えていない」等でnullのものは最後になる) */
   const recentVisits = useMemo(() => {
     const latestBySpot = new Map<string, Visit>();
     for (const v of visits) {
       const prev = latestBySpot.get(v.spot_id);
-      if (!prev || v.created_at > prev.created_at) latestBySpot.set(v.spot_id, v);
+      if (!prev || (v.visited_on ?? "") > (prev.visited_on ?? "")) {
+        latestBySpot.set(v.spot_id, v);
+      }
     }
     return Array.from(latestBySpot.values())
       .filter((v) => spotById.has(v.spot_id))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+      .sort((a, b) => (b.visited_on ?? "").localeCompare(a.visited_on ?? ""));
   }, [visits, spotById]);
 
   /** 都道府県ごとの件数(登録があるものだけ、JIS順) */
@@ -381,6 +396,7 @@ export default function SpotsView({
 
   const plannedPager = usePagedItems(plannedSpots, CLIENT_PAGE_SIZE);
   const recentVisitsPager = usePagedItems(recentVisits, CLIENT_PAGE_SIZE);
+  const myReviewsPager = usePagedItems(myReviews, CLIENT_PAGE_SIZE);
   const privateSpotsPager = usePagedItems(myPrivateSpots, CLIENT_PAGE_SIZE);
   const filteredSpotsPager = usePagedItems(filteredSpots, CLIENT_PAGE_SIZE);
   const { setPage: setFilteredPage } = filteredSpotsPager;
@@ -427,6 +443,9 @@ export default function SpotsView({
                             {spot.municipality && ` ${spot.municipality}`}
                           </p>
                         </div>
+                        <span className="shrink-0 text-xs text-gray-400">
+                          {new Date(plan.created_at).toLocaleDateString("ja-JP")}
+                        </span>
                       </button>
                     </li>
                   ))}
@@ -485,6 +504,47 @@ export default function SpotsView({
                 </>
               )}
             </div>
+            {myReviews.length > 0 && (
+              <div className="mb-6">
+                <h1 className="mb-4 text-lg font-bold">自分が書いた口コミ</h1>
+                <PagedListHeader
+                  page={myReviewsPager.page}
+                  totalPages={myReviewsPager.totalPages}
+                  total={myReviewsPager.total}
+                  onChange={myReviewsPager.setPage}
+                />
+                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  {myReviewsPager.pageItems.map((review) => (
+                    <li key={review.id}>
+                      <button
+                        onClick={() => setDetailSpotId(review.spot_id)}
+                        className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                      >
+                        <RankBadge rank={review.spot_rank} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{review.spot_name}</p>
+                          <p className="text-xs text-gray-500">
+                            {review.spot_prefecture}
+                            {review.spot_municipality && ` ${review.spot_municipality}`}
+                          </p>
+                          <p className="mt-1 line-clamp-2 text-sm text-gray-700">
+                            {review.body}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-xs text-gray-400">
+                          {new Date(review.created_at).toLocaleDateString("ja-JP")}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <PagedListFooter
+                  page={myReviewsPager.page}
+                  totalPages={myReviewsPager.totalPages}
+                  onChange={myReviewsPager.setPage}
+                />
+              </div>
+            )}
             {myPrivateSpots.length > 0 && (
               <div className="mb-6">
                 <h1 className="mb-4 text-lg font-bold">自分の非公開スポット</h1>
@@ -683,6 +743,7 @@ export default function SpotsView({
             onSpotChange={refreshAfterSpotChange}
             onSpotDeleted={refreshAfterSpotDelete}
             onVisitPlanChange={loadVisitPlans}
+            onReviewChange={loadMyReviews}
           />
         )}
       </main>
@@ -779,6 +840,7 @@ export default function SpotsView({
           onSpotChange={refreshAfterSpotChange}
           onSpotDeleted={refreshAfterSpotDelete}
           onVisitPlanChange={loadVisitPlans}
+          onReviewChange={loadMyReviews}
         />
       )}
     </main>
