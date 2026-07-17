@@ -19,15 +19,33 @@ interface WikiSearchResponse {
   query?: { search?: { title: string }[] };
 }
 
-/** MediaWiki Action APIでスポット名を検索して、最初にヒットした記事タイトルを返す */
-async function searchWikiTitle(query: string): Promise<string | null> {
+interface WikiLinksResponse {
+  query?: { pages?: { links?: { title: string }[] }[] };
+}
+
+/** タイトル比較用に番地・記号類を除いたコア文字列を作る */
+function coreOf(name: string): string {
+  return name.replace(/[0-9０-９]+番館?|[・･、,()（）\s　]/g, "");
+}
+
+/**
+ * MediaWiki Action APIでスポット名だけを検索する。所在地(都道府県・市区町村)を
+ * クエリに混ぜると、スポット自体の記事が無い場合に市区町村や「〇〇県出身の人物一覧」
+ * のような無関係な記事が上位に来やすいため、名前単体で検索したうえで、上位数件の中から
+ * タイトルにスポット名が含まれるものだけを採用する(同名の別記事の誤爆を避ける)
+ */
+async function searchWikiTitle(spotName: string): Promise<string | null> {
   const url =
     "https://ja.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*" +
-    `&srlimit=1&srsearch=${encodeURIComponent(query)}`;
+    `&srlimit=5&srsearch=${encodeURIComponent(spotName)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`検索に失敗しました (${res.status})`);
   const json = (await res.json()) as WikiSearchResponse;
-  return json.query?.search?.[0]?.title ?? null;
+  const results = json.query?.search ?? [];
+  const core = coreOf(spotName);
+  if (core.length < 2) return results[0]?.title ?? null;
+  const match = results.find((r) => coreOf(r.title).includes(core));
+  return match?.title ?? null;
 }
 
 async function fetchWikiSummary(title: string): Promise<WikiSummary> {
@@ -38,6 +56,34 @@ async function fetchWikiSummary(title: string): Promise<WikiSummary> {
   );
   if (!res.ok) throw new Error(`記事の取得に失敗しました (${res.status})`);
   return (await res.json()) as WikiSummary;
+}
+
+/**
+ * 曖昧さ回避ページのリンク先から、スポット名を含みかつ所在地(市区町村→都道府県の順)
+ * も一致するタイトルを選ぶ(曖昧さ回避ページは大抵「〇〇 (△△市)」のように所在地を
+ * 括弧書きしたリンクを列挙しているが、市区町村名単体へのリンクも別途混ざっているため、
+ * スポット名を含まないリンク=「伊勢原市」のような市区町村ページ自体は候補から除く)
+ */
+async function resolveDisambiguation(
+  disambigTitle: string,
+  spotName: string,
+  prefecture: string,
+  municipality: string | null
+): Promise<string | null> {
+  const url =
+    "https://ja.wikipedia.org/w/api.php?action=query&prop=links&pllimit=500&plnamespace=0&format=json&formatversion=2&origin=*&titles=" +
+    encodeURIComponent(disambigTitle);
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const json = (await res.json()) as WikiLinksResponse;
+  const core = coreOf(spotName);
+  const candidates = json.query?.pages?.[0]?.links?.filter((l) =>
+    coreOf(l.title).includes(core)
+  ) ?? [];
+  const byMunicipality =
+    municipality && candidates.find((l) => l.title.includes(municipality));
+  const byPrefecture = candidates.find((l) => l.title.includes(prefecture));
+  return (byMunicipality || byPrefecture || candidates[0])?.title ?? null;
 }
 
 /**
@@ -63,20 +109,24 @@ export default function SpotInfoModal({
     let cancelled = false;
     (async () => {
       try {
-        // まず「名前+所在地」で検索して同名スポットの取り違えを減らし、
-        // ヒットしなければ名前だけで再検索する
-        const withAddress = [spotName, prefecture, municipality]
-          .filter(Boolean)
-          .join(" ");
-        const title =
-          (await searchWikiTitle(withAddress)) ??
-          (await searchWikiTitle(spotName));
+        const title = await searchWikiTitle(spotName);
         if (cancelled) return;
         if (!title) {
           setSummary(null);
           return;
         }
-        const data = await fetchWikiSummary(title);
+        let data = await fetchWikiSummary(title);
+        // 曖昧さ回避ページに当たった場合は、所在地が一致するリンク先に差し替える
+        if (!cancelled && data.type === "disambiguation") {
+          const resolvedTitle = await resolveDisambiguation(
+            title,
+            spotName,
+            prefecture,
+            municipality
+          );
+          if (resolvedTitle) data = await fetchWikiSummary(resolvedTitle);
+          else data = { ...data, extract: "" }; // 解決できなければ「見つからなかった」扱い
+        }
         if (!cancelled) setSummary(data);
       } catch (e) {
         if (!cancelled)
