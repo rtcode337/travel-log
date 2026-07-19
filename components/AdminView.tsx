@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
+import type { SeedSpotRow } from "@/lib/sqlSeed";
 import {
   ROLE_LABELS,
   SPOT_ADMIN_ROLES,
@@ -44,6 +45,15 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [spots, setSpots] = useState<Spot[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+
+  const [sqlSyncPreview, setSqlSyncPreview] = useState<{
+    files: string[];
+    totalSeed: number;
+    missingCount: number;
+    missing: SeedSpotRow[];
+  } | null>(null);
+  const [sqlSyncChecking, setSqlSyncChecking] = useState(false);
+  const [sqlSyncApplying, setSqlSyncApplying] = useState(false);
 
   const [users, setUsers] = useState<AppUser[]>([]);
   // ロール・ニックネームは選択/入力しただけでは保存せず、ユーザーごとの
@@ -121,6 +131,45 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     const { error } = await api.spots.bulkApprove(typeKey);
     setMessage(error ? "一括承認に失敗しました: " + error.message : "すべて承認しました。");
     load();
+  };
+
+  const handleCheckSqlSync = async () => {
+    setSqlSyncChecking(true);
+    setMessage(null);
+    setSqlSyncPreview(null);
+    try {
+      const { data, error } = await api.spots.syncSqlPreview(typeKey);
+      if (error) {
+        setMessage("差分の確認に失敗しました: " + error.message);
+        return;
+      }
+      setSqlSyncPreview(data);
+    } finally {
+      setSqlSyncChecking(false);
+    }
+  };
+
+  const handleApplySqlSync = async () => {
+    if (!sqlSyncPreview || sqlSyncPreview.missingCount === 0) return;
+    if (
+      !confirm(
+        `db/init/のSQLシードのうち未登録の${sqlSyncPreview.missingCount}件を公開状態で追加しますか?`
+      )
+    )
+      return;
+    setSqlSyncApplying(true);
+    try {
+      const { error } = await api.spots.syncSqlApply(typeKey);
+      if (error) {
+        setMessage("取り込みに失敗しました: " + error.message);
+        return;
+      }
+      setMessage(`${sqlSyncPreview.missingCount}件追加しました。`);
+      setSqlSyncPreview(null);
+      load();
+    } finally {
+      setSqlSyncApplying(false);
+    }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -650,6 +699,61 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
             <p className="mt-2 text-xs text-gray-400">
               CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。rank/categoryは自由入力で空でも可)
             </p>
+          </section>
+
+          <section className="rounded-xl border border-gray-200 bg-white p-3">
+            <h2 className="mb-2 text-base font-bold">
+              SQLシードとの同期({currentTypeLabel})
+            </h2>
+            <p className="mb-3 text-xs text-gray-500">
+              db/init/配下のこの種類のシードファイルを読み、name+prefecture+municipalityが
+              完全一致するスポットが既に存在しない行だけを公開状態で追加する。表記ゆれや
+              座標近接による重複はここでは検出しないため、追加後は目視で重複確認すること。
+            </p>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleCheckSqlSync}
+                disabled={sqlSyncChecking}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
+              >
+                {sqlSyncChecking ? "確認中…" : "差分を確認"}
+              </button>
+              {sqlSyncPreview && sqlSyncPreview.missingCount > 0 && (
+                <button
+                  onClick={handleApplySqlSync}
+                  disabled={sqlSyncApplying}
+                  className="rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-700"
+                >
+                  {sqlSyncApplying
+                    ? "取り込み中…"
+                    : `未登録の${sqlSyncPreview.missingCount}件を取り込む`}
+                </button>
+              )}
+            </div>
+
+            {sqlSyncPreview && (
+              <div className="mt-3 text-sm">
+                <p className="text-gray-600">
+                  対象ファイル: {sqlSyncPreview.files.join(", ") || "なし"} /
+                  シード総数 {sqlSyncPreview.totalSeed}件 / 未登録{" "}
+                  {sqlSyncPreview.missingCount}件
+                </p>
+                {sqlSyncPreview.missingCount > 0 && (
+                  <ul className="mt-2 max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
+                    {sqlSyncPreview.missing.map((s, i) => (
+                      <li key={i} className="px-3 py-1.5 text-xs">
+                        {s.name}({s.prefecture}
+                        {s.municipality ?? ""})
+                        {s.rank && (
+                          <span className="ml-1 text-gray-400">[{s.rank}]</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </section>
         </div>
       </div>

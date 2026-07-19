@@ -10,6 +10,7 @@ import type {
   Visit,
   VisitPlan,
 } from "@/lib/types";
+import type { SeedSpotRow } from "@/lib/sqlSeed";
 
 interface Result<T> {
   data: T | null;
@@ -128,6 +129,17 @@ export const api = {
       }),
     bulkApprove: (type: string) =>
       request<Spot[]>(`/api/spots/bulk-approve?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+      }),
+    syncSqlPreview: (type: string) =>
+      request<{
+        files: string[];
+        totalSeed: number;
+        missingCount: number;
+        missing: SeedSpotRow[];
+      }>(`/api/spots/sync-sql?type=${encodeURIComponent(type)}`),
+    syncSqlApply: (type: string) =>
+      request<Spot[]>(`/api/spots/sync-sql?type=${encodeURIComponent(type)}`, {
         method: "POST",
       }),
   },
