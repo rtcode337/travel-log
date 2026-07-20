@@ -2,7 +2,12 @@
 
 import { useMemo } from "react";
 import { distinctValues, type Rank, type Spot } from "@/lib/types";
-import { getRankBadgeStyle, getRankOrder } from "@/lib/rankStyle";
+import {
+  autoTextColor,
+  findRankStyle,
+  getRankOrder,
+  type RankStyleDefinition,
+} from "@/lib/rankStyle";
 
 export type VisitedValue = "visited" | "unvisited";
 
@@ -56,19 +61,25 @@ function Chip({
   label,
   active,
   activeClassName,
+  activeStyle,
   onClick,
 }: {
   label: string;
   active: boolean;
-  activeClassName: string;
+  activeClassName?: string;
+  /** ランクごとの動的な配色はTailwindの静的クラスで表現できないためinline styleで渡す */
+  activeStyle?: React.CSSProperties;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      style={active ? activeStyle : undefined}
       className={`rounded-full border px-3 py-1 font-medium ${
-        active ? activeClassName : "border-gray-300 bg-white text-gray-400"
+        active
+          ? activeClassName ?? "border-transparent"
+          : "border-gray-300 bg-white text-gray-400"
       }`}
     >
       {label}
@@ -82,18 +93,21 @@ export default function FilterBar({
   spots,
   filters,
   onChange,
+  rankStyles,
 }: {
   /** 現在アクティブなスポット種別の実データから、ランクの選択肢を動的に作る */
   spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;
+  /** このスポット種別のランク設定(lib/useRankStyles.ts参照) */
+  rankStyles: RankStyleDefinition[];
 }) {
   const availableRanks = useMemo(
     () =>
       distinctValues(spots.map((s) => s.rank)).sort(
-        (a, b) => getRankOrder(a) - getRankOrder(b)
+        (a, b) => getRankOrder(a, rankStyles) - getRankOrder(b, rankStyles)
       ),
-    [spots]
+    [spots, rankStyles]
   );
 
   return (
@@ -104,20 +118,27 @@ export default function FilterBar({
             ランク
           </span>
           <div className="flex flex-wrap gap-1.5">
-            {availableRanks.map((rank) => (
-              <Chip
-                key={rank}
-                label={rank}
-                active={filters.ranks.includes(rank)}
-                activeClassName={getRankBadgeStyle(rank)}
-                onClick={() =>
-                  onChange({
-                    ...filters,
-                    ranks: toggleSelection(filters.ranks, rank),
-                  })
-                }
-              />
-            ))}
+            {availableRanks.map((rank) => {
+              const style = findRankStyle(rank, rankStyles);
+              return (
+                <Chip
+                  key={rank}
+                  label={rank}
+                  active={filters.ranks.includes(rank)}
+                  activeStyle={{
+                    backgroundColor: style.color,
+                    color: style.textColor ?? autoTextColor(style.color),
+                    borderColor: style.borderColor,
+                  }}
+                  onClick={() =>
+                    onChange({
+                      ...filters,
+                      ranks: toggleSelection(filters.ranks, rank),
+                    })
+                  }
+                />
+              );
+            })}
             <Chip
               label="すべて"
               active={filters.ranks.length === 0}

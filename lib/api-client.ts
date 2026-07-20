@@ -7,7 +7,6 @@ import type {
   Spot,
   SpotType,
   SpotTypeSettingKey,
-  SpotTypeVisibility,
   Visit,
   VisitPlan,
 } from "@/lib/types";
@@ -163,11 +162,13 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ settings: { [key]: value } }),
       }),
-    setVisibility: (id: string, visibility: SpotTypeVisibility) =>
+    applySettings: (id: string, settings: Partial<Record<string, boolean | string>>) =>
       request<SpotType>(`/api/spot-types/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ visibility }),
+        body: JSON.stringify({ settings }),
       }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/api/spot-types/${id}`, { method: "DELETE" }),
   },
   appSettings: {
     get: () => request<SpotType>("/api/app-settings"),

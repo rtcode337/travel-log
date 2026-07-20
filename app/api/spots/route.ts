@@ -3,11 +3,15 @@ import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import {
   ALLOWED_STATUS_BY_ROLE,
+  getSpotTypeSetting,
   MODERATION_ROLES,
   SPOT_ADMIN_ROLES,
   SPOTS_PAGE_SIZE,
+  type SpotType,
   type Spot,
 } from "@/lib/types";
+import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
+import { resolveRankStyles } from "@/lib/rankStyle";
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -24,16 +28,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
   }
 
-  const { rows: typeRows } = await query<{ id: string; visibility: string }>(
-    "select id, visibility from spot_types where key = $1",
+  const { rows: typeRows } = await query<SpotType>(
+    `${SPOT_TYPE_SELECT} where t.key = $1`,
     [typeKey]
   );
   const activeType = typeRows[0];
-  // admin_only・disabledの種別はadmin/spot_admin以外には存在自体を見せない
+  // public_visible設定がfalse(既定)の種別はadmin/spot_admin以外には存在自体を見せない
   // (ページ側の404と揃える。管理画面が全statusのスポットを読むためadmin側は素通し)
   if (
     !activeType ||
-    (activeType.visibility !== "public" && !SPOT_ADMIN_ROLES.includes(user.role))
+    (!getSpotTypeSetting(activeType, "public_visible") && !SPOT_ADMIN_ROLES.includes(user.role))
   ) {
     return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
@@ -85,27 +89,20 @@ export async function GET(request: Request) {
     conditions.push(`rank = $${listParams.length}`);
   }
 
-  // ランクの並び順(A〜E→Z→郵便局→その他既知外→null)はlib/rankStyle.tsの
-  // getRankOrderと揃えること(すべてランク表示時にランクが高い順になるように)
-  const RANK_ORDER_SQL = `
-    case
-      when rank = 'A' then 0
-      when rank = 'B' then 1
-      when rank = 'C' then 2
-      when rank = 'D' then 3
-      when rank = 'E' then 4
-      when rank = 'Z' then 5
-      when rank = '郵便局' then 6
-      when rank is null then 8
-      else 7
-    end`;
+  // ランクの並び順はこの種別のランク設定(activeType.settings.rank_styles、無ければ
+  // 観光地のA〜E)の並びをそのまま使う。lib/rankStyle.tsのgetRankOrderと揃えること
+  // (すべてランク表示時にランクが高い順になるように)
+  const rankOrder = resolveRankStyles(activeType).map((s) => s.rank);
 
   const where = conditions.join(" and ");
+  const rankOrderParams = [...listParams, rankOrder];
+  const rankOrderIdx = rankOrderParams.length;
   const [{ rows: items }, { rows: countRows }, { rows: rankRows }] = await Promise.all([
     query<Spot>(
-      `select * from spots where ${where} order by ${RANK_ORDER_SQL}, prefecture, name
-       limit $${listParams.length + 1} offset $${listParams.length + 2}`,
-      [...listParams, SPOTS_PAGE_SIZE, (page - 1) * SPOTS_PAGE_SIZE]
+      `select * from spots where ${where}
+       order by coalesce(array_position($${rankOrderIdx}::text[], rank), 999999), prefecture, name
+       limit $${rankOrderIdx + 1} offset $${rankOrderIdx + 2}`,
+      [...rankOrderParams, SPOTS_PAGE_SIZE, (page - 1) * SPOTS_PAGE_SIZE]
     ),
     query<{ count: string }>(`select count(*) from spots where ${where}`, listParams),
     // ランク選択肢は検索文字列・選択中ランクの影響を受けず、種別全体から出す
@@ -181,14 +178,14 @@ export async function POST(request: Request) {
   if (!typeKey) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
   }
-  const { rows: typeRows } = await query<{ id: string; visibility: string }>(
-    "select id, visibility from spot_types where key = $1",
+  const { rows: typeRows } = await query<SpotType>(
+    `${SPOT_TYPE_SELECT} where t.key = $1`,
     [typeKey]
   );
   const spotType = typeRows[0];
   if (
     !spotType ||
-    (spotType.visibility !== "public" && !SPOT_ADMIN_ROLES.includes(user.role))
+    (!getSpotTypeSetting(spotType, "public_visible") && !SPOT_ADMIN_ROLES.includes(user.role))
   ) {
     return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
