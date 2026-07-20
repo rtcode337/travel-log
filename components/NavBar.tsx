@@ -45,7 +45,7 @@ export default function NavBar() {
       <div className="mx-auto flex max-w-lg items-stretch">
         {items.map((item) => {
           if (item.adminOnly && !isAdmin) return null;
-          // 地図・リスト・管理・アカウントタブは、今表示中のスポット種類キーを保ったまま遷移する
+          // 地図・リスト・管理・アカウントタブは、今表示中のスポット種別キーを保ったまま遷移する
           const href = `/${typeKey}/${item.path}`;
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (

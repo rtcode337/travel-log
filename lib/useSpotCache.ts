@@ -54,11 +54,11 @@ function toEntry(stored: StoredSpotCache): SpotCacheEntry {
 
 /**
  * 公開スポットは頻繁に変わらないため、ページを開くたびにAPIから取り直すのではなく
- * スポット種類ごとにIndexedDBへ明示的にダウンロード・キャッシュする
+ * スポット種別ごとにIndexedDBへ明示的にダウンロード・キャッシュする
  * (/[type]/map・/[type]/spots で共通利用)。未ダウンロードならページを開いたタイミングで
  * 一度だけダウンロード確認ダイアログを出す。
  *
- * 郵便局・御朱印など数万件規模の種類でも保存できるよう、保存先はlocalStorage(約5MB上限)
+ * 郵便局・御朱印など数万件規模の種別でも保存できるよう、保存先はlocalStorage(約5MB上限)
  * ではなくIndexedDBを使い、かつ地図・一覧で使うフィールドだけに間引いて保存する
  * (lib/spotCacheDb.ts)。
  */
@@ -78,7 +78,7 @@ export function useSpotCache(typeKey: string) {
   // アンマウント時(ダイアログごと画面が消えるページ遷移等)は進行中のダウンロードを打ち切る
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // 種類が変わったらキャッシュを非同期に読み直す(IndexedDBアクセスは非同期のため、
+  // 種別が変わったらキャッシュを非同期に読み直す(IndexedDBアクセスは非同期のため、
   // 読み込み完了までready=falseにして、その間は未ダウンロード扱いのプロンプトを出さない)
   useEffect(() => {
     let cancelled = false;

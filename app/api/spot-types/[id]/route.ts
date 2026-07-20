@@ -33,7 +33,7 @@ export async function PATCH(
       return NextResponse.json({ error: "invalid request" }, { status: 400 });
     }
     if (visibility !== "public") {
-      // ログイン後の既定(app_settings.active_spot_type_id)がこの種類のままだと
+      // ログイン後の既定(app_settings.active_spot_type_id)がこの種別のままだと
       // 一般ユーザーのルート("/")が404するページへリダイレクトし続けてしまうため、
       // 公開以外への変更を禁止する
       const { rows: activeRows } = await query(
@@ -42,7 +42,7 @@ export async function PATCH(
       );
       if (activeRows[0]) {
         return NextResponse.json(
-          { error: "ログイン後既定の種類は有効以外にできません。先に既定を変更してください。" },
+          { error: "ログイン後既定の種別は有効以外にできません。先に既定を変更してください。" },
           { status: 400 }
         );
       }
@@ -50,7 +50,7 @@ export async function PATCH(
     await query("update spot_types set visibility = $1 where id = $2", [visibility, id]);
   }
 
-  // スポットの種類ごとの追加設定(口コミ・Wikipediaリンク等)。spot_typesに列を
+  // スポット種別ごとの追加設定(口コミ・Wikipediaリンク等)。spot_typesに列を
   // 増やさずキーを増やせるよう、spot_type_settings(key, value)へupsertする
   // (現状は値がすべてboolean相当のため文字列'true'/'false'で保存)
   if (settings !== undefined) {

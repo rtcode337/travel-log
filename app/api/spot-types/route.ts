@@ -10,7 +10,7 @@ export async function GET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // admin_only・disabledの種類はadmin/spot_admin以外には存在自体を見せない
+  // admin_only・disabledの種別はadmin/spot_admin以外には存在自体を見せない
   const { rows } = await query<SpotType>(
     SPOT_ADMIN_ROLES.includes(user.role)
       ? `${SPOT_TYPE_SELECT} order by t.created_at asc`
