@@ -54,6 +54,8 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   } | null>(null);
   const [sqlSyncChecking, setSqlSyncChecking] = useState(false);
   const [sqlSyncApplying, setSqlSyncApplying] = useState(false);
+  // CSVインポート用のmessageとは別に持つ(共用すると同期のエラーがCSVインポート欄に出てしまう)
+  const [sqlSyncMessage, setSqlSyncMessage] = useState<string | null>(null);
 
   const [users, setUsers] = useState<AppUser[]>([]);
   // ロール・ニックネームは選択/入力しただけでは保存せず、ユーザーごとの
@@ -135,12 +137,12 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
 
   const handleCheckSqlSync = async () => {
     setSqlSyncChecking(true);
-    setMessage(null);
+    setSqlSyncMessage(null);
     setSqlSyncPreview(null);
     try {
       const { data, error } = await api.spots.syncSqlPreview(typeKey);
       if (error) {
-        setMessage("差分の確認に失敗しました: " + error.message);
+        setSqlSyncMessage("差分の確認に失敗しました: " + error.message);
         return;
       }
       setSqlSyncPreview(data);
@@ -158,13 +160,16 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     )
       return;
     setSqlSyncApplying(true);
+    setSqlSyncMessage(null);
     try {
-      const { error } = await api.spots.syncSqlApply(typeKey);
+      const { data, error } = await api.spots.syncSqlApply(typeKey);
       if (error) {
-        setMessage("取り込みに失敗しました: " + error.message);
+        setSqlSyncMessage("取り込みに失敗しました: " + error.message);
         return;
       }
-      setMessage(`${sqlSyncPreview.missingCount}件追加しました。`);
+      setSqlSyncMessage(
+        `${data?.insertedCount ?? sqlSyncPreview.missingCount}件追加しました。`
+      );
       setSqlSyncPreview(null);
       load();
     } finally {
@@ -710,6 +715,12 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
               完全一致するスポットが既に存在しない行だけを公開状態で追加する。表記ゆれや
               座標近接による重複はここでは検出しないため、追加後は目視で重複確認すること。
             </p>
+
+            {sqlSyncMessage && (
+              <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                {sqlSyncMessage}
+              </p>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <button
