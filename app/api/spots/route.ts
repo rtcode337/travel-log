@@ -134,36 +134,42 @@ interface SpotInput {
   official_url: string | null;
 }
 
-async function insertSpot(
+// unnest()で複数行を1回のINSERTにまとめる(CSVインポート等、大量件数の
+// 逐次INSERTがラウンドトリップの積み重ねでタイムアウトするのを避けるため)。
+// with ordinalityで元の並び順を保持し、そのままRETURNINGの順序に反映させる
+async function insertSpots(
   spotTypeId: string,
-  spot: SpotInput,
+  records: SpotInput[],
+  statuses: string[],
   source: "manual" | "user_submitted",
-  status: string,
   createdBy: string
 ) {
   const { rows } = await query<Spot>(
     `insert into spots
       (spot_type_id, name, name_kana, prefecture, municipality, lat, lng, rank, category, description, official_url, source, status, created_by)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     select $1, u.name, u.name_kana, u.prefecture, u.municipality, u.lat, u.lng, u.rank, u.category, u.description, u.official_url, $2, u.status, $3
+     from unnest($4::text[], $5::text[], $6::text[], $7::text[], $8::float8[], $9::float8[], $10::text[], $11::text[], $12::text[], $13::text[], $14::text[])
+       with ordinality as u(name, name_kana, prefecture, municipality, lat, lng, rank, category, description, official_url, status, ord)
+     order by u.ord
      returning *`,
     [
       spotTypeId,
-      spot.name,
-      spot.name_kana,
-      spot.prefecture,
-      spot.municipality,
-      spot.lat,
-      spot.lng,
-      spot.rank,
-      spot.category,
-      spot.description,
-      spot.official_url,
       source,
-      status,
       createdBy,
+      records.map((r) => r.name),
+      records.map((r) => r.name_kana),
+      records.map((r) => r.prefecture),
+      records.map((r) => r.municipality),
+      records.map((r) => r.lat),
+      records.map((r) => r.lng),
+      records.map((r) => r.rank),
+      records.map((r) => r.category),
+      records.map((r) => r.description),
+      records.map((r) => r.official_url),
+      statuses,
     ]
   );
-  return rows[0];
+  return rows;
 }
 
 export async function POST(request: Request) {
@@ -213,12 +219,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const inserted = [];
-    for (let i = 0; i < records.length; i++) {
-      inserted.push(
-        await insertSpot(spotType.id, records[i], source, statuses[i], user.id)
-      );
-    }
+    const inserted = await insertSpots(spotType.id, records, statuses, source, user.id);
     return NextResponse.json({ data: Array.isArray(body) ? inserted : inserted[0] });
   } catch (err) {
     return NextResponse.json(
