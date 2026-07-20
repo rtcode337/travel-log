@@ -57,6 +57,20 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   // CSVインポート用のmessageとは別に持つ(共用すると同期のエラーがCSVインポート欄に出てしまう)
   const [sqlSyncMessage, setSqlSyncMessage] = useState<string | null>(null);
 
+  const [dedupePreview, setDedupePreview] = useState<{
+    groupCount: number;
+    deleteCount: number;
+    groups: {
+      name: string;
+      prefecture: string;
+      municipality: string | null;
+      count: number;
+    }[];
+  } | null>(null);
+  const [dedupeChecking, setDedupeChecking] = useState(false);
+  const [dedupeApplying, setDedupeApplying] = useState(false);
+  const [dedupeMessage, setDedupeMessage] = useState<string | null>(null);
+
   const [users, setUsers] = useState<AppUser[]>([]);
   // ロール・ニックネームは選択/入力しただけでは保存せず、ユーザーごとの
   // 「変更」ボタンを押した時だけAPIに反映する下書き
@@ -174,6 +188,52 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
       load();
     } finally {
       setSqlSyncApplying(false);
+    }
+  };
+
+  const handleCheckDedupe = async () => {
+    setDedupeChecking(true);
+    setDedupeMessage(null);
+    setDedupePreview(null);
+    try {
+      const { data, error } = await api.spots.dedupePreview(typeKey);
+      if (error) {
+        setDedupeMessage("重複の確認に失敗しました: " + error.message);
+        return;
+      }
+      if (data && data.deleteCount === 0) {
+        setDedupeMessage("重複はありません。");
+        return;
+      }
+      setDedupePreview(data);
+    } finally {
+      setDedupeChecking(false);
+    }
+  };
+
+  const handleApplyDedupe = async () => {
+    if (!dedupePreview || dedupePreview.deleteCount === 0) return;
+    if (
+      !confirm(
+        `${dedupePreview.groupCount}グループの重複スポット${dedupePreview.deleteCount}件を削除しますか?` +
+          `各グループで最初に登録された1件を残し、訪問記録・訪問予定・口コミは残す1件に引き継ぎます。` +
+          `この操作は取り消せません。`
+      )
+    )
+      return;
+    setDedupeApplying(true);
+    setDedupeMessage(null);
+    try {
+      const { data, error } = await api.spots.dedupeApply(typeKey);
+      if (error) {
+        setDedupeMessage("重複の削除に失敗しました: " + error.message);
+        return;
+      }
+      setDedupeMessage(`重複${data?.deletedCount ?? 0}件を削除しました。`);
+      setDedupePreview(null);
+      load();
+    } finally {
+      setDedupeApplying(false);
     }
   };
 
@@ -765,6 +825,63 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                 )}
               </div>
             )}
+
+            <div className="mt-4 border-t border-gray-100 pt-3">
+              <h3 className="mb-1 text-sm font-bold">重複スポットの削除</h3>
+              <p className="mb-3 text-xs text-gray-500">
+                同期の並行実行等で同じスポットが複数登録された場合の後始末。
+                name+prefecture+municipalityが完全一致する公開スポットを重複とみなし、
+                各グループで最初に登録された1件を残して削除する(削除される行の
+                訪問記録・訪問予定・口コミは残す1件に引き継ぐ)。
+              </p>
+
+              {dedupeMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                  {dedupeMessage}
+                </p>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleCheckDedupe}
+                  disabled={dedupeChecking}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                >
+                  {dedupeChecking ? "確認中…" : "重複を確認"}
+                </button>
+                {dedupePreview && dedupePreview.deleteCount > 0 && (
+                  <button
+                    onClick={handleApplyDedupe}
+                    disabled={dedupeApplying}
+                    className="rounded-lg border border-red-400 bg-white px-3 py-1.5 text-sm font-medium text-red-700"
+                  >
+                    {dedupeApplying
+                      ? "削除中…"
+                      : `重複${dedupePreview.deleteCount}件を削除`}
+                  </button>
+                )}
+              </div>
+
+              {dedupePreview && dedupePreview.deleteCount > 0 && (
+                <div className="mt-3 text-sm">
+                  <p className="text-gray-600">
+                    重複グループ {dedupePreview.groupCount}件 / 削除対象{" "}
+                    {dedupePreview.deleteCount}件
+                  </p>
+                  <ul className="mt-2 max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
+                    {dedupePreview.groups.map((g, i) => (
+                      <li key={i} className="px-3 py-1.5 text-xs">
+                        {g.name}({g.prefecture}
+                        {g.municipality ?? ""})
+                        <span className="ml-1 text-gray-400">
+                          {g.count}件 → 1件
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </section>
         </div>
       </div>
