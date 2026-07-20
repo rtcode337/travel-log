@@ -47,8 +47,8 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [myId, setMyId] = useState<string | null>(null);
   const isAdmin = myRole === "admin";
 
-  // スポットの種類設定の非表示ランクトグル・CSV取り込み後の件数把握のためだけに、
-  // このスポット種類の全件(status問わず)を軽く保持しておく(一覧UIとしては出さない)
+  // スポット種別設定の非表示ランクトグル・CSV取り込み後の件数把握のためだけに、
+  // このスポット種別の全件(status問わず)を軽く保持しておく(一覧UIとしては出さない)
   const [spots, setSpots] = useState<Spot[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -386,7 +386,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
         return;
       }
 
-      // 差分更新: 既に(status問わず)このスポット種類に存在する行、およびCSV内で
+      // 差分更新: 既に(status問わず)このスポット種別に存在する行、およびCSV内で
       // 重複している行はスキップし、新規分だけ追加する
       const existingKeys = new Set(
         spots.map((s) => spotDiffKey(s.name, s.prefecture, s.lat, s.lng))
@@ -446,7 +446,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     <main className="mx-auto max-w-6xl p-4">
       <h1 className="mb-4 text-lg font-bold">管理画面</h1>
 
-      {/* スポットの種類(ログイン後の既定・種類マスタ) */}
+      {/* スポット種別(ログイン後の既定・種別マスタ) */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
         {/* 左カラム: ユーザー管理(admin専用) */}
         {isAdmin && (
@@ -623,7 +623,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
           <div className="flex flex-col gap-6">
             {isAdmin && currentType && (
               <section className="rounded-xl border border-gray-200 bg-white p-3">
-                <h3 className="mb-2 text-base font-bold">スポットの種類の設定</h3>
+                <h3 className="mb-2 text-base font-bold">スポット種別の設定</h3>
                 {typeSettingsMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
                     {typeSettingsMessage}
@@ -637,7 +637,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                         checked={getSpotTypeSetting(currentType, key)}
                         onChange={() => handleToggleSetting(currentType, key)}
                       />
-                      この種類で{SPOT_TYPE_SETTING_LABELS[key]}を有効にする
+                      この種別で{SPOT_TYPE_SETTING_LABELS[key]}を有効にする
                     </label>
                   ))}
                 </div>
@@ -739,7 +739,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
               {purgeCount !== null && purgeCount > 0 && (
                 <div className="mt-3 flex flex-col gap-2">
                   <p className="text-sm text-gray-600">
-                    削除対象 {purgeCount}件。確認のため、下の欄に種類キー「{typeKey}」を
+                    削除対象 {purgeCount}件。確認のため、下の欄に種別キー「{typeKey}」を
                     入力すると削除ボタンが有効になる。
                   </p>
                   <input
@@ -771,12 +771,12 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
           {isAdmin && (
             <div>
               <h2 className="mb-2 text-base font-bold">
-                ログイン後に自動で開く種類
+                ログイン後に自動で開く種別
               </h2>
               <section className="rounded-xl border border-gray-200 bg-white p-3">
                 <p className="mb-3 text-xs text-gray-500">
                   ログイン後・ルート(/)アクセス時に自動で開く地図/リストの既定(全ユーザー共通)。
-                  ここでの選択は既定を切り替えるだけで、他の種類を非表示にするものではない。
+                  ここでの選択は既定を切り替えるだけで、他の種別を非表示にするものではない。
                 </p>
                 {defaultTypeMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
@@ -803,11 +803,11 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
 
           {isAdmin && (
             <div>
-              <h2 className="mb-2 text-base font-bold">スポットの種類の管理</h2>
+              <h2 className="mb-2 text-base font-bold">スポット種別の管理</h2>
               <section className="rounded-xl border border-gray-200 bg-white p-3">
                 <p className="mb-3 text-xs text-gray-500">
                   スポットの追加・編集・承認は、このページのURL(現在は「{currentTypeLabel}」)
-                  で対象の種類が決まる — 他の種類を扱いたい場合は種類名をクリックして移動する。
+                  で対象の種別が決まる — 他の種別を扱いたい場合は種別名をクリックして移動する。
                 </p>
                 {typeMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
@@ -885,7 +885,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                     type="submit"
                     className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
                   >
-                    + 種類を追加
+                    + 種別を追加
                   </button>
                 </form>
               </section>

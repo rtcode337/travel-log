@@ -1,8 +1,8 @@
 /**
- * rank/categoryはスポットの「種類(SpotType)」ごとに意味が異なりうるため、
+ * rank/categoryはスポットの「種別(SpotType)」ごとに意味が異なりうるため、
  * DB上は自由入力(nullable text)。以下は観光地(spot_type='tourist')が実際に
  * 使っている値で、UIのサジェスト(datalist)用の参考値として残している。
- * 他の種類(郵便局・御朱印など)は独自のrank/categoryを使うか、全く使わなくてよい。
+ * 他の種別(郵便局・御朱印など)は独自のrank/categoryを使うか、全く使わなくてよい。
  */
 export type Rank = string;
 export type Category = string;
@@ -85,7 +85,7 @@ export interface Spot {
 }
 
 /**
- * スポット種類の公開範囲。
+ * スポット種別の公開範囲。
  * public: 全ユーザーに表示 /
  * admin_only: admin・spot_adminのみ/[key]/map・/[key]/spots等を閲覧できる(公開前の準備用) /
  * disabled: 全ユーザーに対して/[key]/map・/[key]/spots・アカウントページのリンクを404/非表示にする
@@ -99,7 +99,7 @@ export const SPOT_TYPE_VISIBILITY_LABELS: Record<SpotTypeVisibility, string> = {
   disabled: "無効",
 };
 
-/** スポットの種類(観光地/郵便局/御朱印など)。管理者が新規追加できる */
+/** スポット種別(観光地/郵便局/御朱印など)。管理者が新規追加できる */
 export interface SpotType {
   id: string;
   key: string;
@@ -112,7 +112,7 @@ export interface SpotType {
 }
 
 /**
- * スポットの種類ごとのON/OFF設定。spot_typesに列を増やさずに済むよう
+ * スポット種別ごとのON/OFF設定。spot_typesに列を増やさずに済むよう
  * spot_type_settings(spot_type_id, key, value)のEAV形式でDBに持つ。
  * 新しい設定を増やす際は、ここにキー・既定値・表示名を追加するだけでよい
  * (マイグレーション不要。使う側は getSpotTypeSetting で読む)。
@@ -144,8 +144,8 @@ export function getSpotTypeSetting(
 }
 
 /**
- * admin: 承認・削除・ユーザー管理・スポットの種類設定・公開スポットの直接作成ができる /
- * spot_admin: ユーザー管理・スポットの種類設定はできないが、スポットについてはadminと同じ
+ * admin: 承認・削除・ユーザー管理・スポット種別設定・公開スポットの直接作成ができる /
+ * spot_admin: ユーザー管理・スポット種別設定はできないが、スポットについてはadminと同じ
  *   権限を持つ(承認待ち→公開/却下への変更、公開スポットの直接作成・編集・削除) /
  * moderator: スポットを非公開・承認待ちで追加できる。承認待ちスポットは全員分閲覧できるが、
  *   承認・却下はできない /

@@ -12,7 +12,7 @@ async function resolveSpotType(typeKey: string) {
 }
 
 /**
- * スポットの種類ごと一括削除。CSVで作り直す前提の強い操作で、published以外
+ * スポット種別ごと一括削除。CSVで作り直す前提の強い操作で、published以外
  * (private/pending/rejected)の他ユーザー分も巻き込んで消すため、ユーザー管理と
  * 同様にadmin専用とする(spot_adminは不可)。
  */
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
   }
   const spotType = await resolveSpotType(typeKey);
   if (!spotType) {
-    return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
+    return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
 
   const { rows } = await query<{ count: string }>(
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
 }
 
 /**
- * 対象スポット種類のスポットをstatus問わず全件削除する。visits/visit_plans/reviewsは
+ * 対象スポット種別のスポットをstatus問わず全件削除する。visits/visit_plans/reviewsは
  * spotsへのFKがon delete cascadeのため自動で消える(db/init/01_schema.sql参照)。
  * 写真ファイルはカスケードで行が消える前に集めておき、削除成功後にまとめて消す。
  */
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   }
   const spotType = await resolveSpotType(typeKey);
   if (!spotType) {
-    return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
+    return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
 
   const client = await pool.connect();

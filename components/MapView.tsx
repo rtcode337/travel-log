@@ -200,7 +200,7 @@ function createLocationDotElement(): HTMLDivElement {
 export default function MapView({
   spotTypeKey,
 }: {
-  /** 表示対象のスポット種類キー(常に /[type]/map から渡される) */
+  /** 表示対象のスポット種別キー(常に /[type]/map から渡される) */
   spotTypeKey: string;
 }) {
   const searchParams = useSearchParams();

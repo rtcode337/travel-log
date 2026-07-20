@@ -25,7 +25,7 @@ export async function GET(request: Request) {
       [typeKey]
     );
     if (!typeRows[0]) {
-      return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
+      return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
     }
     const { rows } = await query<MyReview>(
       `select r.id, r.spot_id, r.body, r.created_at,
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
   // 行が無い(=設定されていない)場合は既定のtrueとして扱う(lib/types.tsのSPOT_TYPE_SETTING_DEFAULTS参照)
   if (spotRows[0].reviews_enabled === "false") {
     return NextResponse.json(
-      { error: "このスポットの種類では口コミが無効になっています。" },
+      { error: "このスポット種別では口コミが無効になっています。" },
       { status: 400 }
     );
   }

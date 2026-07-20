@@ -170,7 +170,7 @@ function PagedListFooter({
 export default function SpotsView({
   spotTypeKey,
 }: {
-  /** 表示対象のスポット種類キー(常に /[type]/spots から渡される) */
+  /** 表示対象のスポット種別キー(常に /[type]/spots から渡される) */
   spotTypeKey: string;
 }) {
   const spotCache = useSpotCache(spotTypeKey);
@@ -196,7 +196,7 @@ export default function SpotsView({
   const [managementLoading, setManagementLoading] = useState(false);
   const [managementSearchInput, setManagementSearchInput] = useState("");
   const [managementSearch, setManagementSearch] = useState("");
-  // A〜Eのランク段階はtourist種類専用(CLAUDE.md参照)。それ以外の種類では
+  // A〜Eのランク段階はtourist種別専用(CLAUDE.md参照)。それ以外の種別では
   // 「A」を既定にすると該当スポットが無く常に0件表示になるため、すべて を既定にする
   const [managementRank, setManagementRank] = useState<Rank | "all">(
     spotTypeKey === "tourist" ? "A" : "all"

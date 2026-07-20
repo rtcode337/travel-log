@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { query } from "@/lib/db";
 
 /**
- * ログイン後にどのスポット種類の地図を開くかは、管理画面で設定した
+ * ログイン後にどのスポット種別の地図を開くかは、管理画面で設定した
  * app_settings.active_spot_type_id(既定はtourist。アプリ初期化時に必ず存在する)で決まる。
  * 切替がすぐ反映されるよう、ビルド時に静的化せず常にリクエスト時に問い合わせる。
  */

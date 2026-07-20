@@ -21,8 +21,8 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
     api.spotTypes.list().then(({ data }) => setSpotTypes(data ?? []));
   }, []);
 
-  // admin_only・disabledの種類はAPI側でadmin/spot_admin以外には返らない。
-  // 管理者にはadmin_onlyの種類もリンクを出す(無効だけは管理者にも出さない)
+  // admin_only・disabledの種別はAPI側でadmin/spot_admin以外には返らない。
+  // 管理者にはadmin_onlyの種別もリンクを出す(無効だけは管理者にも出さない)
   const currentType = spotTypes.find((t) => t.key === typeKey) ?? null;
   const otherTypes = spotTypes.filter(
     (t) => t.key !== typeKey && t.visibility !== "disabled"

@@ -182,7 +182,7 @@ export default function SpotDetailModal({
     [currentSpotType, spot]
   );
 
-  // 郵便局のようにWikipedia記事が存在しない種類では、リンクが機能しないため出さない
+  // 郵便局のようにWikipedia記事が存在しない種別では、リンクが機能しないため出さない
   const wikipediaEnabled = useMemo(
     () => getSpotTypeSetting(currentSpotType, "wikipedia_enabled"),
     [currentSpotType]

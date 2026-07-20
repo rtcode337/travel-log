@@ -5,8 +5,8 @@ import type { SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 
 /**
- * ここで返す/更新する値は「ログイン後に自動で開くスポット種類の既定値」のみ。
- * 地図・一覧・スポットAPIの対象種類はURLキー(/[type]/...)で必ず指定するため、
+ * ここで返す/更新する値は「ログイン後に自動で開くスポット種別の既定値」のみ。
+ * 地図・一覧・スポットAPIの対象種別はURLキー(/[type]/...)で必ず指定するため、
  * この値では絞り込まない。
  */
 export async function GET() {
@@ -41,11 +41,11 @@ export async function PATCH(request: Request) {
     [spot_type_id]
   );
   if (!typeRows[0]) {
-    return NextResponse.json({ error: "存在しない種類です。" }, { status: 400 });
+    return NextResponse.json({ error: "存在しない種別です。" }, { status: 400 });
   }
   if (typeRows[0].visibility !== "public") {
     return NextResponse.json(
-      { error: "無効または管理者のみの種類は既定にできません。" },
+      { error: "無効または管理者のみの種別は既定にできません。" },
       { status: 400 }
     );
   }

@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   );
   const spotType = typeRows[0];
   if (!spotType) {
-    return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
+    return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
 
   const { rows } = await query<Spot>(

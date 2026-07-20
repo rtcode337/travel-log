@@ -6,7 +6,7 @@ import type { Spot } from "@/lib/types";
  * 公開スポットのキャッシュに保存するのは、地図のピン・一覧・絞り込み・重複チェックが
  * 実際に読むフィールドだけに絞る。詳細(description/official_url など)はスポットを
  * 開いたときに api.spots.get で個別に取り直すので、キャッシュには持たせない。
- * spot_type_id も種類ごとにストア上のキーを分けているため保存不要。
+ * spot_type_id も種別ごとにストア上のキーを分けているため保存不要。
  * これにより郵便局(2万件超)・御朱印(4万件超)のような大規模データでも
  * 保存サイズを抑えられる(加えて localStorage の約5MB上限に縛られない IndexedDB を使う)。
  */
@@ -135,7 +135,7 @@ export async function writeSpotCacheDb(
 }
 
 /**
- * 旧localStorage方式(種類ごとに1つのJSON文字列)のキャッシュをIndexedDBへ移行する。
+ * 旧localStorage方式(種別ごとに1つのJSON文字列)のキャッシュをIndexedDBへ移行する。
  * 移行後は元のlocalStorageキーを削除して二度目以降は素通りさせる。
  */
 async function migrateLegacy(typeKey: string): Promise<StoredSpotCache | null> {
