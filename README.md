@@ -10,9 +10,9 @@
 - 訪問記録(いつ・何回・メモ)をファーストクラスの機能に
 - 同一スポットへの複数回訪問に対応
 - 「訪問予定」(行きたい場所のブックマーク)にも対応。訪問を記録すると自動的に外れる
-- 観光地・御朱印の2種類はデータを同梱(観光地7,050件、御朱印46,574件)。郵便局
-  (24,526件)は容量が大きいため外部リポジトリ[travel-log-data](https://github.com/rtcode337/travel-log-data)
-  にCSVとして置き、管理画面のCSVインポートから取り込む(詳細は下記「スポットの種類とデータ量」
+- 観光地(7,050件)のみデータを同梱。郵便局(24,526件)・御朱印(46,574件)は容量が大きいため
+  外部リポジトリ[travel-log-data](https://github.com/rtcode337/travel-log-data)にCSVとして置き、
+  管理画面のCSVインポートから取り込む(詳細は下記「スポットの種類とデータ量」
   「外部データ(travel-log-data)」参照)
 
 ## 技術スタック
@@ -49,10 +49,8 @@ docker compose -f docker-compose.dev.yml up --build
 
 初回起動時、Postgres コンテナが `db/init/` 配下のSQL(`01_schema.sql`=スキーマ一式、
 `02_tourist_spots_by_prefecture.sh`=`tourist_by_prefecture/`配下の観光地データ(都道府県別ファイル)を
-順に読み込むラッパー、
-`03_goshuin_spots.sql`+`04_goshuin_unranked_z.sql`=
-御朱印データ)を自動実行してテーブルを作成する。郵便局データはここには含まれず、後述の
-「外部データ(travel-log-data)」の通り管理画面から別途取り込む。
+順に読み込むラッパー)を自動実行してテーブルを作成する。郵便局・御朱印データはここには含まれず、
+後述の「外部データ(travel-log-data)」の通り管理画面から別途取り込む。
 
 http://localhost:3000 を開くと `/login` にリダイレクトされる。初回はアカウントが
 存在しないため「アカウントを作成」フォームが表示されるので、メールアドレスと
@@ -64,7 +62,7 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 ローカルに Postgres を別途用意し、`.env.example` を `.env.local` としてコピーして
 `DATABASE_URL` / `SESSION_SECRET` を設定した上で `npm install && npm run dev` でも
 起動できる。その場合は `db/init/` 配下のSQL(`tourist_by_prefecture/*.sql`を含む)を
-ファイル名の順(`01_`→`02_`→`03_`→`04_`)に手動で実行する。
+ファイル名の順(`01_`→`02_`)に手動で実行する。
 
 ## Googleログインの設定(任意)
 
@@ -182,16 +180,17 @@ docker compose run --rm -v ./scripts:/app/scripts app node scripts/migrate-photo
 |---|---|---|---|
 | `tourist` | 観光地 | 7,050件 | Wikipedia(ja)月次ページビュー数によるA〜E区分(詳細は次節)。都道府県別に`db/init/tourist_by_prefecture/`配下のファイルに分割 |
 | `post_office` | 郵便局 | 24,526件 | 国土数値情報(郵便局データ P30)。rankは知名度順位ではなく地図表示用の固定値`郵便局`。データは`db/init/`には同梱せず、外部リポジトリtravel-log-dataのCSVを管理画面からインポートする(下記「外部データ(travel-log-data)」参照) |
-| `goshuin` | 御朱印 | 46,574件 | OSM Overpass由来の寺社。Wikipedia記事があるもの6,584件はA〜E区分、記事がないもの39,990件は`Z`(未整理)固定 |
+| `goshuin` | 御朱印 | 46,574件 | OSM Overpass由来の寺社。Wikipedia記事があるもの6,584件はA〜E区分、記事がないもの39,990件は`Z`(未整理)固定。データは`db/init/`には同梱せず、外部リポジトリtravel-log-dataのCSVを管理画面からインポートする(下記「外部データ(travel-log-data)」参照) |
 
 ## 外部データ(travel-log-data)
 
 容量の大きいスポットの初期データ(シード用CSV)は、travel-logリポジトリ本体には
 コミットせず、別リポジトリ[travel-log-data](https://github.com/rtcode337/travel-log-data)に
-`<スポットキー>/`フォルダ単位(例: `post_office/post_offices.csv`)で置く。取り込みは
-新しい仕組みを用意せず、下記「CSVインポート形式」の通り`/[type]/admin`の既存のCSV
-インポート機能をそのまま使う(自動取り込みの仕組みはない)。既に`db/init/`に同梱している
-観光地・御朱印は当面そのままだが、今後追加する種類(郵便局を含む)は基本的にこちらの形に揃える。
+`<スポットキー>/`フォルダ単位(例: `post_office/post_offices.csv`、`goshuin/goshuin_ranked.csv`+
+`goshuin/goshuin_unranked_z.csv`)で置く。取り込みは新しい仕組みを用意せず、下記
+「CSVインポート形式」の通り`/[type]/admin`の既存のCSVインポート機能をそのまま使う
+(自動取り込みの仕組みはない)。既に`db/init/`に同梱している観光地は当面そのままだが、
+今後追加する種類は基本的にこちらの形に揃える。
 
 ## CSVインポート形式
 
