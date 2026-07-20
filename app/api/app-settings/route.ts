@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser, getCurrentUserId } from "@/lib/auth/current-user";
 import type { SpotType } from "@/lib/types";
+import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 
 /**
  * ここで返す/更新する値は「ログイン後に自動で開くスポット種類の既定値」のみ。
@@ -15,8 +16,8 @@ export async function GET() {
   }
 
   const { rows } = await query<SpotType>(
-    `select t.* from app_settings s
-     join spot_types t on t.id = s.active_spot_type_id`
+    `${SPOT_TYPE_SELECT}
+     join app_settings s on s.active_spot_type_id = t.id`
   );
   return NextResponse.json({ data: rows[0] ?? null });
 }
@@ -36,7 +37,7 @@ export async function PATCH(request: Request) {
   }
 
   const { rows: typeRows } = await query<SpotType>(
-    "select * from spot_types where id = $1",
+    `${SPOT_TYPE_SELECT} where t.id = $1`,
     [spot_type_id]
   );
   if (!typeRows[0]) {

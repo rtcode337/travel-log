@@ -6,11 +6,11 @@ import type {
   Role,
   Spot,
   SpotType,
+  SpotTypeSettingKey,
   SpotTypeVisibility,
   Visit,
   VisitPlan,
 } from "@/lib/types";
-import type { SeedSpotRow } from "@/lib/sqlSeed";
 
 interface Result<T> {
   data: T | null;
@@ -131,32 +131,13 @@ export const api = {
       request<Spot[]>(`/api/spots/bulk-approve?type=${encodeURIComponent(type)}`, {
         method: "POST",
       }),
-    syncSqlPreview: (type: string) =>
-      request<{
-        files: string[];
-        totalSeed: number;
-        missingCount: number;
-        missing: SeedSpotRow[];
-      }>(`/api/spots/sync-sql?type=${encodeURIComponent(type)}`),
-    syncSqlApply: (type: string) =>
-      request<{ insertedCount: number }>(
-        `/api/spots/sync-sql?type=${encodeURIComponent(type)}`,
-        { method: "POST" }
+    purgePreview: (type: string) =>
+      request<{ count: number }>(
+        `/api/spots/purge?type=${encodeURIComponent(type)}`
       ),
-    dedupePreview: (type: string) =>
-      request<{
-        groupCount: number;
-        deleteCount: number;
-        groups: {
-          name: string;
-          prefecture: string;
-          municipality: string | null;
-          count: number;
-        }[];
-      }>(`/api/spots/dedupe?type=${encodeURIComponent(type)}`),
-    dedupeApply: (type: string) =>
+    purgeApply: (type: string) =>
       request<{ deletedCount: number }>(
-        `/api/spots/dedupe?type=${encodeURIComponent(type)}`,
+        `/api/spots/purge?type=${encodeURIComponent(type)}`,
         { method: "POST" }
       ),
   },
@@ -177,10 +158,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ key, label }),
       }),
-    setReviewsEnabled: (id: string, reviewsEnabled: boolean) =>
+    setSetting: (id: string, key: SpotTypeSettingKey, value: boolean) =>
       request<SpotType>(`/api/spot-types/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ reviews_enabled: reviewsEnabled }),
+        body: JSON.stringify({ settings: { [key]: value } }),
       }),
     setVisibility: (id: string, visibility: SpotTypeVisibility) =>
       request<SpotType>(`/api/spot-types/${id}`, {
