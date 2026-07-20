@@ -1,12 +1,13 @@
 import type maplibregl from "maplibre-gl";
 import type { Rank } from "./types";
-import { getRankPinStyle, getRankPinTextColor } from "./rankStyle";
+import { autoTextColor, findRankStyle, isImageLabel, type RankStyleDefinition } from "./rankStyle";
 
 /**
  * 地図ピン(下が三角にとんがった吹き出し型)の画像をcanvasで生成し、
  * MapLibreのスタイル画像として登録する。とんがりの先端が画像の下端中央に
  * 来るように描くので、symbolレイヤー側は `icon-anchor: "bottom"` で使う。
- * 縁取りは付けず、代わりに薄い影で地図から浮かせる。
+ * 縁取り線は常に描き、非公開スポットだけ破線にする(色・大きさ・ラベルは
+ * ランクのまま変えない)。
  */
 
 const PIXEL_RATIO = 2;
@@ -30,24 +31,34 @@ export function pinIconId(
   return `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}-${rank ?? "__null__"}`;
 }
 
-/** ピン画像を(未登録なら)生成して登録し、そのIDを返す。冪等 */
-export function ensurePinImage(
+/** data URL画像をHTMLImageElementとして読み込む(base64は同期的に近いが、確実性のためdecode()を待つ) */
+async function loadImage(src: string): Promise<HTMLImageElement> {
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+  return img;
+}
+
+/** ピン画像を(未登録なら)生成して登録し、そのIDを返す。冪等。ラベルが画像の場合は非同期で読み込む */
+export async function ensurePinImage(
   map: maplibregl.Map,
   rank: Rank | null,
   visited: boolean,
   /** 自分だけの非公開スポット。公開スポットと見分けられるよう破線で縁取る */
-  isPrivate: boolean
-): string {
+  isPrivate: boolean,
+  rankStyles: RankStyleDefinition[]
+): Promise<string> {
   const id = pinIconId(rank, visited, isPrivate);
   if (map.hasImage(id)) return id;
 
-  const { size, bg, border } = getRankPinStyle(rank);
+  const style = findRankStyle(rank, rankStyles);
   // 訪問済みは(ランクの色より視認性を優先し)ピン全体を緑+チェックマークにする
-  const fill = visited ? "#16a34a" : bg;
-  const borderColor = visited ? "#15803d" : border;
-  const label = visited ? "✓" : rank === "郵便局" ? "〒" : (rank ?? "");
-  const textColor = visited ? "#ffffff" : getRankPinTextColor(rank);
+  const fill = visited ? "#16a34a" : style.color;
+  const borderColor = visited ? "#15803d" : style.borderColor;
+  const label = visited ? "✓" : style.label;
+  const textColor = visited ? "#ffffff" : style.textColor ?? autoTextColor(style.color);
 
+  const size = style.size;
   const tail = pinTailHeight(size);
   const w = size + PIN_ICON_PAD * 2;
   const h = size + tail + PIN_ICON_PAD * 2;
@@ -76,27 +87,40 @@ export function ensurePinImage(
   ctx.fill();
   ctx.shadowColor = "transparent";
 
-  if (isPrivate) {
-    ctx.setLineDash([3, 2.5]);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = borderColor;
-    ctx.stroke();
-    ctx.setLineDash([]);
+  // 縁取りは常に描く。非公開だけ破線にする(それ以外はランクの見た目のまま)
+  ctx.setLineDash(isPrivate ? [3, 2.5] : []);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = borderColor;
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (!visited && isImageLabel(label)) {
+    try {
+      const img = await loadImage(label.image);
+      const imgSize = size * 0.7;
+      ctx.drawImage(img, cx - imgSize / 2, cy - imgSize / 2, imgSize, imgSize);
+    } catch {
+      // 画像の読み込みに失敗した場合はラベル無しのまま(ピン自体は表示する)
+    }
+  } else {
+    const text = visited ? "✓" : typeof label === "string" ? label : "";
+    if (text) {
+      // rankは自由入力で複数文字もありうるので、その場合は少し小さくして収める
+      const fontSize = Math.max(
+        8,
+        Math.round(size * (text.length > 1 ? 0.38 : 0.6))
+      );
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = textColor;
+      ctx.fillText(text, cx, cy + fontSize * 0.05);
+    }
   }
 
-  if (label) {
-    // rankは自由入力で複数文字もありうるので、その場合は少し小さくして収める
-    const fontSize = Math.max(
-      8,
-      Math.round(size * (label.length > 1 ? 0.38 : 0.6))
-    );
-    ctx.font = `bold ${fontSize}px sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = textColor;
-    ctx.fillText(label, cx, cy + fontSize * 0.05);
-  }
-
+  // 生成に時間がかかる(画像読み込み等)間に同じidで別の呼び出しが先に登録している
+  // 可能性があるため、登録直前にもう一度確認する
+  if (map.hasImage(id)) return id;
   map.addImage(
     id,
     ctx.getImageData(0, 0, canvas.width, canvas.height),

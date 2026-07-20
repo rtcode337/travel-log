@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser, getCurrentUserId } from "@/lib/auth/current-user";
-import type { SpotType } from "@/lib/types";
+import { getSpotTypeSetting, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 
 /**
@@ -43,9 +43,9 @@ export async function PATCH(request: Request) {
   if (!typeRows[0]) {
     return NextResponse.json({ error: "存在しない種別です。" }, { status: 400 });
   }
-  if (typeRows[0].visibility !== "public") {
+  if (!getSpotTypeSetting(typeRows[0], "public_visible")) {
     return NextResponse.json(
-      { error: "無効または管理者のみの種別は既定にできません。" },
+      { error: "一般公開していない種別は既定にできません。" },
       { status: 400 }
     );
   }

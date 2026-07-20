@@ -21,6 +21,7 @@ import RankBadge from "@/components/RankBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getRankOrder } from "@/lib/rankStyle";
+import { useRankStyles } from "@/lib/useRankStyles";
 import { useSpotCache } from "@/lib/useSpotCache";
 
 type SortKey = "rank" | "name" | "visited";
@@ -174,6 +175,7 @@ export default function SpotsView({
   spotTypeKey: string;
 }) {
   const spotCache = useSpotCache(spotTypeKey);
+  const rankStyles = useRankStyles(spotTypeKey);
   const [privateSpots, setPrivateSpots] = useState<Spot[]>([]);
   const spots = useMemo(
     () => [...(spotCache.publicSpots ?? []), ...privateSpots],
@@ -215,12 +217,14 @@ export default function SpotsView({
       setManagementItems(data.items);
       setManagementTotal(data.total);
       setManagementAvailableRanks(
-        [...data.availableRanks].sort((a, b) => getRankOrder(a) - getRankOrder(b))
+        [...data.availableRanks].sort(
+          (a, b) => getRankOrder(a, rankStyles) - getRankOrder(b, rankStyles)
+        )
       );
     }
     setManagementLoaded(true);
     setManagementLoading(false);
-  }, [spotTypeKey, managementPage, managementSearch, managementRank]);
+  }, [spotTypeKey, managementPage, managementSearch, managementRank, rankStyles]);
 
   useEffect(() => {
     if (browseMode === "rank") loadManagementSpots();
@@ -376,7 +380,7 @@ export default function SpotsView({
       switch (sortKey) {
         case "rank":
           return (
-            getRankOrder(a.rank) - getRankOrder(b.rank) ||
+            getRankOrder(a.rank, rankStyles) - getRankOrder(b.rank, rankStyles) ||
             (a.name_kana ?? a.name).localeCompare(b.name_kana ?? b.name, "ja")
           );
         case "name":
@@ -392,7 +396,7 @@ export default function SpotsView({
       }
     });
     return list;
-  }, [spots, selectedPref, filters, visitedIds, sortKey, latestVisitDate]);
+  }, [spots, selectedPref, filters, visitedIds, sortKey, latestVisitDate, rankStyles]);
 
   const plannedPager = usePagedItems(plannedSpots, CLIENT_PAGE_SIZE);
   const recentVisitsPager = usePagedItems(recentVisits, CLIENT_PAGE_SIZE);
@@ -435,7 +439,12 @@ export default function SpotsView({
                         onClick={() => setDetailSpotId(spot.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
-                        <RankBadge rank={spot.rank} size="sm" />
+                        <RankBadge
+                          rank={spot.rank}
+                          rankStyles={rankStyles}
+                          isPrivate={spot.status === "private"}
+                          size="sm"
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
                           <p className="text-xs text-gray-500">
@@ -480,7 +489,12 @@ export default function SpotsView({
                             onClick={() => setDetailSpotId(spot.id)}
                             className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                           >
-                            <RankBadge rank={spot.rank} size="sm" />
+                            <RankBadge
+                          rank={spot.rank}
+                          rankStyles={rankStyles}
+                          isPrivate={spot.status === "private"}
+                          size="sm"
+                        />
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-medium">{spot.name}</p>
                               <p className="text-xs text-gray-500">
@@ -520,7 +534,11 @@ export default function SpotsView({
                         onClick={() => setDetailSpotId(review.spot_id)}
                         className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
-                        <RankBadge rank={review.spot_rank} size="sm" />
+                        <RankBadge
+                          rank={review.spot_rank}
+                          rankStyles={rankStyles}
+                          size="sm"
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{review.spot_name}</p>
                           <p className="text-xs text-gray-500">
@@ -561,7 +579,12 @@ export default function SpotsView({
                         onClick={() => setDetailSpotId(spot.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
-                        <RankBadge rank={spot.rank} size="sm" />
+                        <RankBadge
+                          rank={spot.rank}
+                          rankStyles={rankStyles}
+                          isPrivate={spot.status === "private"}
+                          size="sm"
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
                           <p className="text-xs text-gray-500">
@@ -699,7 +722,12 @@ export default function SpotsView({
                           onClick={() => setDetailSpotId(spot.id)}
                           className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                         >
-                          <RankBadge rank={spot.rank} size="sm" />
+                          <RankBadge
+                          rank={spot.rank}
+                          rankStyles={rankStyles}
+                          isPrivate={spot.status === "private"}
+                          size="sm"
+                        />
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{spot.name}</p>
                             <p className="text-xs text-gray-500">
@@ -772,6 +800,7 @@ export default function SpotsView({
           spots={spots.filter((s) => s.prefecture === selectedPref)}
           filters={filters}
           onChange={setFilters}
+          rankStyles={rankStyles}
         />
         <select
           value={sortKey}
@@ -799,7 +828,12 @@ export default function SpotsView({
               onClick={() => setDetailSpotId(spot.id)}
               className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
             >
-              <RankBadge rank={spot.rank} size="sm" />
+              <RankBadge
+                rank={spot.rank}
+                rankStyles={rankStyles}
+                isPrivate={spot.status === "private"}
+                size="sm"
+              />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{spot.name}</p>
                 <p className="text-xs text-gray-500">

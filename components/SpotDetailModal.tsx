@@ -18,6 +18,7 @@ import {
 } from "@/lib/types";
 import RankBadge from "@/components/RankBadge";
 import MiniMap from "@/components/MiniMap";
+import { resolveRankStyles } from "@/lib/rankStyle";
 import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
@@ -173,6 +174,10 @@ export default function SpotDetailModal({
     () => spotTypes.find((t) => t.id === spot?.spot_type_id) ?? null,
     [spotTypes, spot]
   );
+  const rankStyles = useMemo(
+    () => resolveRankStyles(currentSpotType),
+    [currentSpotType]
+  );
 
   // 非公開スポットは口コミの表示・投稿ともに不可
   const reviewsEnabled = useMemo(
@@ -182,7 +187,7 @@ export default function SpotDetailModal({
     [currentSpotType, spot]
   );
 
-  // 郵便局のようにWikipedia記事が存在しない種別では、リンクが機能しないため出さない
+  // 大半のスポットにWikipedia記事が存在しない種別では、リンクが機能しないため出さない
   const wikipediaEnabled = useMemo(
     () => getSpotTypeSetting(currentSpotType, "wikipedia_enabled"),
     [currentSpotType]
@@ -259,7 +264,11 @@ export default function SpotDetailModal({
           <>
             <div className="mb-3 flex items-start justify-between gap-2">
               <div className="flex items-center gap-2">
-                <RankBadge rank={spot.rank} />
+                <RankBadge
+                  rank={spot.rank}
+                  rankStyles={rankStyles}
+                  isPrivate={spot.status === "private"}
+                />
                 <div>
                   <h2 className="text-lg font-bold leading-tight">
                     {spot.name}
@@ -328,7 +337,12 @@ export default function SpotDetailModal({
             )}
 
             <div className="relative">
-              <MiniMap lat={spot.lat} lng={spot.lng} rank={spot.rank} />
+              <MiniMap
+                lat={spot.lat}
+                lng={spot.lng}
+                rank={spot.rank}
+                rankStyles={rankStyles}
+              />
               {canManage && (
                 <div className="absolute right-2 top-2 z-10 flex gap-2 rounded-lg bg-white/90 px-2 py-1 shadow">
                   <button

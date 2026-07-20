@@ -1,8 +1,10 @@
+import { isValidRankStyle, type RankStyleDefinition } from "./rankStyle";
+
 /**
  * rank/categoryはスポットの「種別(SpotType)」ごとに意味が異なりうるため、
  * DB上は自由入力(nullable text)。以下は観光地(spot_type='tourist')が実際に
  * 使っている値で、UIのサジェスト(datalist)用の参考値として残している。
- * 他の種別(郵便局・御朱印など)は独自のrank/categoryを使うか、全く使わなくてよい。
+ * 他の種別は独自のrank/categoryを使うか、全く使わなくてよい。
  */
 export type Rank = string;
 export type Category = string;
@@ -16,16 +18,6 @@ export type Category = string;
  * C: 次30%(地方の定番) / D: 次30%(地元で知られている) / E: 残り20%(穴場)
  */
 export const RANKS: Rank[] = ["A", "B", "C", "D", "E"];
-
-export const RANK_LABELS: Record<string, string> = {
-  A: "A: 絶対外せない",
-  B: "B: 全国区で有名",
-  C: "C: 地方の定番",
-  D: "D: 地元で知られている",
-  E: "E: 穴場・マニアック",
-  Z: "Z: 未整理(Wikipedia情報なし・地図では既定で非表示)",
-  郵便局: "郵便局",
-};
 
 export const CATEGORIES = [
   "神社仏閣",
@@ -84,22 +76,7 @@ export interface Spot {
   updated_at: string;
 }
 
-/**
- * スポット種別の公開範囲。
- * public: 全ユーザーに表示 /
- * admin_only: admin・spot_adminのみ/[key]/map・/[key]/spots等を閲覧できる(公開前の準備用) /
- * disabled: 全ユーザーに対して/[key]/map・/[key]/spots・アカウントページのリンクを404/非表示にする
- * いずれの場合も/[key]/adminは再有効化のため常にアクセス可。
- */
-export type SpotTypeVisibility = "public" | "admin_only" | "disabled";
-
-export const SPOT_TYPE_VISIBILITY_LABELS: Record<SpotTypeVisibility, string> = {
-  public: "有効",
-  admin_only: "管理者のみ",
-  disabled: "無効",
-};
-
-/** スポット種別(観光地/郵便局/御朱印など)。管理者が新規追加できる */
+/** スポット種別(観光地など)。管理者が新規追加できる */
 export interface SpotType {
   id: string;
   key: string;
@@ -107,7 +84,6 @@ export interface SpotType {
   /** spot_type_settings(key/value)をオブジェクトにまとめたもの。値は文字列("true"/"false")で、
    * キーが存在しない設定はSPOT_TYPE_SETTING_DEFAULTSの既定値として扱う(getSpotTypeSetting参照) */
   settings: Record<string, string>;
-  visibility: SpotTypeVisibility;
   created_at: string;
 }
 
@@ -116,16 +92,28 @@ export interface SpotType {
  * spot_type_settings(spot_type_id, key, value)のEAV形式でDBに持つ。
  * 新しい設定を増やす際は、ここにキー・既定値・表示名を追加するだけでよい
  * (マイグレーション不要。使う側は getSpotTypeSetting で読む)。
+ *
+ * public_visible: かつての spot_types.visibility(public/admin_only/disabled の3値)の
+ * 後継。既定はfalse — 種別を追加した当初はadmin/spot_admin以外には404/非表示にしておき、
+ * 準備が整ってからtrueにして/[key]/map・/[key]/spots・アカウントページのリンクを
+ * 全ユーザーに開放する(/[key]/adminは既定値に関わらず常にアクセス可)。
+ * disabled相当(誰にも見せない)は種別そのものの削除で代替するため設定としては無くなった。
  */
-export type SpotTypeSettingKey = "reviews_enabled" | "wikipedia_enabled";
+export type SpotTypeSettingKey =
+  | "public_visible"
+  | "reviews_enabled"
+  | "wikipedia_enabled";
 
 export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
+  public_visible: false,
   reviews_enabled: true,
   wikipedia_enabled: true,
 };
 
-/** 管理画面のチェックボックス・メッセージに使う短い名前 */
+/** 管理画面のチェックボックス・メッセージに使う短い名前(名詞句。
+ * 「この種別で{名前}を有効にする」というテンプレートに当てはめて使う) */
 export const SPOT_TYPE_SETTING_LABELS: Record<SpotTypeSettingKey, string> = {
+  public_visible: "一般公開(管理者以外も閲覧可能にする)",
   reviews_enabled: "口コミ",
   wikipedia_enabled: "Wikipediaリンク",
 };
@@ -141,6 +129,63 @@ export function getSpotTypeSetting(
 ): boolean {
   const raw = type?.settings?.[key];
   return raw === undefined ? SPOT_TYPE_SETTING_DEFAULTS[key] : raw === "true";
+}
+
+/**
+ * スポット種別を管理画面からJSONファイルで一括作成するための定義ファイル形式。
+ * travel-log-data(例: `<スポットキー>/settings.json`)にスポットデータのCSVと並べて置く想定
+ * (詳細はtravel-log-data/README.md参照)。settingsは省略したキーが既定値のまま
+ * (SPOT_TYPE_SETTING_DEFAULTS)になる点はDBのEAV設計と同じ。
+ * ranksを省略した場合(または画面から手入力で種別を追加した場合)は観光地の
+ * A〜E(DEFAULT_RANK_STYLES、lib/rankStyle.ts参照)がそのまま既定のランク設定になる。
+ */
+export interface SpotTypeDefinitionFile {
+  key: string;
+  label: string;
+  settings?: Partial<Record<string, boolean>>;
+  ranks?: RankStyleDefinition[];
+}
+
+/** JSONをparseした後の値がSpotTypeDefinitionFileとして使える形か検証する */
+export function parseSpotTypeDefinition(
+  json: unknown
+): { data: SpotTypeDefinitionFile } | { error: string } {
+  if (typeof json !== "object" || json === null || Array.isArray(json)) {
+    return { error: "JSONのトップレベルはオブジェクトである必要があります。" };
+  }
+  const obj = json as Record<string, unknown>;
+  if (typeof obj.key !== "string" || !obj.key.trim()) {
+    return { error: "key(文字列)が必要です。" };
+  }
+  if (typeof obj.label !== "string" || !obj.label.trim()) {
+    return { error: "label(文字列)が必要です。" };
+  }
+  if (obj.settings !== undefined) {
+    if (typeof obj.settings !== "object" || obj.settings === null || Array.isArray(obj.settings)) {
+      return { error: "settingsはオブジェクトである必要があります。" };
+    }
+    for (const [k, v] of Object.entries(obj.settings as Record<string, unknown>)) {
+      if (typeof v !== "boolean") {
+        return { error: `settings.${k}はtrue/falseである必要があります。` };
+      }
+    }
+  }
+  if (obj.ranks !== undefined) {
+    if (!Array.isArray(obj.ranks) || !obj.ranks.every(isValidRankStyle)) {
+      return {
+        error:
+          "ranksは { rank, color, borderColor, size, label, textColor? } の配列である必要があります。",
+      };
+    }
+  }
+  return {
+    data: {
+      key: obj.key.trim(),
+      label: obj.label.trim(),
+      settings: obj.settings as Partial<Record<string, boolean>> | undefined,
+      ranks: obj.ranks as RankStyleDefinition[] | undefined,
+    },
+  };
 }
 
 /**

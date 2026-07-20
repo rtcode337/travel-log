@@ -11,22 +11,21 @@ create extension if not exists pgcrypto;
 -- =============================================================
 create table spot_types (
   id              uuid primary key default gen_random_uuid(),
-  key             text not null unique,   -- 機械可読キー(例: 'tourist', 'post_office', 'goshuin')
-  label           text not null,          -- 表示名(例: '観光地', '郵便局', '御朱印')
-  -- public: 全ユーザーに表示 / admin_only: admin・spot_adminのみ/[key]/map等を閲覧できる /
-  -- disabled: /[key]/map・/[key]/spots・アカウントページのリンクを404/非表示にする
-  -- (いずれも/[key]/adminは再有効化のため常にアクセス可)
-  visibility      text not null default 'public' check (visibility in ('public', 'admin_only', 'disabled')),
+  key             text not null unique,   -- 機械可読キー(例: 'tourist')
+  label           text not null,          -- 表示名(例: '観光地')
   created_at      timestamptz not null default now()
 );
 
 -- =============================================================
 -- spot_type_settings: スポット種別ごとのON/OFF設定をkey/valueで持つ
--- (口コミ・Wikipediaリンクなど)。設定を追加するたびに spot_types に列を
--- 増やさずに済むよう、EAV形式にしてある。値は現状すべてboolean相当を
+-- (口コミ・Wikipediaリンク・閲覧を管理者以外不可にするなど)。設定を追加するたびに
+-- spot_types に列を増やさずに済むよう、EAV形式にしてある。値は現状すべてboolean相当を
 -- 'true'/'false'の文字列で保存する(既知のキー・既定値・表示名は
 -- lib/types.ts の SPOT_TYPE_SETTING_DEFAULTS/SPOT_TYPE_SETTING_LABELS 参照)。
--- 行が存在しないキーは既定値(現状すべてtrue)として扱う
+-- 行が存在しないキーは設定ごとの既定値として扱う(設定により既定値は異なる)。
+-- かつて存在した spot_types.visibility 列(public/admin_only/disabled の3値)は廃止し、
+-- admin_only設定(true/false)に一本化した。disabled相当(誰にも見せない)は、
+-- スポット種別そのものの削除(/[type]/admin の「スポット種別の管理」)で代替する
 -- =============================================================
 create table spot_type_settings (
   spot_type_id uuid not null references spot_types (id) on delete cascade,
@@ -170,19 +169,18 @@ create table reviews (
 create index reviews_spot_id_idx on reviews (spot_id);
 
 -- =============================================================
--- 参考データ: スポット種別3つ(観光地のみデータあり。郵便局・御朱印は今後用の空の種別)
+-- 参考データ: 既定のスポット種別(観光地)のみ作成する。他の種別は管理画面から
+-- 手入力フォーム、または設定情報(公開範囲・ランクの一覧と見た目等)込みのJSONファイル
+-- アップロードで追加する(components/AdminView.tsxの「スポット種別の管理」参照)
 -- =============================================================
-insert into spot_types (key, label) values
-  ('tourist', '観光地'),
-  ('post_office', '郵便局'),
-  ('goshuin', '御朱印');
+insert into spot_types (key, label) values ('tourist', '観光地');
 
--- 既定値(true)から外れるものだけを明示的に登録する(EAV形式なので、
--- 既定のままでよい設定は行自体を作らない)
+-- 既定値から外れるものだけを明示的に登録する(EAV形式なので、既定のままでよい
+-- 設定は行自体を作らない)。public_visibleは既定false(=管理者以外閲覧不可)のため、
+-- 最初から一般公開しておきたいこの種別には明示的にtrueを入れる。あとから
+-- 管理画面で追加する種別は、準備が整うまで自動的に非公開のままになる
 insert into spot_type_settings (spot_type_id, key, value)
-  select id, 'reviews_enabled', 'false' from spot_types where key = 'post_office'
-  union all
-  select id, 'wikipedia_enabled', 'false' from spot_types where key = 'post_office';
+  select id, 'public_visible', 'true' from spot_types where key = 'tourist';
 
 insert into app_settings (active_spot_type_id)
   select id from spot_types where key = 'tourist';

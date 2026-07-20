@@ -58,7 +58,7 @@ function toEntry(stored: StoredSpotCache): SpotCacheEntry {
  * (/[type]/map・/[type]/spots で共通利用)。未ダウンロードならページを開いたタイミングで
  * 一度だけダウンロード確認ダイアログを出す。
  *
- * 郵便局・御朱印など数万件規模の種別でも保存できるよう、保存先はlocalStorage(約5MB上限)
+ * 数万件規模の種別でも保存できるよう、保存先はlocalStorage(約5MB上限)
  * ではなくIndexedDBを使い、かつ地図・一覧で使うフィールドだけに間引いて保存する
  * (lib/spotCacheDb.ts)。
  */

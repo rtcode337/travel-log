@@ -14,6 +14,7 @@ import {
 import type { Role, Spot } from "@/lib/types";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
+import { useRankStyles } from "@/lib/useRankStyles";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -232,6 +233,7 @@ export default function MapView({
   const locationDotRef = useRef<maplibregl.Marker | null>(null);
 
   const spotCache = useSpotCache(spotTypeKey);
+  const rankStyles = useRankStyles(spotTypeKey);
   const [privateSpots, setPrivateSpots] = useState<Spot[]>([]);
   const spots = useMemo(
     () => [...(spotCache.publicSpots ?? []), ...privateSpots],
@@ -525,30 +527,41 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    let cancelled = false;
 
     const filteredSpots = spots.filter((spot) =>
       passesFilters(filters, spot.rank, visitedIds.has(spot.id))
     );
 
-    const renderSpots = () => {
+    const renderSpots = async () => {
       ensureClusterLayers(map, setDetailSpotId);
       showClusterLayers(map);
       // 使われるピン画像(ランク×訪問済み×非公開)を先に登録してからデータを流し込む
-      for (const spot of filteredSpots) {
-        ensurePinImage(
-          map,
-          spot.rank,
-          visitedIds.has(spot.id),
-          spot.status === "private"
-        );
-      }
+      // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
+      await Promise.all(
+        filteredSpots.map((spot) =>
+          ensurePinImage(
+            map,
+            spot.rank,
+            visitedIds.has(spot.id),
+            spot.status === "private",
+            rankStyles
+          )
+        )
+      );
+      if (cancelled) return;
       const source = map.getSource(CLUSTER_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
       source?.setData(buildClusterGeoJSON(filteredSpots, visitedIds));
     };
-    runWhenMapReady(renderSpots);
-  }, [spots, visitedIds, filters, runWhenMapReady]);
+    runWhenMapReady(() => {
+      renderSpots();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [spots, visitedIds, filters, runWhenMapReady, rankStyles]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
   // (通常の取得はpublishedのみなので、それ以外は一覧に反映されるまでこれで見せる)
@@ -650,7 +663,12 @@ export default function MapView({
                 ✕
               </button>
             </div>
-            <FilterBar spots={spots} filters={filters} onChange={setFilters} />
+            <FilterBar
+              spots={spots}
+              filters={filters}
+              onChange={setFilters}
+              rankStyles={rankStyles}
+            />
 
             <div className="border-t border-gray-100 pt-3">
               <p className="mb-1 text-sm font-medium">公開スポットのダウンロード</p>

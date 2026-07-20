@@ -5,16 +5,19 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { osmStyle } from "@/lib/mapStyle";
 import type { Rank } from "@/lib/types";
-import { getRankPinColor } from "@/lib/rankStyle";
+import { findRankStyle, type RankStyleDefinition } from "@/lib/rankStyle";
 
 export default function MiniMap({
   lat,
   lng,
   rank,
+  rankStyles,
 }: {
   lat: number;
   lng: number;
   rank: Rank | null;
+  /** このスポットが属するスポット種別のランク設定(lib/useRankStyles.ts参照) */
+  rankStyles: RankStyleDefinition[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -30,12 +33,13 @@ export default function MiniMap({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
-    new maplibregl.Marker({ color: getRankPinColor(rank) }).setLngLat([lng, lat]).addTo(map);
+    const color = findRankStyle(rank, rankStyles).color;
+    new maplibregl.Marker({ color }).setLngLat([lng, lat]).addTo(map);
     return () => {
       map.remove();
       mapRef.current = null;
     };
-  }, [lat, lng, rank]);
+  }, [lat, lng, rank, rankStyles]);
 
   return (
     <div

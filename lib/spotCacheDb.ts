@@ -7,8 +7,8 @@ import type { Spot } from "@/lib/types";
  * 実際に読むフィールドだけに絞る。詳細(description/official_url など)はスポットを
  * 開いたときに api.spots.get で個別に取り直すので、キャッシュには持たせない。
  * spot_type_id も種別ごとにストア上のキーを分けているため保存不要。
- * これにより郵便局(2万件超)・御朱印(4万件超)のような大規模データでも
- * 保存サイズを抑えられる(加えて localStorage の約5MB上限に縛られない IndexedDB を使う)。
+ * これにより数万件規模の大規模データでも保存サイズを抑えられる
+ * (加えて localStorage の約5MB上限に縛られない IndexedDB を使う)。
  */
 export type CachedSpot = Pick<
   Spot,
