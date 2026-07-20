@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import type { SpotType } from "@/lib/types";
+import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 
 export async function PATCH(
   request: Request,
@@ -16,17 +17,15 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const { reviews_enabled, visibility } = await request.json();
+  const { visibility, settings } = await request.json();
 
-  const sets: string[] = [];
-  const values: unknown[] = [];
+  if (visibility === undefined && settings === undefined) {
+    return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  }
 
-  if (reviews_enabled !== undefined) {
-    if (typeof reviews_enabled !== "boolean") {
-      return NextResponse.json({ error: "invalid request" }, { status: 400 });
-    }
-    values.push(reviews_enabled);
-    sets.push(`reviews_enabled = $${values.length}`);
+  const { rows: existingRows } = await query("select 1 from spot_types where id = $1", [id]);
+  if (!existingRows[0]) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   if (visibility !== undefined) {
@@ -48,21 +47,29 @@ export async function PATCH(
         );
       }
     }
-    values.push(visibility);
-    sets.push(`visibility = $${values.length}`);
+    await query("update spot_types set visibility = $1 where id = $2", [visibility, id]);
   }
 
-  if (sets.length === 0) {
-    return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  // スポットの種類ごとの追加設定(口コミ・Wikipediaリンク等)。spot_typesに列を
+  // 増やさずキーを増やせるよう、spot_type_settings(key, value)へupsertする
+  // (現状は値がすべてboolean相当のため文字列'true'/'false'で保存)
+  if (settings !== undefined) {
+    if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
+      return NextResponse.json({ error: "invalid request" }, { status: 400 });
+    }
+    for (const [key, value] of Object.entries(settings)) {
+      if (typeof value !== "boolean") {
+        return NextResponse.json({ error: "invalid request" }, { status: 400 });
+      }
+      await query(
+        `insert into spot_type_settings (spot_type_id, key, value)
+         values ($1, $2, $3)
+         on conflict (spot_type_id, key) do update set value = excluded.value`,
+        [id, key, String(value)]
+      );
+    }
   }
 
-  values.push(id);
-  const { rows } = await query<SpotType>(
-    `update spot_types set ${sets.join(", ")} where id = $${values.length} returning *`,
-    values
-  );
-  if (!rows[0]) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  const { rows } = await query<SpotType>(`${SPOT_TYPE_SELECT} where t.id = $1`, [id]);
   return NextResponse.json({ data: rows[0] });
 }

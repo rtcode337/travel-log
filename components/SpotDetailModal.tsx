@@ -6,6 +6,7 @@ import { api } from "@/lib/api-client";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import {
   formatVisitedOn,
+  getSpotTypeSetting,
   REVIEWS_PAGE_SIZE,
   SPOT_ADMIN_ROLES,
   visitPhotoSrc,
@@ -168,13 +169,23 @@ export default function SpotDetailModal({
   // 承認待ち→公開/却下の変更はspot_admin/adminのみ(投稿者本人かどうかは問わない)
   const canModerate = !!spot && spot.status === "pending" && isSpotAdmin;
 
+  const currentSpotType = useMemo(
+    () => spotTypes.find((t) => t.id === spot?.spot_type_id) ?? null,
+    [spotTypes, spot]
+  );
+
   // 非公開スポットは口コミの表示・投稿ともに不可
   const reviewsEnabled = useMemo(
     () =>
       spot?.status !== "private" &&
-      (spotTypes.find((t) => t.id === spot?.spot_type_id)?.reviews_enabled ??
-        true),
-    [spotTypes, spot]
+      getSpotTypeSetting(currentSpotType, "reviews_enabled"),
+    [currentSpotType, spot]
+  );
+
+  // 郵便局のようにWikipedia記事が存在しない種類では、リンクが機能しないため出さない
+  const wikipediaEnabled = useMemo(
+    () => getSpotTypeSetting(currentSpotType, "wikipedia_enabled"),
+    [currentSpotType]
   );
 
   const loadReviews = useCallback(
@@ -345,15 +356,17 @@ export default function SpotDetailModal({
               >
                 地図で開く
               </Link>
-              <button
-                type="button"
-                onClick={() => setShowInfo(true)}
-                aria-label="Wikipediaでスポット詳細を開く"
-                title="Wikipediaでスポット詳細を開く"
-                className="rounded p-1 text-blue-600 hover:bg-blue-50"
-              >
-                <WikipediaIcon className="size-5" />
-              </button>
+              {wikipediaEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setShowInfo(true)}
+                  aria-label="Wikipediaでスポット詳細を開く"
+                  title="Wikipediaでスポット詳細を開く"
+                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
+                >
+                  <WikipediaIcon className="size-5" />
+                </button>
+              )}
               <div className="ml-auto flex items-center gap-1 text-sm text-gray-500">
                 Google:
                 <a
