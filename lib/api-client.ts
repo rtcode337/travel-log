@@ -143,6 +143,22 @@ export const api = {
         `/api/spots/sync-sql?type=${encodeURIComponent(type)}`,
         { method: "POST" }
       ),
+    dedupePreview: (type: string) =>
+      request<{
+        groupCount: number;
+        deleteCount: number;
+        groups: {
+          name: string;
+          prefecture: string;
+          municipality: string | null;
+          count: number;
+        }[];
+      }>(`/api/spots/dedupe?type=${encodeURIComponent(type)}`),
+    dedupeApply: (type: string) =>
+      request<{ deletedCount: number }>(
+        `/api/spots/dedupe?type=${encodeURIComponent(type)}`,
+        { method: "POST" }
+      ),
   },
   geocode: {
     search: (q: string) =>
