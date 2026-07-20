@@ -5,19 +5,19 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
+import { RANK_STYLES_SETTING_KEY } from "@/lib/rankStyle";
 import {
   getSpotTypeSetting,
+  parseSpotTypeDefinition,
   ROLE_LABELS,
   SPOT_ADMIN_ROLES,
   SPOT_TYPE_SETTING_KEYS,
   SPOT_TYPE_SETTING_LABELS,
-  SPOT_TYPE_VISIBILITY_LABELS,
   type AppUser,
   type Role,
   type Spot,
   type SpotType,
   type SpotTypeSettingKey,
-  type SpotTypeVisibility,
 } from "@/lib/types";
 
 const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
@@ -79,6 +79,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [newTypeKey, setNewTypeKey] = useState("");
   const [newTypeLabel, setNewTypeLabel] = useState("");
   const [typeMessage, setTypeMessage] = useState<string | null>(null);
+  const [importingType, setImportingType] = useState(false);
   const [defaultTypeMessage, setDefaultTypeMessage] = useState<string | null>(
     null
   );
@@ -277,18 +278,21 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     loadSpotTypes();
   };
 
-  const handleChangeVisibility = async (
-    type: SpotType,
-    visibility: SpotTypeVisibility
-  ) => {
-    const { error } = await api.spotTypes.setVisibility(type.id, visibility);
+  const handleDeleteType = async (type: SpotType) => {
+    if (
+      !confirm(
+        `「${type.label}」(${type.key})を削除しますか?このスポット種別に属するスポットが` +
+          `残っている場合は、公開・承認待ち・却下・非公開を問わず全件(訪問記録・訪問予定・` +
+          `口コミ・写真も含む)削除してから種別自体を削除します。この操作は取り消せません。`
+      )
+    )
+      return;
+    const { error } = await api.spotTypes.delete(type.id);
     if (error) {
-      setTypeMessage("公開範囲の変更に失敗しました: " + error.message);
+      setTypeMessage(`「${type.label}」の削除に失敗しました: ` + error.message);
       return;
     }
-    setTypeMessage(
-      `「${type.label}」を「${SPOT_TYPE_VISIBILITY_LABELS[visibility]}」にしました。`
-    );
+    setTypeMessage(`「${type.label}」を削除しました。`);
     loadSpotTypes();
   };
 
@@ -319,9 +323,66 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     loadSpotTypes();
   };
 
+  const handleCreateTypeFromJson = async (file: File) => {
+    setImportingType(true);
+    setTypeMessage(null);
+    try {
+      let json: unknown;
+      try {
+        json = JSON.parse(await file.text());
+      } catch {
+        setTypeMessage("JSONの読み込みに失敗しました(構文エラー)。");
+        return;
+      }
+      const parsed = parseSpotTypeDefinition(json);
+      if ("error" in parsed) {
+        setTypeMessage("JSONの内容が不正です: " + parsed.error);
+        return;
+      }
+      const { key, label, settings, ranks } = parsed.data;
+
+      const { data: created, error } = await api.spotTypes.create(key, label);
+      if (error || !created) {
+        setTypeMessage("追加に失敗しました: " + (error?.message ?? ""));
+        return;
+      }
+
+      // ranksが指定されていれば、真偽値の設定と合わせて1回のPATCHで反映する
+      // (省略時はDEFAULT_RANK_STYLES=観光地のA〜Eにフォールバックするので何もしない)
+      const settingsToApply: Record<string, boolean | string> = {};
+      for (const [k, v] of Object.entries(settings ?? {})) {
+        if (v !== undefined) settingsToApply[k] = v;
+      }
+      if (ranks) {
+        settingsToApply[RANK_STYLES_SETTING_KEY] = JSON.stringify(ranks);
+      }
+
+      if (Object.keys(settingsToApply).length > 0) {
+        const { error: settingsError } = await api.spotTypes.applySettings(
+          created.id,
+          settingsToApply
+        );
+        if (settingsError) {
+          setTypeMessage(
+            `「${label}」を追加しましたが、設定の反映に失敗しました: ` +
+              settingsError.message
+          );
+          loadSpotTypes();
+          return;
+        }
+      }
+
+      setTypeMessage(`「${label}」をJSONから追加しました。`);
+      loadSpotTypes();
+    } finally {
+      setImportingType(false);
+    }
+  };
+
   // name+prefecture+lat+lng の完全一致を「同じスポット」とみなす差分更新用のキー。
-  // municipalityは使わない — 御朱印(同名の神社仏閣が同一市区町村内に複数あることが
-  // 珍しくない)ではname+prefecture+municipalityだと別スポットを誤って同一視してしまうため
+  // municipalityは使わない — 種別によっては同一市区町村内に同名のスポットが
+  // 複数あることも珍しくなく、name+prefecture+municipalityだと別スポットを
+  // 誤って同一視してしまうため
   const spotDiffKey = (
     name: string,
     prefecture: string,
@@ -617,7 +678,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
         {/* 右カラム(またはadminでない場合は唯一のカラム): スポットの管理 */}
         <div>
           <h2 className="mb-2 text-base font-bold">
-            スポット管理({currentTypeLabel})
+            このスポット種別の管理({currentTypeLabel})
           </h2>
 
           <div className="flex flex-col gap-6">
@@ -770,44 +831,13 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
 
           {isAdmin && (
             <div>
-              <h2 className="mb-2 text-base font-bold">
-                ログイン後に自動で開く種別
-              </h2>
+              <h2 className="mb-2 text-base font-bold">別のスポット種別の管理</h2>
               <section className="rounded-xl border border-gray-200 bg-white p-3">
                 <p className="mb-3 text-xs text-gray-500">
-                  ログイン後・ルート(/)アクセス時に自動で開く地図/リストの既定(全ユーザー共通)。
-                  ここでの選択は既定を切り替えるだけで、他の種別を非表示にするものではない。
-                </p>
-                {defaultTypeMessage && (
-                  <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                    {defaultTypeMessage}
-                  </p>
-                )}
-                <select
-                  value={defaultType?.id ?? ""}
-                  onChange={(e) => {
-                    const type = spotTypes.find((t) => t.id === e.target.value);
-                    if (type) handleSetDefaultType(type);
-                  }}
-                  className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-                >
-                  {spotTypes.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </section>
-            </div>
-          )}
-
-          {isAdmin && (
-            <div>
-              <h2 className="mb-2 text-base font-bold">スポット種別の管理</h2>
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
-                <p className="mb-3 text-xs text-gray-500">
-                  スポットの追加・編集・承認は、このページのURL(現在は「{currentTypeLabel}」)
-                  で対象の種別が決まる — 他の種別を扱いたい場合は種別名をクリックして移動する。
+                  現在開いている「{currentTypeLabel}」以外のスポット種別の一覧。種別名を
+                  クリックするとそのページに移動する(公開/非公開の切り替えは、移動先の
+                  「スポット種別の設定」から行う)。削除は非公開の種別のみ行える
+                  (スポットが残っていれば全件削除してから種別自体を削除する)。
                 </p>
                 {typeMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
@@ -815,43 +845,38 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                   </p>
                 )}
                 <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-                  {spotTypes.map((t) => (
-                    <li key={t.id} className="flex items-center gap-3 px-3 py-2">
-                      {t.key === typeKey ? (
-                        <span className="flex-1 text-sm">{t.label}</span>
-                      ) : (
-                        <Link
-                          href={`/${t.key}/admin`}
-                          className="flex-1 text-sm text-blue-600 underline"
-                        >
-                          {t.label}
-                        </Link>
-                      )}
-                      <span className="text-xs text-gray-400">{t.key}</span>
-                      <select
-                        value={t.visibility}
-                        onChange={(e) =>
-                          handleChangeVisibility(
-                            t,
-                            e.target.value as SpotTypeVisibility
-                          )
-                        }
-                        title="「管理者のみ」はadmin/スポット管理者だけが地図/一覧を見られる(公開前の準備用)。「無効」は全員に対してリンクが消え、直接アクセスも404になる"
-                        className="rounded-lg border border-gray-300 px-1.5 py-1 text-xs text-gray-600"
-                      >
-                        {(
-                          Object.entries(SPOT_TYPE_VISIBILITY_LABELS) as [
-                            SpotTypeVisibility,
-                            string,
-                          ][]
-                        ).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </li>
-                  ))}
+                  {spotTypes
+                    .filter((t) => t.key !== typeKey)
+                    .map((t) => {
+                      const isPublic = getSpotTypeSetting(t, "public_visible");
+                      return (
+                        <li key={t.id} className="flex items-center gap-3 px-3 py-2">
+                          <span className="flex-1 text-sm">
+                            <Link
+                              href={`/${t.key}/admin`}
+                              className="text-blue-600 underline"
+                            >
+                              {t.label}
+                            </Link>{" "}
+                            <span className="text-gray-400">({t.key})</span>
+                          </span>
+                          <span className="w-12 shrink-0 text-xs text-gray-500">
+                            {isPublic ? "公開" : "非公開"}
+                          </span>
+                          <span className="w-10 shrink-0 text-right">
+                            {!isPublic && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteType(t)}
+                                className="text-xs font-medium text-red-500 underline"
+                              >
+                                削除
+                              </button>
+                            )}
+                          </span>
+                        </li>
+                      );
+                    })}
                 </ul>
                 <form
                   onSubmit={handleCreateType}
@@ -888,6 +913,66 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                     + 種別を追加
                   </button>
                 </form>
+                <div className="mt-3 border-t border-gray-100 pt-3">
+                  <p className="mb-2 text-xs text-gray-500">
+                    設定情報込みのJSONファイルからも追加できる
+                    (
+                    <code>{"{ key, label, settings?, ranks? }"}</code>
+                    形式。<code>ranks</code>はそのスポット種別で使えるランクの一覧と
+                    表示スタイル(色・縁取り線の色・地図ピンの大きさ・ラベル)の配列で、
+                    省略すると観光地のA〜Eが既定になる。travel-log-dataリポジトリの
+                    各スポットキーフォルダ内の<code>settings.json</code>を参照)。
+                  </p>
+                  <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                    {importingType ? "追加中…" : "JSONファイルから追加"}
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      disabled={importingType}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleCreateTypeFromJson(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {isAdmin && (
+            <div>
+              <h2 className="mb-2 text-base font-bold">
+                ログイン後に自動で開く種別
+              </h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <p className="mb-3 text-xs text-gray-500">
+                  ログイン後・ルート(/)アクセス時に自動で開く地図/リストの既定(全ユーザー共通)。
+                  ここでの選択は既定を切り替えるだけで、他の種別を非表示にするものではない。
+                </p>
+                {defaultTypeMessage && (
+                  <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {defaultTypeMessage}
+                  </p>
+                )}
+                <select
+                  value={defaultType?.id ?? ""}
+                  onChange={(e) => {
+                    const type = spotTypes.find((t) => t.id === e.target.value);
+                    if (type) handleSetDefaultType(type);
+                  }}
+                  className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                >
+                  {spotTypes
+                    .filter((t) => getSpotTypeSetting(t, "public_visible"))
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                </select>
               </section>
             </div>
           )}

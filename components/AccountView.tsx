@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { ROLE_LABELS, type Role, type SpotType } from "@/lib/types";
+import { getSpotTypeSetting, ROLE_LABELS, type Role, type SpotType } from "@/lib/types";
 
 export default function AccountView({ typeKey }: { typeKey: string }) {
   const router = useRouter();
@@ -21,12 +21,10 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
     api.spotTypes.list().then(({ data }) => setSpotTypes(data ?? []));
   }, []);
 
-  // admin_only・disabledの種別はAPI側でadmin/spot_admin以外には返らない。
-  // 管理者にはadmin_onlyの種別もリンクを出す(無効だけは管理者にも出さない)
+  // public_visible=false(非公開)の種別はAPI側でadmin/spot_admin以外には返らない。
+  // 管理者には非公開の種別もリンクを出す
   const currentType = spotTypes.find((t) => t.key === typeKey) ?? null;
-  const otherTypes = spotTypes.filter(
-    (t) => t.key !== typeKey && t.visibility !== "disabled"
-  );
+  const otherTypes = spotTypes.filter((t) => t.key !== typeKey);
 
   const handleLogout = async () => {
     await api.auth.logout();
@@ -68,7 +66,7 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
                 >
                   <span>
                     {t.label}
-                    {t.visibility === "admin_only" && (
+                    {!getSpotTypeSetting(t, "public_visible") && (
                       <span className="ml-1.5 text-xs text-gray-400">
                         (管理者のみ)
                       </span>

@@ -41,7 +41,7 @@ export default function VisitFormModal({
 }: {
   spotId: string;
   spotName: string;
-  /** falseならこのスポット種別では口コミ機能が無効(郵便局など)なので入力欄自体を出さない */
+  /** falseならこのスポット種別では口コミ機能が無効なので入力欄自体を出さない */
   reviewsEnabled: boolean;
   onClose: () => void;
   onSaved: () => void;

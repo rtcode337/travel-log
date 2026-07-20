@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { SPOT_ADMIN_ROLES, type SpotType } from "@/lib/types";
+import { getSpotTypeSetting, SPOT_ADMIN_ROLES, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 
 export async function GET() {
@@ -10,13 +10,12 @@ export async function GET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // admin_only・disabledの種別はadmin/spot_admin以外には存在自体を見せない
-  const { rows } = await query<SpotType>(
-    SPOT_ADMIN_ROLES.includes(user.role)
-      ? `${SPOT_TYPE_SELECT} order by t.created_at asc`
-      : `${SPOT_TYPE_SELECT} where t.visibility = 'public' order by t.created_at asc`
-  );
-  return NextResponse.json({ data: rows });
+  const { rows } = await query<SpotType>(`${SPOT_TYPE_SELECT} order by t.created_at asc`);
+  // public_visible設定がfalse(既定)の種別はadmin/spot_admin以外には存在自体を見せない
+  const visible = SPOT_ADMIN_ROLES.includes(user.role)
+    ? rows
+    : rows.filter((t) => getSpotTypeSetting(t, "public_visible"));
+  return NextResponse.json({ data: visible });
 }
 
 export async function POST(request: Request) {
