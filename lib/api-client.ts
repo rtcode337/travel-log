@@ -139,9 +139,10 @@ export const api = {
         missing: SeedSpotRow[];
       }>(`/api/spots/sync-sql?type=${encodeURIComponent(type)}`),
     syncSqlApply: (type: string) =>
-      request<Spot[]>(`/api/spots/sync-sql?type=${encodeURIComponent(type)}`, {
-        method: "POST",
-      }),
+      request<{ insertedCount: number }>(
+        `/api/spots/sync-sql?type=${encodeURIComponent(type)}`,
+        { method: "POST" }
+      ),
   },
   geocode: {
     search: (q: string) =>
