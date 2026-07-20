@@ -83,7 +83,7 @@ export default function FilterBar({
   filters,
   onChange,
 }: {
-  /** 現在アクティブなスポット種類の実データから、ランクの選択肢を動的に作る */
+  /** 現在アクティブなスポット種別の実データから、ランクの選択肢を動的に作る */
   spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;

@@ -5,7 +5,7 @@ import { SPOT_ADMIN_ROLES, type SpotTypeVisibility } from "@/lib/types";
 /**
  * /[type]/map・/[type]/spots・/[type]/account 共通の表示可否チェック。
  * disabledは全員404、admin_onlyはadmin/spot_adminのみ閲覧できる
- * (/[type]/adminはここを通さず常にアクセス可。無効化した種類を再有効化できなくなるため)。
+ * (/[type]/adminはここを通さず常にアクセス可。無効化した種別を再有効化できなくなるため)。
  */
 export async function canViewSpotType(typeKey: string): Promise<boolean> {
   const { rows } = await query<{ visibility: SpotTypeVisibility }>(

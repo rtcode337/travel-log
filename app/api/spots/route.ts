@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
-  // URL(/[type]/map・/[type]/spots)のスポット種類キーを常に必須にする
+  // URL(/[type]/map・/[type]/spots)のスポット種別キーを常に必須にする
   // (app_settingsの既定はログイン後リダイレクト先の決定にのみ使う。GET /api/spots自体では見ない)
   const typeKey = searchParams.get("type");
   if (!typeKey) {
@@ -29,13 +29,13 @@ export async function GET(request: Request) {
     [typeKey]
   );
   const activeType = typeRows[0];
-  // admin_only・disabledの種類はadmin/spot_admin以外には存在自体を見せない
+  // admin_only・disabledの種別はadmin/spot_admin以外には存在自体を見せない
   // (ページ側の404と揃える。管理画面が全statusのスポットを読むためadmin側は素通し)
   if (
     !activeType ||
     (activeType.visibility !== "public" && !SPOT_ADMIN_ROLES.includes(user.role))
   ) {
-    return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
+    return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
 
   const baseConditions = ["spot_type_id = $2"];
@@ -108,7 +108,7 @@ export async function GET(request: Request) {
       [...listParams, SPOTS_PAGE_SIZE, (page - 1) * SPOTS_PAGE_SIZE]
     ),
     query<{ count: string }>(`select count(*) from spots where ${where}`, listParams),
-    // ランク選択肢は検索文字列・選択中ランクの影響を受けず、種類全体から出す
+    // ランク選択肢は検索文字列・選択中ランクの影響を受けず、種別全体から出す
     query<{ rank: string }>(
       `select distinct rank from spots where ${baseConditions.join(" and ")} and rank is not null`,
       params
@@ -175,7 +175,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // 新規登録先のスポット種類も、参照(GET)と同じくURLのキーで必ず明示させる
+  // 新規登録先のスポット種別も、参照(GET)と同じくURLのキーで必ず明示させる
   // (app_settingsの既定には依存しない)
   const typeKey = new URL(request.url).searchParams.get("type");
   if (!typeKey) {
@@ -190,7 +190,7 @@ export async function POST(request: Request) {
     !spotType ||
     (spotType.visibility !== "public" && !SPOT_ADMIN_ROLES.includes(user.role))
   ) {
-    return NextResponse.json({ error: "存在しない種類です。" }, { status: 404 });
+    return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
 
   // 一般ユーザーは非公開スポットのみ、モデレーターは非公開/承認待ち、管理者は
