@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { SPOT_ADMIN_ROLES, type Spot } from "@/lib/types";
+import { SPOT_ADMIN_ROLES } from "@/lib/types";
 import { readSeedSpots, type SeedSpotRow } from "@/lib/sqlSeed";
+
+// 複数行VALUESの1文あたりの行数。1行9パラメータ+共通2なので、
+// 1,000行でもPostgresのパラメータ上限(65,535)には遠く及ばない
+const INSERT_CHUNK_SIZE = 1000;
 
 function spotKey(name: string, prefecture: string, municipality: string | null) {
   return `${name}|${prefecture}|${municipality ?? ""}`;
@@ -97,29 +101,51 @@ export async function POST(request: Request) {
   }
 
   const { missing } = await diffSeedSpots(typeKey, spotType.id);
-
-  const inserted: Spot[] = [];
-  for (const row of missing) {
-    const { rows } = await query<Spot>(
-      `insert into spots
-        (spot_type_id, name, name_kana, prefecture, municipality, lat, lng, rank, category, description, source, status, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'manual', 'published', $11)
-       returning *`,
-      [
-        spotType.id,
-        row.name,
-        row.name_kana,
-        row.prefecture,
-        row.municipality,
-        row.lat,
-        row.lng,
-        row.rank,
-        row.category,
-        row.description,
-        user.id,
-      ]
-    );
-    inserted.push(rows[0]);
+  if (missing.length === 0) {
+    return NextResponse.json({ data: { insertedCount: 0 } });
   }
-  return NextResponse.json({ data: inserted });
+
+  // 1件ずつのINSERT(数千回のラウンドトリップ)だと観光地シード規模(7,000件超)で
+  // リクエストがタイムアウトするため、複数行VALUESのチャンクに分けて1トランザクションで
+  // 投入する。レスポンスも全行を返さず件数のみ返す
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    for (let offset = 0; offset < missing.length; offset += INSERT_CHUNK_SIZE) {
+      const chunk = missing.slice(offset, offset + INSERT_CHUNK_SIZE);
+      const params: unknown[] = [spotType.id, user.id];
+      const tuples = chunk.map((row) => {
+        const base = params.length;
+        params.push(
+          row.name,
+          row.name_kana,
+          row.prefecture,
+          row.municipality,
+          row.lat,
+          row.lng,
+          row.rank,
+          row.category,
+          row.description
+        );
+        const placeholders = Array.from({ length: 9 }, (_, i) => `$${base + i + 1}`);
+        return `($1, ${placeholders.join(", ")}, 'manual', 'published', $2)`;
+      });
+      await client.query(
+        `insert into spots
+          (spot_type_id, name, name_kana, prefecture, municipality, lat, lng, rank, category, description, source, status, created_by)
+         values ${tuples.join(", ")}`,
+        params
+      );
+    }
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback").catch(() => {});
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "insert failed" },
+      { status: 500 }
+    );
+  } finally {
+    client.release();
+  }
+  return NextResponse.json({ data: { insertedCount: missing.length } });
 }
