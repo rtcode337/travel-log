@@ -79,18 +79,22 @@ export async function POST(request: Request) {
   }
 
   const { rows: spotRows } = await query<{
-    reviews_enabled: boolean;
+    reviews_enabled: string | null;
     status: string;
   }>(
-    `select st.reviews_enabled, s.status
-     from spots s join spot_types st on st.id = s.spot_type_id
+    `select
+       (select value from spot_type_settings
+        where spot_type_id = s.spot_type_id and key = 'reviews_enabled') as reviews_enabled,
+       s.status
+     from spots s
      where s.id = $1`,
     [spot_id]
   );
   if (!spotRows[0]) {
     return NextResponse.json({ error: "spot not found" }, { status: 404 });
   }
-  if (!spotRows[0].reviews_enabled) {
+  // 行が無い(=設定されていない)場合は既定のtrueとして扱う(lib/types.tsのSPOT_TYPE_SETTING_DEFAULTS参照)
+  if (spotRows[0].reviews_enabled === "false") {
     return NextResponse.json(
       { error: "このスポットの種類では口コミが無効になっています。" },
       { status: 400 }

@@ -5,19 +5,26 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
-import type { SeedSpotRow } from "@/lib/sqlSeed";
 import {
+  getSpotTypeSetting,
   ROLE_LABELS,
   SPOT_ADMIN_ROLES,
+  SPOT_TYPE_SETTING_KEYS,
+  SPOT_TYPE_SETTING_LABELS,
   SPOT_TYPE_VISIBILITY_LABELS,
   type AppUser,
   type Role,
   type Spot,
   type SpotType,
+  type SpotTypeSettingKey,
   type SpotTypeVisibility,
 } from "@/lib/types";
 
 const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
+
+// CSVインポートを1リクエストにまとめず1000件ずつに分けて送る(進捗表示のためと、
+// 大量データで1リクエストがタイムアウトするのを避けるため)
+const CSV_IMPORT_CHUNK_SIZE = 1000;
 
 const CSV_COLUMNS = [
   "name",
@@ -45,31 +52,16 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [spots, setSpots] = useState<Spot[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
-
-  const [sqlSyncPreview, setSqlSyncPreview] = useState<{
-    files: string[];
-    totalSeed: number;
-    missingCount: number;
-    missing: SeedSpotRow[];
+  const [importProgress, setImportProgress] = useState<{
+    done: number;
+    total: number;
   } | null>(null);
-  const [sqlSyncChecking, setSqlSyncChecking] = useState(false);
-  const [sqlSyncApplying, setSqlSyncApplying] = useState(false);
-  // CSVインポート用のmessageとは別に持つ(共用すると同期のエラーがCSVインポート欄に出てしまう)
-  const [sqlSyncMessage, setSqlSyncMessage] = useState<string | null>(null);
 
-  const [dedupePreview, setDedupePreview] = useState<{
-    groupCount: number;
-    deleteCount: number;
-    groups: {
-      name: string;
-      prefecture: string;
-      municipality: string | null;
-      count: number;
-    }[];
-  } | null>(null);
-  const [dedupeChecking, setDedupeChecking] = useState(false);
-  const [dedupeApplying, setDedupeApplying] = useState(false);
-  const [dedupeMessage, setDedupeMessage] = useState<string | null>(null);
+  const [purgeCount, setPurgeCount] = useState<number | null>(null);
+  const [purgeChecking, setPurgeChecking] = useState(false);
+  const [purgeApplying, setPurgeApplying] = useState(false);
+  const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
+  const [purgeConfirmText, setPurgeConfirmText] = useState("");
 
   const [users, setUsers] = useState<AppUser[]>([]);
   // ロール・ニックネームは選択/入力しただけでは保存せず、ユーザーごとの
@@ -87,6 +79,12 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [newTypeKey, setNewTypeKey] = useState("");
   const [newTypeLabel, setNewTypeLabel] = useState("");
   const [typeMessage, setTypeMessage] = useState<string | null>(null);
+  const [defaultTypeMessage, setDefaultTypeMessage] = useState<string | null>(
+    null
+  );
+  const [typeSettingsMessage, setTypeSettingsMessage] = useState<
+    string | null
+  >(null);
 
   const currentType = useMemo(
     () => spotTypes.find((t) => t.key === typeKey) ?? null,
@@ -149,91 +147,47 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     load();
   };
 
-  const handleCheckSqlSync = async () => {
-    setSqlSyncChecking(true);
-    setSqlSyncMessage(null);
-    setSqlSyncPreview(null);
+  const handleCheckPurge = async () => {
+    setPurgeChecking(true);
+    setPurgeMessage(null);
+    setPurgeCount(null);
     try {
-      const { data, error } = await api.spots.syncSqlPreview(typeKey);
+      const { data, error } = await api.spots.purgePreview(typeKey);
       if (error) {
-        setSqlSyncMessage("差分の確認に失敗しました: " + error.message);
+        setPurgeMessage("件数の確認に失敗しました: " + error.message);
         return;
       }
-      setSqlSyncPreview(data);
+      setPurgeCount(data?.count ?? 0);
     } finally {
-      setSqlSyncChecking(false);
+      setPurgeChecking(false);
     }
   };
 
-  const handleApplySqlSync = async () => {
-    if (!sqlSyncPreview || sqlSyncPreview.missingCount === 0) return;
+  const handleApplyPurge = async () => {
+    if (purgeCount === null || purgeCount === 0) return;
+    if (purgeConfirmText !== typeKey) return;
     if (
       !confirm(
-        `db/init/のSQLシードのうち未登録の${sqlSyncPreview.missingCount}件を公開状態で追加しますか?`
+        `「${currentTypeLabel}」(${typeKey})の全スポット${purgeCount}件を削除しますか?` +
+          `公開・承認待ち・却下・非公開を問わず全て対象で、紐づく訪問記録・訪問予定・` +
+          `口コミ・写真も全ユーザー分削除されます。この操作は取り消せません。`
       )
     )
       return;
-    setSqlSyncApplying(true);
-    setSqlSyncMessage(null);
+    setPurgeApplying(true);
+    setPurgeMessage(null);
     try {
-      const { data, error } = await api.spots.syncSqlApply(typeKey);
+      const { data, error } = await api.spots.purgeApply(typeKey);
       if (error) {
-        setSqlSyncMessage("取り込みに失敗しました: " + error.message);
+        setPurgeMessage("削除に失敗しました: " + error.message);
         return;
       }
-      setSqlSyncMessage(
-        `${data?.insertedCount ?? sqlSyncPreview.missingCount}件追加しました。`
-      );
-      setSqlSyncPreview(null);
+      setPurgeMessage(`${data?.deletedCount ?? 0}件削除しました。`);
+      setPurgeCount(null);
+      setPurgeConfirmText("");
       load();
     } finally {
-      setSqlSyncApplying(false);
-    }
-  };
-
-  const handleCheckDedupe = async () => {
-    setDedupeChecking(true);
-    setDedupeMessage(null);
-    setDedupePreview(null);
-    try {
-      const { data, error } = await api.spots.dedupePreview(typeKey);
-      if (error) {
-        setDedupeMessage("重複の確認に失敗しました: " + error.message);
-        return;
-      }
-      if (data && data.deleteCount === 0) {
-        setDedupeMessage("重複はありません。");
-        return;
-      }
-      setDedupePreview(data);
-    } finally {
-      setDedupeChecking(false);
-    }
-  };
-
-  const handleApplyDedupe = async () => {
-    if (!dedupePreview || dedupePreview.deleteCount === 0) return;
-    if (
-      !confirm(
-        `${dedupePreview.groupCount}グループの重複スポット${dedupePreview.deleteCount}件を削除しますか?` +
-          `各グループで最初に登録された1件を残し、訪問記録・訪問予定・口コミは残す1件に引き継ぎます。` +
-          `この操作は取り消せません。`
-      )
-    )
-      return;
-    setDedupeApplying(true);
-    setDedupeMessage(null);
-    try {
-      const { data, error } = await api.spots.dedupeApply(typeKey);
-      if (error) {
-        setDedupeMessage("重複の削除に失敗しました: " + error.message);
-        return;
-      }
-      setDedupeMessage(`重複${data?.deletedCount ?? 0}件を削除しました。`);
-      setDedupePreview(null);
-      load();
-    } finally {
-      setDedupeApplying(false);
+      setPurgeApplying(false);
     }
   };
 
@@ -306,17 +260,19 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     loadUsers();
   };
 
-  const handleToggleReviewsEnabled = async (type: SpotType) => {
-    const { error } = await api.spotTypes.setReviewsEnabled(
-      type.id,
-      !type.reviews_enabled
-    );
+  const handleToggleSetting = async (
+    type: SpotType,
+    key: SpotTypeSettingKey
+  ) => {
+    const current = getSpotTypeSetting(type, key);
+    const { error } = await api.spotTypes.setSetting(type.id, key, !current);
+    const label = SPOT_TYPE_SETTING_LABELS[key];
     if (error) {
-      setTypeMessage("口コミ設定の変更に失敗しました: " + error.message);
+      setTypeSettingsMessage(`${label}の変更に失敗しました: ` + error.message);
       return;
     }
-    setTypeMessage(
-      `「${type.label}」の口コミを${!type.reviews_enabled ? "有効" : "無効"}にしました。`
+    setTypeSettingsMessage(
+      `「${type.label}」の${label}を${!current ? "有効" : "無効"}にしました。`
     );
     loadSpotTypes();
   };
@@ -339,10 +295,10 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const handleSetDefaultType = async (type: SpotType) => {
     const { error } = await api.appSettings.setActive(type.id);
     if (error) {
-      setTypeMessage("既定の変更に失敗しました: " + error.message);
+      setDefaultTypeMessage("既定の変更に失敗しました: " + error.message);
       return;
     }
-    setTypeMessage(`ログイン後の既定を「${type.label}」に変更しました。`);
+    setDefaultTypeMessage(`ログイン後の既定を「${type.label}」に変更しました。`);
     setDefaultType(type);
   };
 
@@ -362,6 +318,16 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     setNewTypeLabel("");
     loadSpotTypes();
   };
+
+  // name+prefecture+lat+lng の完全一致を「同じスポット」とみなす差分更新用のキー。
+  // municipalityは使わない — 御朱印(同名の神社仏閣が同一市区町村内に複数あることが
+  // 珍しくない)ではname+prefecture+municipalityだと別スポットを誤って同一視してしまうため
+  const spotDiffKey = (
+    name: string,
+    prefecture: string,
+    lat: number,
+    lng: number
+  ) => `${name}|${prefecture}|${lat}|${lng}`;
 
   const handleCsvFile = async (file: File) => {
     setImporting(true);
@@ -419,15 +385,58 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
         );
         return;
       }
-      const { error } = await api.spots.createMany(records, typeKey);
-      if (error) {
-        setMessage("インポートに失敗しました: " + error.message);
+
+      // 差分更新: 既に(status問わず)このスポット種類に存在する行、およびCSV内で
+      // 重複している行はスキップし、新規分だけ追加する
+      const existingKeys = new Set(
+        spots.map((s) => spotDiffKey(s.name, s.prefecture, s.lat, s.lng))
+      );
+      const seenKeys = new Set<string>();
+      const newRecords = [];
+      for (const record of records) {
+        const key = spotDiffKey(record.name, record.prefecture, record.lat, record.lng);
+        if (existingKeys.has(key) || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        newRecords.push(record);
+      }
+      const skippedCount = records.length - newRecords.length;
+
+      if (newRecords.length === 0) {
+        setMessage(`新規行はありませんでした(${skippedCount}件は既存のためスキップ)。`);
         return;
       }
-      setMessage(`${records.length}件インポートしました。`);
+
+      // 1000件ずつ順番に送信し、進捗を表示する(大量データで1リクエストが
+      // タイムアウトするのも避けられる)
+      let insertedCount = 0;
+      setImportProgress({ done: 0, total: newRecords.length });
+      for (
+        let offset = 0;
+        offset < newRecords.length;
+        offset += CSV_IMPORT_CHUNK_SIZE
+      ) {
+        const chunk = newRecords.slice(offset, offset + CSV_IMPORT_CHUNK_SIZE);
+        const { error } = await api.spots.createMany(chunk, typeKey);
+        if (error) {
+          setMessage(
+            `${insertedCount}件追加した時点でインポートに失敗しました: ` +
+              error.message
+          );
+          load();
+          return;
+        }
+        insertedCount += chunk.length;
+        setImportProgress({ done: insertedCount, total: newRecords.length });
+      }
+
+      setMessage(
+        `${insertedCount}件追加しました` +
+          (skippedCount > 0 ? `(${skippedCount}件は既存のためスキップ)。` : "。")
+      );
       load();
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   };
 
@@ -606,283 +615,283 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
         )}
 
         {/* 右カラム(またはadminでない場合は唯一のカラム): スポットの管理 */}
-        <div className="flex flex-col gap-6">
-          {isAdmin && (
+        <div>
+          <h2 className="mb-2 text-base font-bold">
+            スポット管理({currentTypeLabel})
+          </h2>
+
+          <div className="flex flex-col gap-6">
+            {isAdmin && currentType && (
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <h3 className="mb-2 text-base font-bold">スポットの種類の設定</h3>
+                {typeSettingsMessage && (
+                  <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {typeSettingsMessage}
+                  </p>
+                )}
+                <div className="flex flex-col gap-2">
+                  {SPOT_TYPE_SETTING_KEYS.map((key) => (
+                    <label key={key} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={getSpotTypeSetting(currentType, key)}
+                        onChange={() => handleToggleSetting(currentType, key)}
+                      />
+                      この種類で{SPOT_TYPE_SETTING_LABELS[key]}を有効にする
+                    </label>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="rounded-xl border border-gray-200 bg-white p-3">
-              <h2 className="mb-2 text-base font-bold">スポットの種類</h2>
+              <h3 className="mb-2 text-base font-bold">CSVインポート</h3>
               <p className="mb-3 text-xs text-gray-500">
-                ここでの選択は、ログイン後に自動で開く地図/リストの既定を切り替えるだけ
-                (全ユーザー共通)。スポットの追加・編集・承認は、このページのURL(現在は
-                「{currentTypeLabel}」)で対象の種類が決まる — 他の種類を扱いたい場合は
-                種類名をクリックして移動する。
+                個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
+                ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは最初から公開される)。
+                差分更新: name+prefecture+lat+lngが完全一致するスポットが既に
+                (status問わず)存在する行はスキップし、新規分だけ追加するため、同じCSVを
+                何度アップロードしても重複登録されない。
               </p>
-              {typeMessage && (
+
+              {message && (
                 <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                  {typeMessage}
+                  {message}
                 </p>
               )}
-              <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-                {spotTypes.map((t) => (
-                  <li key={t.id} className="flex items-center gap-3 px-3 py-2">
-                    <input
-                      type="radio"
-                      name="default-spot-type"
-                      checked={defaultType?.id === t.id}
-                      onChange={() => handleSetDefaultType(t)}
-                      title="ログイン後に自動で開く既定にする"
+
+              {importProgress && (
+                <div className="mb-3">
+                  <p className="mb-1 text-sm text-gray-600">
+                    インポート中… {importProgress.done} / {importProgress.total}件
+                  </p>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                    <div
+                      className="h-full rounded-full bg-blue-500 transition-all"
+                      style={{
+                        width: `${Math.round(
+                          (importProgress.done / importProgress.total) * 100
+                        )}%`,
+                      }}
                     />
-                    {t.key === typeKey ? (
-                      <span className="flex-1 text-sm">{t.label}</span>
-                    ) : (
-                      <Link
-                        href={`/${t.key}/admin`}
-                        className="flex-1 text-sm text-blue-600 underline"
-                      >
-                        {t.label}
-                      </Link>
-                    )}
-                    <span className="text-xs text-gray-400">{t.key}</span>
-                    <select
-                      value={t.visibility}
-                      onChange={(e) =>
-                        handleChangeVisibility(
-                          t,
-                          e.target.value as SpotTypeVisibility
-                        )
-                      }
-                      title="「管理者のみ」はadmin/スポット管理者だけが地図/一覧を見られる(公開前の準備用)。「無効」は全員に対してリンクが消え、直接アクセスも404になる"
-                      className="rounded-lg border border-gray-300 px-1.5 py-1 text-xs text-gray-600"
-                    >
-                      {(
-                        Object.entries(SPOT_TYPE_VISIBILITY_LABELS) as [
-                          SpotTypeVisibility,
-                          string,
-                        ][]
-                      ).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </li>
-                ))}
-              </ul>
-              <form
-                onSubmit={handleCreateType}
-                className="flex flex-wrap items-end gap-2"
-              >
-                <div>
-                  <label className="mb-1 block text-xs font-medium">
-                    キー(英数字)
-                  </label>
-                  <input
-                    required
-                    value={newTypeKey}
-                    onChange={(e) => setNewTypeKey(e.target.value)}
-                    placeholder="tourist"
-                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                  />
+                  </div>
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium">
-                    表示名
-                  </label>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                  {importing ? "インポート中…" : "CSVインポート"}
                   <input
-                    required
-                    value={newTypeLabel}
-                    onChange={(e) => setNewTypeLabel(e.target.value)}
-                    placeholder="観光地"
-                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    disabled={importing}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleCsvFile(file);
+                      e.target.value = "";
+                    }}
                   />
-                </div>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
-                >
-                  + 種類を追加
-                </button>
-              </form>
-            </section>
-          )}
-
-          {isAdmin && currentType && (
-            <section className="rounded-xl border border-gray-200 bg-white p-3">
-              <h2 className="mb-2 text-base font-bold">
-                口コミ設定({currentTypeLabel})
-              </h2>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={currentType.reviews_enabled}
-                  onChange={() => handleToggleReviewsEnabled(currentType)}
-                />
-                この種類で口コミを有効にする
-              </label>
-            </section>
-          )}
-
-          <section className="rounded-xl border border-gray-200 bg-white p-3">
-            <h2 className="mb-2 text-base font-bold">
-              CSVインポート({currentTypeLabel})
-            </h2>
-            <p className="mb-3 text-xs text-gray-500">
-              個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
-              ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは最初から公開される)。
-            </p>
-
-            {message && (
-              <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                {message}
-              </p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
-                {importing ? "インポート中…" : "CSVインポート"}
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  disabled={importing}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleCsvFile(file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-              {pendingCount > 0 && (
-                <button
-                  onClick={handleBulkApprove}
-                  className="rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-700"
-                >
-                  承認待ち{pendingCount}件をすべて承認
-                </button>
-              )}
-            </div>
-
-            <p className="mt-2 text-xs text-gray-400">
-              CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。rank/categoryは自由入力で空でも可)
-            </p>
-          </section>
-
-          <section className="rounded-xl border border-gray-200 bg-white p-3">
-            <h2 className="mb-2 text-base font-bold">
-              SQLシードとの同期({currentTypeLabel})
-            </h2>
-            <p className="mb-3 text-xs text-gray-500">
-              db/init/配下のこの種類のシードファイルを読み、name+prefecture+municipalityが
-              完全一致するスポットが既に存在しない行だけを公開状態で追加する。表記ゆれや
-              座標近接による重複はここでは検出しないため、追加後は目視で重複確認すること。
-            </p>
-
-            {sqlSyncMessage && (
-              <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                {sqlSyncMessage}
-              </p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={handleCheckSqlSync}
-                disabled={sqlSyncChecking}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
-              >
-                {sqlSyncChecking ? "確認中…" : "差分を確認"}
-              </button>
-              {sqlSyncPreview && sqlSyncPreview.missingCount > 0 && (
-                <button
-                  onClick={handleApplySqlSync}
-                  disabled={sqlSyncApplying}
-                  className="rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-700"
-                >
-                  {sqlSyncApplying
-                    ? "取り込み中…"
-                    : `未登録の${sqlSyncPreview.missingCount}件を取り込む`}
-                </button>
-              )}
-            </div>
-
-            {sqlSyncPreview && (
-              <div className="mt-3 text-sm">
-                <p className="text-gray-600">
-                  対象ファイル: {sqlSyncPreview.files.join(", ") || "なし"} /
-                  シード総数 {sqlSyncPreview.totalSeed}件 / 未登録{" "}
-                  {sqlSyncPreview.missingCount}件
-                </p>
-                {sqlSyncPreview.missingCount > 0 && (
-                  <ul className="mt-2 max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
-                    {sqlSyncPreview.missing.map((s, i) => (
-                      <li key={i} className="px-3 py-1.5 text-xs">
-                        {s.name}({s.prefecture}
-                        {s.municipality ?? ""})
-                        {s.rank && (
-                          <span className="ml-1 text-gray-400">[{s.rank}]</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                </label>
+                {pendingCount > 0 && (
+                  <button
+                    onClick={handleBulkApprove}
+                    className="rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-700"
+                  >
+                    承認待ち{pendingCount}件をすべて承認
+                  </button>
                 )}
               </div>
-            )}
 
-            <div className="mt-4 border-t border-gray-100 pt-3">
-              <h3 className="mb-1 text-sm font-bold">重複スポットの削除</h3>
+              <p className="mt-2 text-xs text-gray-400">
+                CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。rank/categoryは自由入力で空でも可)
+              </p>
+            </section>
+
+          {isAdmin && (
+            <section className="rounded-xl border border-red-200 bg-white p-3">
+              <h3 className="mb-2 text-base font-bold text-red-700">
+                スポット全削除
+              </h3>
               <p className="mb-3 text-xs text-gray-500">
-                同期の並行実行等で同じスポットが複数登録された場合の後始末。
-                name+prefecture+municipalityが完全一致する公開スポットを重複とみなし、
-                各グループで最初に登録された1件を残して削除する(削除される行の
-                訪問記録・訪問予定・口コミは残す1件に引き継ぐ)。
+                「{currentTypeLabel}」({typeKey})のスポットを公開・承認待ち・却下・非公開
+                問わず全件削除する。紐づく訪問記録・訪問予定・口コミ・写真も全ユーザー分
+                まとめて削除され、元に戻せない。CSVインポート用データを外部で作り直した
+                際などに、一度空にしてから入れ直す用途を想定。
               </p>
 
-              {dedupeMessage && (
-                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                  {dedupeMessage}
+              {purgeMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-red-50 p-2 text-sm text-red-800">
+                  {purgeMessage}
                 </p>
               )}
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={handleCheckDedupe}
-                  disabled={dedupeChecking}
+                  onClick={handleCheckPurge}
+                  disabled={purgeChecking}
                   className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
                 >
-                  {dedupeChecking ? "確認中…" : "重複を確認"}
+                  {purgeChecking ? "確認中…" : "件数を確認"}
                 </button>
-                {dedupePreview && dedupePreview.deleteCount > 0 && (
-                  <button
-                    onClick={handleApplyDedupe}
-                    disabled={dedupeApplying}
-                    className="rounded-lg border border-red-400 bg-white px-3 py-1.5 text-sm font-medium text-red-700"
-                  >
-                    {dedupeApplying
-                      ? "削除中…"
-                      : `重複${dedupePreview.deleteCount}件を削除`}
-                  </button>
-                )}
               </div>
 
-              {dedupePreview && dedupePreview.deleteCount > 0 && (
-                <div className="mt-3 text-sm">
-                  <p className="text-gray-600">
-                    重複グループ {dedupePreview.groupCount}件 / 削除対象{" "}
-                    {dedupePreview.deleteCount}件
+              {purgeCount !== null && purgeCount > 0 && (
+                <div className="mt-3 flex flex-col gap-2">
+                  <p className="text-sm text-gray-600">
+                    削除対象 {purgeCount}件。確認のため、下の欄に種類キー「{typeKey}」を
+                    入力すると削除ボタンが有効になる。
                   </p>
-                  <ul className="mt-2 max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
-                    {dedupePreview.groups.map((g, i) => (
-                      <li key={i} className="px-3 py-1.5 text-xs">
-                        {g.name}({g.prefecture}
-                        {g.municipality ?? ""})
-                        <span className="ml-1 text-gray-400">
-                          {g.count}件 → 1件
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={purgeConfirmText}
+                    onChange={(e) => setPurgeConfirmText(e.target.value)}
+                    placeholder={typeKey}
+                    className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                  />
+                  <button
+                    onClick={handleApplyPurge}
+                    disabled={purgeApplying || purgeConfirmText !== typeKey}
+                    className="w-fit rounded-lg border border-red-400 bg-white px-3 py-1.5 text-sm font-medium text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {purgeApplying ? "削除中…" : `${purgeCount}件を全て削除`}
+                  </button>
                 </div>
               )}
+
+              {purgeCount === 0 && (
+                <p className="mt-3 text-sm text-gray-500">
+                  対象スポットはありません。
+                </p>
+              )}
+            </section>
+          )}
+
+          {isAdmin && (
+            <div>
+              <h2 className="mb-2 text-base font-bold">
+                ログイン後に自動で開く種類
+              </h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <p className="mb-3 text-xs text-gray-500">
+                  ログイン後・ルート(/)アクセス時に自動で開く地図/リストの既定(全ユーザー共通)。
+                  ここでの選択は既定を切り替えるだけで、他の種類を非表示にするものではない。
+                </p>
+                {defaultTypeMessage && (
+                  <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {defaultTypeMessage}
+                  </p>
+                )}
+                <select
+                  value={defaultType?.id ?? ""}
+                  onChange={(e) => {
+                    const type = spotTypes.find((t) => t.id === e.target.value);
+                    if (type) handleSetDefaultType(type);
+                  }}
+                  className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                >
+                  {spotTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </section>
             </div>
-          </section>
+          )}
+
+          {isAdmin && (
+            <div>
+              <h2 className="mb-2 text-base font-bold">スポットの種類の管理</h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <p className="mb-3 text-xs text-gray-500">
+                  スポットの追加・編集・承認は、このページのURL(現在は「{currentTypeLabel}」)
+                  で対象の種類が決まる — 他の種類を扱いたい場合は種類名をクリックして移動する。
+                </p>
+                {typeMessage && (
+                  <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {typeMessage}
+                  </p>
+                )}
+                <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                  {spotTypes.map((t) => (
+                    <li key={t.id} className="flex items-center gap-3 px-3 py-2">
+                      {t.key === typeKey ? (
+                        <span className="flex-1 text-sm">{t.label}</span>
+                      ) : (
+                        <Link
+                          href={`/${t.key}/admin`}
+                          className="flex-1 text-sm text-blue-600 underline"
+                        >
+                          {t.label}
+                        </Link>
+                      )}
+                      <span className="text-xs text-gray-400">{t.key}</span>
+                      <select
+                        value={t.visibility}
+                        onChange={(e) =>
+                          handleChangeVisibility(
+                            t,
+                            e.target.value as SpotTypeVisibility
+                          )
+                        }
+                        title="「管理者のみ」はadmin/スポット管理者だけが地図/一覧を見られる(公開前の準備用)。「無効」は全員に対してリンクが消え、直接アクセスも404になる"
+                        className="rounded-lg border border-gray-300 px-1.5 py-1 text-xs text-gray-600"
+                      >
+                        {(
+                          Object.entries(SPOT_TYPE_VISIBILITY_LABELS) as [
+                            SpotTypeVisibility,
+                            string,
+                          ][]
+                        ).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </li>
+                  ))}
+                </ul>
+                <form
+                  onSubmit={handleCreateType}
+                  className="flex flex-wrap items-end gap-2"
+                >
+                  <div>
+                    <label className="mb-1 block text-xs font-medium">
+                      キー(英数字)
+                    </label>
+                    <input
+                      required
+                      value={newTypeKey}
+                      onChange={(e) => setNewTypeKey(e.target.value)}
+                      placeholder="tourist"
+                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium">
+                      表示名
+                    </label>
+                    <input
+                      required
+                      value={newTypeLabel}
+                      onChange={(e) => setNewTypeLabel(e.target.value)}
+                      placeholder="観光地"
+                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
+                  >
+                    + 種類を追加
+                  </button>
+                </form>
+              </section>
+            </div>
+          )}
+          </div>
         </div>
       </div>
     </main>

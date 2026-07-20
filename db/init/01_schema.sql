@@ -13,12 +13,26 @@ create table spot_types (
   id              uuid primary key default gen_random_uuid(),
   key             text not null unique,   -- 機械可読キー(例: 'tourist', 'post_office', 'goshuin')
   label           text not null,          -- 表示名(例: '観光地', '郵便局', '御朱印')
-  reviews_enabled boolean not null default true, -- この種類のスポットで口コミ機能を使うか
   -- public: 全ユーザーに表示 / admin_only: admin・spot_adminのみ/[key]/map等を閲覧できる /
   -- disabled: /[key]/map・/[key]/spots・アカウントページのリンクを404/非表示にする
   -- (いずれも/[key]/adminは再有効化のため常にアクセス可)
   visibility      text not null default 'public' check (visibility in ('public', 'admin_only', 'disabled')),
   created_at      timestamptz not null default now()
+);
+
+-- =============================================================
+-- spot_type_settings: スポットの種類ごとのON/OFF設定をkey/valueで持つ
+-- (口コミ・Wikipediaリンクなど)。設定を追加するたびに spot_types に列を
+-- 増やさずに済むよう、EAV形式にしてある。値は現状すべてboolean相当を
+-- 'true'/'false'の文字列で保存する(既知のキー・既定値・表示名は
+-- lib/types.ts の SPOT_TYPE_SETTING_DEFAULTS/SPOT_TYPE_SETTING_LABELS 参照)。
+-- 行が存在しないキーは既定値(現状すべてtrue)として扱う
+-- =============================================================
+create table spot_type_settings (
+  spot_type_id uuid not null references spot_types (id) on delete cascade,
+  key          text not null,
+  value        text not null,
+  primary key (spot_type_id, key)
 );
 
 -- =============================================================
@@ -141,7 +155,7 @@ create index visit_plans_spot_id_idx on visit_plans (spot_id);
 
 -- =============================================================
 -- reviews: 口コミ。投稿するたびに増える掲示板方式(1ユーザーが同じスポットに何件でも書ける)。
--- スポットの種類ごとにspot_types.reviews_enabledで機能そのもののON/OFFを切り替えられる。
+-- スポットの種類ごとにspot_type_settingsの'reviews_enabled'で機能そのもののON/OFFを切り替えられる。
 -- ランク表示ロジックには reviews を一切参照させないこと
 -- =============================================================
 create table reviews (
@@ -158,10 +172,17 @@ create index reviews_spot_id_idx on reviews (spot_id);
 -- =============================================================
 -- 参考データ: スポットの種類3つ(観光地のみデータあり。郵便局・御朱印は今後用の空の種類)
 -- =============================================================
-insert into spot_types (key, label, reviews_enabled) values
-  ('tourist', '観光地', true),
-  ('post_office', '郵便局', false),
-  ('goshuin', '御朱印', true);
+insert into spot_types (key, label) values
+  ('tourist', '観光地'),
+  ('post_office', '郵便局'),
+  ('goshuin', '御朱印');
+
+-- 既定値(true)から外れるものだけを明示的に登録する(EAV形式なので、
+-- 既定のままでよい設定は行自体を作らない)
+insert into spot_type_settings (spot_type_id, key, value)
+  select id, 'reviews_enabled', 'false' from spot_types where key = 'post_office'
+  union all
+  select id, 'wikipedia_enabled', 'false' from spot_types where key = 'post_office';
 
 insert into app_settings (active_spot_type_id)
   select id from spot_types where key = 'tourist';

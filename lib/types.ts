@@ -104,9 +104,43 @@ export interface SpotType {
   id: string;
   key: string;
   label: string;
-  reviews_enabled: boolean;
+  /** spot_type_settings(key/value)をオブジェクトにまとめたもの。値は文字列("true"/"false")で、
+   * キーが存在しない設定はSPOT_TYPE_SETTING_DEFAULTSの既定値として扱う(getSpotTypeSetting参照) */
+  settings: Record<string, string>;
   visibility: SpotTypeVisibility;
   created_at: string;
+}
+
+/**
+ * スポットの種類ごとのON/OFF設定。spot_typesに列を増やさずに済むよう
+ * spot_type_settings(spot_type_id, key, value)のEAV形式でDBに持つ。
+ * 新しい設定を増やす際は、ここにキー・既定値・表示名を追加するだけでよい
+ * (マイグレーション不要。使う側は getSpotTypeSetting で読む)。
+ */
+export type SpotTypeSettingKey = "reviews_enabled" | "wikipedia_enabled";
+
+export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
+  reviews_enabled: true,
+  wikipedia_enabled: true,
+};
+
+/** 管理画面のチェックボックス・メッセージに使う短い名前 */
+export const SPOT_TYPE_SETTING_LABELS: Record<SpotTypeSettingKey, string> = {
+  reviews_enabled: "口コミ",
+  wikipedia_enabled: "Wikipediaリンク",
+};
+
+export const SPOT_TYPE_SETTING_KEYS = Object.keys(
+  SPOT_TYPE_SETTING_DEFAULTS
+) as SpotTypeSettingKey[];
+
+/** type.settings[key]の文字列値からbooleanを解決する。行が無ければ既定値を返す */
+export function getSpotTypeSetting(
+  type: Pick<SpotType, "settings"> | null | undefined,
+  key: SpotTypeSettingKey
+): boolean {
+  const raw = type?.settings?.[key];
+  return raw === undefined ? SPOT_TYPE_SETTING_DEFAULTS[key] : raw === "true";
 }
 
 /**
