@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import {
-  PREFECTURES,
   SPOTS_PAGE_SIZE,
   formatVisitedOn,
   type MyReview,
@@ -12,6 +11,12 @@ import {
   type Visit,
   type VisitPlan,
 } from "@/lib/types";
+import {
+  compareRegions,
+  DEFAULT_REGION_SCOPE,
+  regionFieldLabel,
+} from "@/lib/region";
+import { useRegionScope } from "@/lib/useRegionScope";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -176,6 +181,9 @@ export default function SpotsView({
 }) {
   const spotCache = useSpotCache(spotTypeKey);
   const rankStyles = useRankStyles(spotTypeKey);
+  // 種別の対象地域スコープ。地域タブの名称(都道府県/州・県/国)と並び順に使う
+  const regionScope = useRegionScope(spotTypeKey) ?? DEFAULT_REGION_SCOPE;
+  const regionLabel = regionFieldLabel(regionScope);
   const [privateSpots, setPrivateSpots] = useState<Spot[]>([]);
   const spots = useMemo(
     () => [...(spotCache.publicSpots ?? []), ...privateSpots],
@@ -356,7 +364,8 @@ export default function SpotsView({
       .sort((a, b) => (b.visited_on ?? "").localeCompare(a.visited_on ?? ""));
   }, [visits, spotById]);
 
-  /** 都道府県ごとの件数(登録があるものだけ、JIS順) */
+  /** 地域(都道府県/州・県/国)ごとの件数。登録がある地域だけを、'jp'はJIS順・
+   * それ以外は五十音順に並べる(スコープ外の値も消さず末尾に出す。compareRegions参照) */
   const prefectureRows = useMemo(() => {
     const counts = new Map<string, { total: number; visited: number }>();
     for (const spot of spots) {
@@ -365,11 +374,10 @@ export default function SpotsView({
       if (visitedIds.has(spot.id)) row.visited += 1;
       counts.set(spot.prefecture, row);
     }
-    return PREFECTURES.filter((p) => counts.has(p)).map((p) => ({
-      prefecture: p,
-      ...counts.get(p)!,
-    }));
-  }, [spots, visitedIds]);
+    return Array.from(counts.keys())
+      .sort((a, b) => compareRegions(a, b, regionScope))
+      .map((p) => ({ prefecture: p, ...counts.get(p)! }));
+  }, [spots, visitedIds, regionScope]);
 
   const filteredSpots = useMemo(() => {
     const list = spots.filter((s) => {
@@ -611,7 +619,9 @@ export default function SpotsView({
           <section>
             <div className="mb-4 flex items-center justify-between">
               <h1 className="text-lg font-bold">
-                {browseMode === "prefecture" ? "都道府県から探す" : "ランクから探す"}
+                {browseMode === "prefecture"
+                  ? `${regionLabel}から探す`
+                  : "ランクから探す"}
               </h1>
               <div className="flex overflow-hidden rounded-lg border border-gray-300 text-xs">
                 <button
@@ -634,7 +644,7 @@ export default function SpotsView({
                       : "bg-white text-gray-500"
                   }`}
                 >
-                  都道府県
+                  {regionLabel}
                 </button>
               </div>
             </div>
@@ -675,7 +685,7 @@ export default function SpotsView({
                     type="search"
                     value={managementSearchInput}
                     onChange={(e) => setManagementSearchInput(e.target.value)}
-                    placeholder="名前・都道府県で検索"
+                    placeholder={`名前・${regionLabel}で検索`}
                     className="min-w-40 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
                   />
                   <button
@@ -790,7 +800,7 @@ export default function SpotsView({
           onClick={() => setSelectedPref(null)}
           className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-600"
         >
-          ← 都道府県
+          ← {regionLabel}
         </button>
         <h1 className="text-lg font-bold">{selectedPref}</h1>
       </div>

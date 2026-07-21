@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserId } from "@/lib/auth/current-user";
+import { DEFAULT_REGION_SCOPE, isValidRegionScope } from "@/lib/region";
 
 interface NominatimResult {
   display_name: string;
@@ -19,14 +20,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "q is required" }, { status: 400 });
   }
 
-  const url =
-    "https://nominatim.openstreetmap.org/search?" +
-    new URLSearchParams({
-      q,
-      format: "json",
-      limit: "5",
-      countrycodes: "jp",
-    });
+  // スポット種別の対象地域スコープ(region_scope)に応じて検索対象の国を絞る。
+  // 'world'は絞り込みなし、国コードはその国のみ、未指定・不正値は従来どおり日本のみ
+  const scopeParam = searchParams.get("scope");
+  const scope =
+    scopeParam && isValidRegionScope(scopeParam) ? scopeParam : DEFAULT_REGION_SCOPE;
+
+  const params = new URLSearchParams({
+    q,
+    format: "json",
+    limit: "5",
+    "accept-language": "ja",
+  });
+  if (scope !== "world") params.set("countrycodes", scope);
+
+  const url = "https://nominatim.openstreetmap.org/search?" + params;
 
   const res = await fetch(url, {
     headers: {

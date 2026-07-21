@@ -61,6 +61,8 @@ export interface Spot {
   spot_type_id: string;
   name: string;
   name_kana: string | null;
+  /** 地域。種別のregion_scope設定により意味が変わる(日本=都道府県、
+   * 国指定=州・県、世界=国。lib/region.ts参照)。列名は歴史的にprefectureのまま */
   prefecture: string;
   municipality: string | null;
   lat: number;
@@ -135,14 +137,16 @@ export function getSpotTypeSetting(
  * スポット種別を管理画面からJSONファイルで一括作成するための定義ファイル形式。
  * travel-log-data(例: `<スポットキー>/settings.json`)にスポットデータのCSVと並べて置く想定
  * (詳細はtravel-log-data/README.md参照)。settingsは省略したキーが既定値のまま
- * (SPOT_TYPE_SETTING_DEFAULTS)になる点はDBのEAV設計と同じ。
+ * (SPOT_TYPE_SETTING_DEFAULTS)になる点はDBのEAV設計と同じ。boolean設定のほか、
+ * region_scope('jp'/国コード/'world')・wikipedia_lang('en'等)のような文字列値の
+ * 設定もそのまま指定できる(妥当性はPATCH /api/spot-types/[id]側で検証される)。
  * ranksを省略した場合(または画面から手入力で種別を追加した場合)は観光地の
  * A〜E(DEFAULT_RANK_STYLES、lib/rankStyle.ts参照)がそのまま既定のランク設定になる。
  */
 export interface SpotTypeDefinitionFile {
   key: string;
   label: string;
-  settings?: Partial<Record<string, boolean>>;
+  settings?: Partial<Record<string, boolean | string>>;
   ranks?: RankStyleDefinition[];
 }
 
@@ -165,8 +169,10 @@ export function parseSpotTypeDefinition(
       return { error: "settingsはオブジェクトである必要があります。" };
     }
     for (const [k, v] of Object.entries(obj.settings as Record<string, unknown>)) {
-      if (typeof v !== "boolean") {
-        return { error: `settings.${k}はtrue/falseである必要があります。` };
+      if (typeof v !== "boolean" && typeof v !== "string") {
+        return {
+          error: `settings.${k}はtrue/falseまたは文字列である必要があります。`,
+        };
       }
     }
   }
@@ -182,7 +188,9 @@ export function parseSpotTypeDefinition(
     data: {
       key: obj.key.trim(),
       label: obj.label.trim(),
-      settings: obj.settings as Partial<Record<string, boolean>> | undefined,
+      settings: obj.settings as
+        | Partial<Record<string, boolean | string>>
+        | undefined,
       ranks: obj.ranks as RankStyleDefinition[] | undefined,
     },
   };
@@ -296,6 +304,11 @@ export const REVIEWS_PAGE_SIZE = 10;
 
 export const SPOTS_PAGE_SIZE = 50;
 
+/**
+ * 47都道府県(JIS X 0401順)。region_scopeが'jp'(既定)のスポット種別でのみ
+ * 「地域の全集合」として使う(入力セレクトの選択肢・一覧の並び順)。
+ * 'jp'以外のスコープでは地域は自由入力で、このリストは参照しない(lib/region.ts参照)
+ */
 export const PREFECTURES = [
   "北海道",
   "青森県",

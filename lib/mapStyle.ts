@@ -28,5 +28,9 @@ export const osmStyle: StyleSpecification = {
 export const JAPAN_CENTER: [number, number] = [137.0, 37.5];
 export const JAPAN_ZOOM = 4.5;
 
+/** region_scopeが'jp'以外の種別で、スポット未取得時に出す世界全体の初期表示 */
+export const WORLD_CENTER: [number, number] = [20.0, 20.0];
+export const WORLD_ZOOM = 1.3;
+
 /** 現在地取得後にズームインする際のズームレベル */
 export const CURRENT_LOCATION_ZOOM = 14;

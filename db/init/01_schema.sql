@@ -17,11 +17,14 @@ create table spot_types (
 );
 
 -- =============================================================
--- spot_type_settings: スポット種別ごとのON/OFF設定をkey/valueで持つ
+-- spot_type_settings: スポット種別ごとの設定をkey/valueで持つ
 -- (口コミ・Wikipediaリンク・閲覧を管理者以外不可にするなど)。設定を追加するたびに
--- spot_types に列を増やさずに済むよう、EAV形式にしてある。値は現状すべてboolean相当を
--- 'true'/'false'の文字列で保存する(既知のキー・既定値・表示名は
--- lib/types.ts の SPOT_TYPE_SETTING_DEFAULTS/SPOT_TYPE_SETTING_LABELS 参照)。
+-- spot_types に列を増やさずに済むよう、EAV形式にしてある。値はboolean相当を
+-- 'true'/'false'の文字列で保存するもの(既知のキー・既定値・表示名は
+-- lib/types.ts の SPOT_TYPE_SETTING_DEFAULTS/SPOT_TYPE_SETTING_LABELS 参照)のほか、
+-- 文字列値のキーもある: rank_styles(ランク定義のJSON、lib/rankStyle.ts)、
+-- region_scope(対象地域 'jp'/国コード/'world')・wikipedia_lang(言語コード。
+-- いずれも lib/region.ts 参照)。
 -- 行が存在しないキーは設定ごとの既定値として扱う(設定により既定値は異なる)。
 -- かつて存在した spot_types.visibility 列(public/admin_only/disabled の3値)は廃止し、
 -- admin_only設定(true/false)に一本化した。disabled相当(誰にも見せない)は、
@@ -75,6 +78,8 @@ create table spots (
   spot_type_id  uuid not null references spot_types (id),
   name          text not null,
   name_kana     text,
+  -- 地域。種別のregion_scope設定により意味が変わる(既定'jp'=都道府県、
+  -- 国コード指定=その国の州・県、'world'=国名)。列名は歴史的にprefectureのまま
   prefecture    text not null,
   municipality  text,
   lat           double precision not null,
