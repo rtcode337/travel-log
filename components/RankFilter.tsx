@@ -1,7 +1,12 @@
 "use client";
 
 import type { Rank } from "@/lib/types";
-import { autoTextColor, findRankStyle, type RankStyleDefinition } from "@/lib/rankStyle";
+import {
+  autoTextColor,
+  findRankStyle,
+  isImageLabel,
+  type RankStyleDefinition,
+} from "@/lib/rankStyle";
 
 /** ランクの選択肢がこれを超える種別(放送回番号など)はボタン列を並べきれないためselectにする */
 export const RANK_FILTER_BUTTONS_MAX = 12;
@@ -36,17 +41,21 @@ export default function RankFilter({
 }) {
   if (ranks.length === 0) return null;
 
+  // selectになるほど選択肢が多い種別(放送回番号等)では、HTMLの複数選択リスト
+  // (ctrl/cmdクリックが要る・常に数行分の高さを取る)より、見慣れた単一選択の
+  // プルダウンの方が使いやすいため、この場合だけ単一選択にする。横幅に余裕がある
+  // ため、labelではなくrankそのもの(短い略称ではなく完全な値)を選択肢に出す
   if (ranks.length > RANK_FILTER_BUTTONS_MAX) {
+    const ALL_VALUE = "";
     return (
       <select
-        multiple
-        value={selected}
+        value={selected.length === 1 ? selected[0] : ALL_VALUE}
         onChange={(e) =>
-          onChange(Array.from(e.target.selectedOptions, (o) => o.value as Rank))
+          onChange(e.target.value === ALL_VALUE ? [] : [e.target.value as Rank])
         }
-        size={Math.min(ranks.length, 6)}
         className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
       >
+        <option value={ALL_VALUE}>すべて</option>
         {ranks.map((r) => (
           <option key={r} value={r}>
             {r}
@@ -65,6 +74,7 @@ export default function RankFilter({
           <button
             key={r}
             type="button"
+            title={r}
             onClick={() => onChange(toggleSelection(selected, r))}
             style={
               active
@@ -78,7 +88,16 @@ export default function RankFilter({
               active ? "" : "text-gray-500 hover:bg-gray-50"
             }`}
           >
-            {r}
+            {isImageLabel(style.label) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={style.label.image}
+                alt={r}
+                className="mx-auto h-4 w-4 object-contain"
+              />
+            ) : (
+              style.label
+            )}
           </button>
         );
       })}
