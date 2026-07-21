@@ -51,10 +51,9 @@
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-初回起動時、Postgres コンテナが `db/init/` 配下(`01_schema.sql`=スキーマ一式、
-`02_tourist_spots.sh`=観光地データ全件(`tourist_spots.csv`)を読み込むラッパー)を
-自動実行してテーブルを作成する。他のスポット種別を追加したい場合は、
-後述の「外部データ(travel-log-data)」の通り管理画面から別途取り込む。
+初回起動時、Postgres コンテナが `db/init/01_schema.sql` を自動実行してテーブルと
+既定のスポット種別(`tourist`=観光地、データは空)を作成する。観光地データを含め、
+スポットデータは後述の「外部データ(travel-log-data)」の通り管理画面から別途取り込む。
 
 http://localhost:3000 を開くと `/login` にリダイレクトされる。初回はアカウントが
 存在しないため「アカウントを作成」フォームが表示されるので、メールアドレスと
@@ -65,9 +64,7 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 ローカルに Postgres を別途用意し、`.env.example` を `.env.local` としてコピーして
 `DATABASE_URL` / `SESSION_SECRET` を設定した上で `npm install && npm run dev` でも
-起動できる。その場合は `db/init/` 配下をファイル名の順(`01_`→`02_`)に手動で実行する
-(`02_tourist_spots.sh`はpsqlへの`-f`指定ではなくシェルスクリプトなので、
-そのまま実行するか、中身の`\copy`+`insert`を直接流し込む)。
+起動できる。その場合は `db/init/01_schema.sql` を手動で実行する。
 
 ## Googleログインの設定(任意)
 
@@ -176,19 +173,25 @@ JSONファイルをアップロードしても追加できる(travel-log-dataリ
 
 | 種別キー | 表示名 | 件数 | データソース・ランク基準 |
 |---|---|---|---|
-| `tourist` | 観光地 | 7,039件 | Wikipedia(ja)月次ページビュー数によるA〜E区分(詳細は次節)。全件`db/init/tourist_spots.csv`から`db/init/02_tourist_spots.sh`経由でアプリ初期化時に自動投入 |
+| `tourist` | 観光地 | 7,039件 | Wikipedia(ja)月次ページビュー数によるA〜E区分(詳細は次節)。データはtravel-log-dataリポジトリの`tourist/spots.csv`から管理画面のCSVインポートで取り込む(下記「外部データ(travel-log-data)」参照) |
 
 ## 外部データ(travel-log-data)
 
-容量の大きいスポットの初期データ(シード用CSV)は、travel-logリポジトリ本体には
-コミットせず、別リポジトリ[travel-log-data](https://github.com/rtcode337/travel-log-data)に
-`<スポットキー>/`フォルダ単位(例: `<スポットキー>/spots.csv`)で置く運用にできる。取り込みは
+スポットの初期データ(シード用CSV)は、travel-logリポジトリ本体にはコミットせず、
+別リポジトリ[travel-log-data](https://github.com/rtcode337/travel-log-data)に
+`<スポットキー>/`フォルダ単位(例: `<スポットキー>/spots.csv`)で置く運用にしている。取り込みは
 新しい仕組みを用意せず、下記「CSVインポート形式」の通り`/[type]/admin`の既存のCSVインポート
-機能をそのまま使う(自動取り込みの仕組みはない)。`tourist`だけは例外で、唯一の既定種別として
-アプリ初期化時に自動で入っている必要があるため、travel-log-data側の`tourist/spots.csv`と
-同内容をtravel-log本体の`db/init/tourist_spots.csv`にも複製し、`db/init/02_tourist_spots.sh`が
-自動投入する(手動CSVインポートは不要)。今後追加する種別はこの例外に倣わず、
-travel-log-data側のみに置いて手動CSVインポートで取り込む形に揃える。
+機能をそのまま使う(自動取り込みの仕組みはない)。`tourist`(観光地)も含め、全種別が
+この方式に統一されている。既定種別として`spot_types`の行自体はアプリ初期化時
+(`db/init/01_schema.sql`)に自動で作られるが、スポットデータは自動投入されないため、
+初回セットアップ後は`/tourist/admin`からtravel-log-dataの`tourist/spots.csv`を
+CSVインポートする必要がある。
+
+観光地(`tourist`)データの`description`列はWikipedia記事冒頭文の引用、`name`/`lat`/`lng`の
+一部はOpenStreetMapのデータを元に構成されているため、それぞれの利用許諾条件
+(Wikipedia: CC BY-SA 4.0、OpenStreetMap: ODbL)に基づく出典表示が必要(詳細は
+travel-log-data/README.md参照)。travel-logリポジトリ本体のMITライセンスは
+アプリのコードにのみ適用され、外部データリポジトリのデータには及ばない。
 
 ## CSVインポート形式
 
