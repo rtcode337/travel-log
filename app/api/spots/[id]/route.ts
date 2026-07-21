@@ -71,21 +71,19 @@ export async function PATCH(
 
   const { rows } = await query<Spot>(
     `update spots set
-      name = $1, name_kana = $2, prefecture = $3, municipality = $4,
-      lat = $5, lng = $6, rank = $7, category = $8, description = $9, official_url = $10
-     where id = $11
+      name = $1, name_kana = $2, region = $3,
+      lat = $4, lng = $5, rank = $6, category = $7, description = $8
+     where id = $9
      returning *`,
     [
       spot.name,
       spot.name_kana,
-      spot.prefecture,
-      spot.municipality,
+      spot.region,
       spot.lat,
       spot.lng,
       spot.rank,
       spot.category,
       spot.description,
-      spot.official_url,
       id,
     ]
   );

@@ -4,13 +4,13 @@ import { PREFECTURES, type SpotType } from "./types";
  * スポット種別ごとの「対象地域」設定(region_scope)。rank_stylesと同じく
  * boolean以外の値を持つためSpotTypeSettingKeyとは別扱いで、spot_type_settingsに
  * 文字列としてそのまま保存する。値は次の3種類:
- * - 'jp'(既定): 従来どおり日本。spots.prefecture には47都道府県が入り、
+ * - 'jp'(既定): 従来どおり日本。spots.region には47都道府県が入り、
  *   入力UIもPREFECTURESのセレクトボックスになる
  * - ISO 3166-1 alpha-2の国コード小文字('us'など): その国が対象。
- *   spots.prefecture にはその国の州・県(Nominatimのstate/province相当)が入る
- * - 'world': 世界全体が対象。spots.prefecture には国名が入る
- * いずれのスコープでもDB列は既存の spots.prefecture をそのまま使い、
- * 「この種別における地域区分」として読み替える(列名の変更・移行はしない)。
+ *   spots.region にはその国の州・県(Nominatimのstate/province相当)が入る
+ * - 'world': 世界全体が対象。spots.region には国名が入る
+ * いずれのスコープでも同じ spots.region 列を使い、「この種別における地域区分」
+ * として読み替える。
  */
 export const REGION_SCOPE_SETTING_KEY = "region_scope";
 export const DEFAULT_REGION_SCOPE = "jp";
@@ -51,7 +51,7 @@ export function resolveWikipediaLang(
 }
 
 /**
- * spots.prefecture列の「この種別での呼び名」。フォームのラベル・一覧の見出し等に使う
+ * spots.region列の「この種別での呼び名」。フォームのラベル・一覧の見出し等に使う
  * (国指定スコープの区分は国によって州・省・県などまちまちなため「州・県」で総称する)
  */
 export function regionFieldLabel(scope: string): string {

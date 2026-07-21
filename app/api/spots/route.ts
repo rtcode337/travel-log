@@ -64,7 +64,7 @@ export async function GET(request: Request) {
   const pageParam = searchParams.get("page");
   if (!pageParam) {
     const { rows } = await query<Spot>(
-      `select * from spots where ${baseConditions.join(" and ")} order by prefecture, name`,
+      `select * from spots where ${baseConditions.join(" and ")} order by region, name`,
       params
     );
     return NextResponse.json({ data: rows });
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
     listParams.push(`%${search}%`);
     const idx = listParams.length;
     conditions.push(
-      `(name ilike $${idx} or name_kana ilike $${idx} or prefecture ilike $${idx})`
+      `(name ilike $${idx} or name_kana ilike $${idx} or region ilike $${idx})`
     );
   }
 
@@ -100,7 +100,7 @@ export async function GET(request: Request) {
   const [{ rows: items }, { rows: countRows }, { rows: rankRows }] = await Promise.all([
     query<Spot>(
       `select * from spots where ${where}
-       order by coalesce(array_position($${rankOrderIdx}::text[], rank), 999999), prefecture, name
+       order by coalesce(array_position($${rankOrderIdx}::text[], rank), 999999), region, name
        limit $${rankOrderIdx + 1} offset $${rankOrderIdx + 2}`,
       [...rankOrderParams, SPOTS_PAGE_SIZE, (page - 1) * SPOTS_PAGE_SIZE]
     ),
@@ -124,14 +124,12 @@ export async function GET(request: Request) {
 interface SpotInput {
   name: string;
   name_kana: string | null;
-  prefecture: string;
-  municipality: string | null;
+  region: string;
   lat: number;
   lng: number;
   rank: string | null;
   category: string | null;
   description: string | null;
-  official_url: string | null;
 }
 
 // unnest()で複数行を1回のINSERTにまとめる(CSVインポート等、大量件数の
@@ -141,31 +139,27 @@ async function insertSpots(
   spotTypeId: string,
   records: SpotInput[],
   statuses: string[],
-  source: "manual" | "user_submitted",
   createdBy: string
 ) {
   const { rows } = await query<Spot>(
     `insert into spots
-      (spot_type_id, name, name_kana, prefecture, municipality, lat, lng, rank, category, description, official_url, source, status, created_by)
-     select $1, u.name, u.name_kana, u.prefecture, u.municipality, u.lat, u.lng, u.rank, u.category, u.description, u.official_url, $2, u.status, $3
-     from unnest($4::text[], $5::text[], $6::text[], $7::text[], $8::float8[], $9::float8[], $10::text[], $11::text[], $12::text[], $13::text[], $14::text[])
-       with ordinality as u(name, name_kana, prefecture, municipality, lat, lng, rank, category, description, official_url, status, ord)
+      (spot_type_id, name, name_kana, region, lat, lng, rank, category, description, status, created_by)
+     select $1, u.name, u.name_kana, u.region, u.lat, u.lng, u.rank, u.category, u.description, u.status, $2
+     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::text[], $11::text[])
+       with ordinality as u(name, name_kana, region, lat, lng, rank, category, description, status, ord)
      order by u.ord
      returning *`,
     [
       spotTypeId,
-      source,
       createdBy,
       records.map((r) => r.name),
       records.map((r) => r.name_kana),
-      records.map((r) => r.prefecture),
-      records.map((r) => r.municipality),
+      records.map((r) => r.region),
       records.map((r) => r.lat),
       records.map((r) => r.lng),
       records.map((r) => r.rank),
       records.map((r) => r.category),
       records.map((r) => r.description),
-      records.map((r) => r.official_url),
       statuses,
     ]
   );
@@ -200,7 +194,6 @@ export async function POST(request: Request) {
   // それに加えて公開も選べる(いずれも未指定なら user以外は承認待ち、userは非公開)
   const allowedStatuses = ALLOWED_STATUS_BY_ROLE[user.role];
   const defaultStatus = user.role === "user" ? "private" : "pending";
-  const source = SPOT_ADMIN_ROLES.includes(user.role) ? "manual" : "user_submitted";
 
   const body = await request.json();
   const records: (SpotInput & { status?: string })[] = Array.isArray(body)
@@ -219,7 +212,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const inserted = await insertSpots(spotType.id, records, statuses, source, user.id);
+    const inserted = await insertSpots(spotType.id, records, statuses, user.id);
     return NextResponse.json({ data: Array.isArray(body) ? inserted : inserted[0] });
   } catch (err) {
     return NextResponse.json(

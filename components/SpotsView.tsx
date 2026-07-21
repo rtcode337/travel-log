@@ -30,7 +30,7 @@ import { useRankStyles } from "@/lib/useRankStyles";
 import { useSpotCache } from "@/lib/useSpotCache";
 
 type SortKey = "rank" | "name" | "visited";
-type BrowseMode = "prefecture" | "rank";
+type BrowseMode = "region" | "rank";
 
 const STATUS_LABELS: Partial<Record<Spot["status"], string>> = {
   private: "非公開",
@@ -193,7 +193,7 @@ export default function SpotsView({
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [myReviews, setMyReviews] = useState<MyReview[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPref, setSelectedPref] = useState<string | null>(null);
+  const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
@@ -366,22 +366,22 @@ export default function SpotsView({
 
   /** 地域(都道府県/州・県/国)ごとの件数。登録がある地域だけを、'jp'はJIS順・
    * それ以外は五十音順に並べる(スコープ外の値も消さず末尾に出す。compareRegions参照) */
-  const prefectureRows = useMemo(() => {
+  const regionRows = useMemo(() => {
     const counts = new Map<string, { total: number; visited: number }>();
     for (const spot of spots) {
-      const row = counts.get(spot.prefecture) ?? { total: 0, visited: 0 };
+      const row = counts.get(spot.region) ?? { total: 0, visited: 0 };
       row.total += 1;
       if (visitedIds.has(spot.id)) row.visited += 1;
-      counts.set(spot.prefecture, row);
+      counts.set(spot.region, row);
     }
     return Array.from(counts.keys())
       .sort((a, b) => compareRegions(a, b, regionScope))
-      .map((p) => ({ prefecture: p, ...counts.get(p)! }));
+      .map((p) => ({ region: p, ...counts.get(p)! }));
   }, [spots, visitedIds, regionScope]);
 
   const filteredSpots = useMemo(() => {
     const list = spots.filter((s) => {
-      if (s.prefecture !== selectedPref) return false;
+      if (s.region !== selectedRegion) return false;
       return passesFilters(filters, s.rank, visitedIds.has(s.id));
     });
     list.sort((a, b) => {
@@ -404,7 +404,7 @@ export default function SpotsView({
       }
     });
     return list;
-  }, [spots, selectedPref, filters, visitedIds, sortKey, latestVisitDate, rankStyles]);
+  }, [spots, selectedRegion, filters, visitedIds, sortKey, latestVisitDate, rankStyles]);
 
   const plannedPager = usePagedItems(plannedSpots, CLIENT_PAGE_SIZE);
   const recentVisitsPager = usePagedItems(recentVisits, CLIENT_PAGE_SIZE);
@@ -414,7 +414,7 @@ export default function SpotsView({
   const { setPage: setFilteredPage } = filteredSpotsPager;
   useEffect(() => {
     setFilteredPage(1);
-  }, [selectedPref, filters, sortKey, setFilteredPage]);
+  }, [selectedRegion, filters, sortKey, setFilteredPage]);
 
   if (loading) {
     return (
@@ -425,7 +425,7 @@ export default function SpotsView({
   }
 
   // トップ画面: 2カラム(左=最近の訪問、右=都道府県別)
-  if (!selectedPref) {
+  if (!selectedRegion) {
     return (
       <>
       <main className="mx-auto max-w-4xl p-4">
@@ -455,10 +455,7 @@ export default function SpotsView({
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
-                          <p className="text-xs text-gray-500">
-                            {spot.prefecture}
-                            {spot.municipality && ` ${spot.municipality}`}
-                          </p>
+                          <p className="text-xs text-gray-500">{spot.region}</p>
                         </div>
                         <span className="shrink-0 text-xs text-gray-400">
                           {new Date(plan.created_at).toLocaleDateString("ja-JP")}
@@ -505,10 +502,7 @@ export default function SpotsView({
                         />
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-medium">{spot.name}</p>
-                              <p className="text-xs text-gray-500">
-                                {spot.prefecture}
-                                {spot.municipality && ` ${spot.municipality}`}
-                              </p>
+                              <p className="text-xs text-gray-500">{spot.region}</p>
                             </div>
                             <span className="shrink-0 text-xs text-gray-400">
                               {formatVisitedOn(visit.visited_on, visit.date_precision)}
@@ -549,10 +543,7 @@ export default function SpotsView({
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{review.spot_name}</p>
-                          <p className="text-xs text-gray-500">
-                            {review.spot_prefecture}
-                            {review.spot_municipality && ` ${review.spot_municipality}`}
-                          </p>
+                          <p className="text-xs text-gray-500">{review.spot_region}</p>
                           <p className="mt-1 line-clamp-2 text-sm text-gray-700">
                             {review.body}
                           </p>
@@ -595,10 +586,7 @@ export default function SpotsView({
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
-                          <p className="text-xs text-gray-500">
-                            {spot.prefecture}
-                            {spot.municipality && ` ${spot.municipality}`}
-                          </p>
+                          <p className="text-xs text-gray-500">{spot.region}</p>
                         </div>
                         <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
                           非公開
@@ -619,7 +607,7 @@ export default function SpotsView({
           <section>
             <div className="mb-4 flex items-center justify-between">
               <h1 className="text-lg font-bold">
-                {browseMode === "prefecture"
+                {browseMode === "region"
                   ? `${regionLabel}から探す`
                   : "ランクから探す"}
               </h1>
@@ -637,9 +625,9 @@ export default function SpotsView({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setBrowseMode("prefecture")}
+                  onClick={() => setBrowseMode("region")}
                   className={`px-2.5 py-1 font-medium ${
-                    browseMode === "prefecture"
+                    browseMode === "region"
                       ? "bg-blue-600 text-white"
                       : "bg-white text-gray-500"
                   }`}
@@ -649,16 +637,16 @@ export default function SpotsView({
               </div>
             </div>
 
-            {browseMode === "prefecture" ? (
+            {browseMode === "region" ? (
               <>
                 <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-                  {prefectureRows.map((row) => (
-                    <li key={row.prefecture}>
+                  {regionRows.map((row) => (
+                    <li key={row.region}>
                       <button
-                        onClick={() => setSelectedPref(row.prefecture)}
+                        onClick={() => setSelectedRegion(row.region)}
                         className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
                       >
-                        <span className="font-medium">{row.prefecture}</span>
+                        <span className="font-medium">{row.region}</span>
                         <span className="text-sm text-gray-500">
                           <span className="mr-2 text-green-600">
                             ✓ {row.visited}
@@ -669,7 +657,7 @@ export default function SpotsView({
                     </li>
                   ))}
                 </ul>
-                {prefectureRows.length === 0 && (
+                {regionRows.length === 0 && (
                   <p className="text-sm text-gray-500">
                     スポットが未登録です。地図から追加してください。
                   </p>
@@ -741,7 +729,7 @@ export default function SpotsView({
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{spot.name}</p>
                             <p className="text-xs text-gray-500">
-                              {spot.prefecture} ・ {spot.category}
+                              {spot.region} ・ {spot.category}
                             </p>
                           </div>
                           {spot.status !== "published" && (
@@ -797,17 +785,17 @@ export default function SpotsView({
     <main className="mx-auto max-w-lg p-4">
       <div className="mb-3 flex items-center gap-2">
         <button
-          onClick={() => setSelectedPref(null)}
+          onClick={() => setSelectedRegion(null)}
           className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-600"
         >
           ← {regionLabel}
         </button>
-        <h1 className="text-lg font-bold">{selectedPref}</h1>
+        <h1 className="text-lg font-bold">{selectedRegion}</h1>
       </div>
 
       <div className="mb-3 space-y-2">
         <FilterBar
-          spots={spots.filter((s) => s.prefecture === selectedPref)}
+          spots={spots.filter((s) => s.region === selectedRegion)}
           filters={filters}
           onChange={setFilters}
           rankStyles={rankStyles}
@@ -846,10 +834,7 @@ export default function SpotsView({
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{spot.name}</p>
-                <p className="text-xs text-gray-500">
-                  {spot.municipality && `${spot.municipality} ・ `}
-                  {spot.category}
-                </p>
+                <p className="text-xs text-gray-500">{spot.category}</p>
               </div>
               {spot.status === "private" && (
                 <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">

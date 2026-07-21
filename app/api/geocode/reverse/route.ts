@@ -8,10 +8,6 @@ interface NominatimReverseResult {
     country?: string;
     state?: string;
     province?: string;
-    city?: string;
-    city_district?: string;
-    town?: string;
-    village?: string;
     county?: string;
     "ISO3166-2-lvl4"?: string;
   };
@@ -37,7 +33,7 @@ function resolveJpPrefecture(
 }
 
 /**
- * スポット種別の対象地域スコープ(region_scope)に応じて、spots.prefecture列に
+ * スポット種別の対象地域スコープ(region_scope)に応じて、spots.region列に
  * 入れる「地域」を解決する。'jp'=都道府県、'world'=国名、国コード=州・県
  * (国により state/province/county のどれで返るかまちまちなため順に試す)
  */
@@ -90,11 +86,6 @@ export async function GET(request: Request) {
   const address = result.address ?? {};
 
   return NextResponse.json({
-    data: {
-      region: resolveRegion(address, scope),
-      // 東京23区は city_district(区)、それ以外は city/town/village のどれかに入る
-      municipality:
-        address.city_district ?? address.city ?? address.town ?? address.village ?? null,
-    },
+    data: { region: resolveRegion(address, scope) },
   });
 }

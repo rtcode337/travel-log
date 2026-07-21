@@ -39,14 +39,12 @@ const CSV_IMPORT_CHUNK_SIZE = 1000;
 const CSV_COLUMNS = [
   "name",
   "name_kana",
-  "prefecture",
-  "municipality",
+  "region",
   "lat",
   "lng",
   "rank",
   "category",
   "description",
-  "official_url",
 ] as const;
 
 export default function AdminView({ typeKey }: { typeKey: string }) {
@@ -448,16 +446,13 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     }
   };
 
-  // name+prefecture+lat+lng の完全一致を「同じスポット」とみなす差分更新用のキー。
-  // municipalityは使わない — 種別によっては同一市区町村内に同名のスポットが
-  // 複数あることも珍しくなく、name+prefecture+municipalityだと別スポットを
-  // 誤って同一視してしまうため
+  // name+region+lat+lng の完全一致を「同じスポット」とみなす差分更新用のキー
   const spotDiffKey = (
     name: string,
-    prefecture: string,
+    region: string,
     lat: number,
     lng: number
-  ) => `${name}|${prefecture}|${lat}|${lng}`;
+  ) => `${name}|${region}|${lat}|${lng}`;
 
   const handleCsvFile = async (file: File) => {
     setImporting(true);
@@ -473,7 +468,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
       const idx = Object.fromEntries(
         CSV_COLUMNS.map((c) => [c, header.indexOf(c)])
       ) as Record<(typeof CSV_COLUMNS)[number], number>;
-      for (const required of ["name", "prefecture", "lat", "lng"] as const) {
+      for (const required of ["name", "region", "lat", "lng"] as const) {
         if (idx[required] === -1) {
           setMessage(`CSVヘッダーに ${required} 列がありません。`);
           return;
@@ -496,14 +491,12 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
           records.push({
             name: get("name"),
             name_kana: get("name_kana") || null,
-            prefecture: get("prefecture"),
-            municipality: get("municipality") || null,
+            region: get("region"),
             lat,
             lng,
             rank,
             category,
             description: get("description") || null,
-            official_url: get("official_url") || null,
             // CSVインポートはこのページ(spot_admin/admin専用)からのみ行えるため、
             // 承認待ちを経由せずそのまま公開する
             status: "published",
@@ -519,12 +512,12 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
       // 差分更新: 既に(status問わず)このスポット種別に存在する行、およびCSV内で
       // 重複している行はスキップし、新規分だけ追加する
       const existingKeys = new Set(
-        spots.map((s) => spotDiffKey(s.name, s.prefecture, s.lat, s.lng))
+        spots.map((s) => spotDiffKey(s.name, s.region, s.lat, s.lng))
       );
       const seenKeys = new Set<string>();
       const newRecords = [];
       for (const record of records) {
-        const key = spotDiffKey(record.name, record.prefecture, record.lat, record.lng);
+        const key = spotDiffKey(record.name, record.region, record.lat, record.lng);
         if (existingKeys.has(key) || seenKeys.has(key)) continue;
         seenKeys.add(key);
         newRecords.push(record);
@@ -697,7 +690,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                   autoComplete="off"
                   value={newUserNickname}
                   onChange={(e) => setNewUserNickname(e.target.value)}
-                  placeholder="口コミ等に表示する名前(未設定ならメールアドレス)"
+                  placeholder="口コミ等に表示する名前(未設定なら「匿名」)"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 />
               </div>
@@ -841,7 +834,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
               <p className="mb-3 text-xs text-gray-500">
                 個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
                 ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは最初から公開される)。
-                差分更新: name+prefecture+lat+lngが完全一致するスポットが既に
+                差分更新: name+region+lat+lngが完全一致するスポットが既に
                 (status問わず)存在する行はスキップし、新規分だけ追加するため、同じCSVを
                 何度アップロードしても重複登録されない。
               </p>
@@ -896,8 +889,8 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
               </div>
 
               <p className="mt-2 text-xs text-gray-400">
-                CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。
-                prefecture列にはこの種別の地域(
+                CSV列: {CSV_COLUMNS.join(", ")}(name, region, lat, lng は必須。
+                region列にはこの種別の地域(
                 {regionFieldLabel(currentRegionScope)})を入れる。
                 rank/categoryは自由入力で空でも可)
               </p>

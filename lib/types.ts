@@ -62,16 +62,13 @@ export interface Spot {
   name: string;
   name_kana: string | null;
   /** 地域。種別のregion_scope設定により意味が変わる(日本=都道府県、
-   * 国指定=州・県、世界=国。lib/region.ts参照)。列名は歴史的にprefectureのまま */
-  prefecture: string;
-  municipality: string | null;
+   * 国指定=州・県、世界=国。lib/region.ts参照) */
+  region: string;
   lat: number;
   lng: number;
   rank: Rank | null;
   category: Category | null;
   description: string | null;
-  official_url: string | null;
-  source: "manual" | "opendata" | "user_submitted";
   status: SpotStatus;
   created_by: string | null;
   created_at: string;
@@ -255,12 +252,11 @@ export interface Visit {
 }
 
 /**
- * visits.photosの1要素を<img src>用のURLにする。現行データはphotosフォルダ内の
- * 相対パス(認証付きの/api/photos/経由で配信)。ファイル保存方式へ移行する前の
- * 旧データ(Base64のdata URL)がDBに残っていることがあり、それはそのまま使う
+ * visits.photosの1要素(photosフォルダ内の相対パス)を<img src>用のURLにする。
+ * 実体の配信は認証付きの/api/photos/経由
  */
 export function visitPhotoSrc(photo: string): string {
-  return photo.startsWith("data:") ? photo : `/api/photos/${photo}`;
+  return `/api/photos/${photo}`;
 }
 
 /** 訪問予定(行きたい場所のブックマーク)。訪問を記録すると自動で消える */
@@ -295,8 +291,7 @@ export interface MyReview {
   body: string;
   created_at: string;
   spot_name: string;
-  spot_prefecture: string;
-  spot_municipality: string | null;
+  spot_region: string;
   spot_rank: Rank | null;
 }
 

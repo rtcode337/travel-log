@@ -20,8 +20,5 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-# standalone出力はnext buildが実際にimportしたファイルしか含まないため、管理画面の
-# 「SQLシードとの同期」機能(lib/sqlSeed.tsがfsで直接読む)向けに db/init を別途コピーする
-COPY --from=builder /app/db/init ./db/init
 EXPOSE 3000
 CMD ["node", "server.js"]

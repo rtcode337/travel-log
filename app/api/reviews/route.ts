@@ -29,8 +29,7 @@ export async function GET(request: Request) {
     }
     const { rows } = await query<MyReview>(
       `select r.id, r.spot_id, r.body, r.created_at,
-         s.name as spot_name, s.prefecture as spot_prefecture,
-         s.municipality as spot_municipality, s.rank as spot_rank
+         s.name as spot_name, s.region as spot_region, s.rank as spot_rank
        from reviews r
        join spots s on s.id = r.spot_id
        where r.user_id = $1 and s.spot_type_id = $2
@@ -48,7 +47,7 @@ export async function GET(request: Request) {
 
   const [{ rows }, { rows: countRows }] = await Promise.all([
     query<PublicReview>(
-      `select r.id, r.body, r.created_at, coalesce(u.nickname, u.email) as user_name
+      `select r.id, r.body, r.created_at, coalesce(nullif(u.nickname, ''), '匿名') as user_name
        from reviews r
        join users u on u.id = r.user_id
        where r.spot_id = $1 and r.visibility = 'public'

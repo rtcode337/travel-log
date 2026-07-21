@@ -4,7 +4,7 @@ import type { Spot } from "@/lib/types";
 
 /**
  * 公開スポットのキャッシュに保存するのは、地図のピン・一覧・絞り込み・重複チェックが
- * 実際に読むフィールドだけに絞る。詳細(description/official_url など)はスポットを
+ * 実際に読むフィールドだけに絞る。詳細(description など)はスポットを
  * 開いたときに api.spots.get で個別に取り直すので、キャッシュには持たせない。
  * spot_type_id も種別ごとにストア上のキーを分けているため保存不要。
  * これにより数万件規模の大規模データでも保存サイズを抑えられる
@@ -15,8 +15,7 @@ export type CachedSpot = Pick<
   | "id"
   | "name"
   | "name_kana"
-  | "prefecture"
-  | "municipality"
+  | "region"
   | "lat"
   | "lng"
   | "rank"
@@ -35,8 +34,7 @@ export function trimSpot(spot: Spot): CachedSpot {
     id: spot.id,
     name: spot.name,
     name_kana: spot.name_kana,
-    prefecture: spot.prefecture,
-    municipality: spot.municipality,
+    region: spot.region,
     lat: spot.lat,
     lng: spot.lng,
     rank: spot.rank,
@@ -55,8 +53,6 @@ export function expandSpot(spot: CachedSpot): Spot {
     ...spot,
     spot_type_id: "",
     description: null,
-    official_url: null,
-    source: "manual",
     created_by: null,
     created_at: "",
     updated_at: "",
@@ -65,9 +61,11 @@ export function expandSpot(spot: CachedSpot): Spot {
 
 const DB_NAME = "travel-log";
 // 検証中に一時的にストア名を"public-spots-v2"へ切り替える版(DB_VERSION=2)を
-// 配ってしまったことがあるため、それを開いたブラウザより確実に前進するよう3にする
+// 配ってしまったことがあるため、それを開いたブラウザより確実に前進するよう3にした
 // (IndexedDBはバージョンを後退できず、既存より低いバージョンでopenすると失敗する)。
-const DB_VERSION = 3;
+// 4はCachedSpotの形が変わった(prefecture/municipality → region)ためのもので、
+// 旧形式のまま残っているエントリを読ませないようupgrade時にストアごと作り直す。
+const DB_VERSION = 4;
 const STORE = "public-spots"; // 値のキーはtypeKey
 const TEMP_V2_STORE = "public-spots-v2"; // 上記の一時版が作ったストア(残っていれば削除)
 const LEGACY_PREFIX = "travel-log:public-spots:"; // 旧localStorage方式のキー接頭辞
@@ -84,10 +82,13 @@ function openDb(): Promise<IDBDatabase> {
       if (db.objectStoreNames.contains(TEMP_V2_STORE)) {
         db.deleteObjectStore(TEMP_V2_STORE);
       }
-      if (!db.objectStoreNames.contains(STORE)) {
-        // keyPathは持たせず、typeKeyを外部キーにしてput/getする
-        db.createObjectStore(STORE);
+      // 旧バージョンのエントリはCachedSpotの形が違うので中身ごと捨てる
+      // (次回アクセス時に /api/spots から取り直される)
+      if (db.objectStoreNames.contains(STORE)) {
+        db.deleteObjectStore(STORE);
       }
+      // keyPathは持たせず、typeKeyを外部キーにしてput/getする
+      db.createObjectStore(STORE);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -98,9 +99,7 @@ export async function readSpotCacheDb(
   typeKey: string
 ): Promise<StoredSpotCache | null> {
   if (!idbAvailable()) return null;
-  // 旧localStorage方式のキャッシュが残っていれば、初回に一度だけIndexedDBへ引き継ぐ
-  const migrated = await migrateLegacy(typeKey);
-  if (migrated) return migrated;
+  clearLegacyCache(typeKey);
   try {
     const db = await openDb();
     return await new Promise<StoredSpotCache | null>((resolve, reject) => {
@@ -135,38 +134,15 @@ export async function writeSpotCacheDb(
 }
 
 /**
- * 旧localStorage方式(種別ごとに1つのJSON文字列)のキャッシュをIndexedDBへ移行する。
- * 移行後は元のlocalStorageキーを削除して二度目以降は素通りさせる。
+ * 旧localStorage方式(種別ごとに1つのJSON文字列)のキャッシュを掃除する。
+ * 中身はprefecture/municipality時代の形なので引き継がず、キーを消すだけにして
+ * /api/spots から取り直させる。
  */
-async function migrateLegacy(typeKey: string): Promise<StoredSpotCache | null> {
-  if (typeof localStorage === "undefined") return null;
-  const key = LEGACY_PREFIX + typeKey;
-  let raw: string | null;
+function clearLegacyCache(typeKey: string): void {
+  if (typeof localStorage === "undefined") return;
   try {
-    raw = localStorage.getItem(key);
+    localStorage.removeItem(LEGACY_PREFIX + typeKey);
   } catch {
-    return null;
-  }
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as { downloadedAt?: string; spots?: Spot[] };
-    if (!parsed.spots) {
-      localStorage.removeItem(key);
-      return null;
-    }
-    const entry: StoredSpotCache = {
-      downloadedAt: parsed.downloadedAt ?? new Date().toISOString(),
-      spots: parsed.spots.map(trimSpot),
-    };
-    await writeSpotCacheDb(typeKey, entry);
-    localStorage.removeItem(key);
-    return entry;
-  } catch {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // 破損データの掃除に失敗しても実害はないので無視する
-    }
-    return null;
+    // 掃除に失敗しても実害はないので無視する
   }
 }

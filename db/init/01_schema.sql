@@ -63,7 +63,7 @@ create table users (
   password_hash text,
   google_id     text unique,
   role          text not null default 'user' check (role in ('admin', 'spot_admin', 'moderator', 'user')),
-  nickname      text, -- 口コミ等に表示する表示名(未設定ならメールアドレスを使う)
+  nickname      text, -- 口コミ等に表示する表示名(未設定なら「匿名」と表示。メールアドレスは出さない)
   created_at    timestamptz not null default now(),
   constraint users_has_login_method check (password_hash is not null or google_id is not null)
 );
@@ -79,18 +79,13 @@ create table spots (
   name          text not null,
   name_kana     text,
   -- 地域。種別のregion_scope設定により意味が変わる(既定'jp'=都道府県、
-  -- 国コード指定=その国の州・県、'world'=国名)。列名は歴史的にprefectureのまま
-  prefecture    text not null,
-  municipality  text,
+  -- 国コード指定=その国の州・県、'world'=国名)
+  region        text not null,
   lat           double precision not null,
   lng           double precision not null,
   rank          text,
   category      text,
   description   text,
-  official_url  text,
-  source        text not null default 'manual' check (
-    source in ('manual', 'opendata', 'user_submitted')
-  ),
   -- private: 誰でも作成できる非公開スポット。作成者本人にしか見えず、口コミも使えない
   status        text not null default 'published' check (
     status in ('published', 'pending', 'rejected', 'private')
@@ -100,7 +95,7 @@ create table spots (
   updated_at    timestamptz not null default now()
 );
 
-create index spots_prefecture_idx on spots (prefecture);
+create index spots_region_idx on spots (region);
 create index spots_rank_idx on spots (rank);
 create index spots_spot_type_id_idx on spots (spot_type_id);
 
@@ -132,8 +127,7 @@ create table visits (
   ),
   memo           text,
   -- photosフォルダ(docker-composeでbindマウント)内の相対パス
-  -- 「<ユーザーID>/<年>/<月>/<uuid>.<拡張子>」を保存する(lib/photos.ts参照)。
-  -- 旧方式のBase64 data URLが残っている場合はscripts/migrate-photos-to-files.mjsで移行する
+  -- 「<ユーザーID>/<年>/<月>/<uuid>.<拡張子>」を保存する(lib/photos.ts参照)
   photos         text[] not null default '{}',
   created_at     timestamptz not null default now()
 );

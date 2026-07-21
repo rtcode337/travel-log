@@ -92,17 +92,16 @@ async function fetchWikiSummary(lang: string, title: string): Promise<WikiSummar
 }
 
 /**
- * 曖昧さ回避ページのリンク先から、スポット名を含みかつ所在地(市区町村→都道府県の順)
- * も一致するタイトルを選ぶ(曖昧さ回避ページは大抵「〇〇 (△△市)」のように所在地を
- * 括弧書きしたリンクを列挙しているが、市区町村名単体へのリンクも別途混ざっているため、
- * スポット名を含まないリンク=「伊勢原市」のような市区町村ページ自体は候補から除く)
+ * 曖昧さ回避ページのリンク先から、スポット名を含みかつ地域も一致するタイトルを選ぶ
+ * (曖昧さ回避ページは大抵「〇〇 (△△市)」のように所在地を括弧書きしたリンクを
+ * 列挙しているが、地名単体へのリンクも別途混ざっているため、スポット名を含まない
+ * リンク=「伊勢原市」のような地名ページ自体は候補から除く)
  */
 async function resolveDisambiguation(
   lang: string,
   disambigTitle: string,
   spotName: string,
-  prefecture: string,
-  municipality: string | null
+  region: string
 ): Promise<string | null> {
   const url =
     `https://${lang}.wikipedia.org/w/api.php?action=query&prop=links&pllimit=500&plnamespace=0&format=json&formatversion=2&origin=*&titles=` +
@@ -114,10 +113,8 @@ async function resolveDisambiguation(
   const candidates = json.query?.pages?.[0]?.links?.filter((l) =>
     coreOf(l.title).includes(core)
   ) ?? [];
-  const byMunicipality =
-    municipality && candidates.find((l) => l.title.includes(municipality));
-  const byPrefecture = candidates.find((l) => l.title.includes(prefecture));
-  return (byMunicipality || byPrefecture || candidates[0])?.title ?? null;
+  const byRegion = candidates.find((l) => l.title.includes(region));
+  return (byRegion || candidates[0])?.title ?? null;
 }
 
 /**
@@ -127,15 +124,13 @@ async function resolveDisambiguation(
  */
 export default function SpotInfoModal({
   spotName,
-  prefecture,
-  municipality,
+  region,
   lang,
   onClose,
 }: {
   spotName: string;
   /** 地域(都道府県/州・県/国)。表示と曖昧さ回避ページの解決に使う */
-  prefecture: string;
-  municipality: string | null;
+  region: string;
   /** 参照するWikipediaの言語版(サブドメイン)。例: 'ja'、'en' */
   lang: string;
   onClose: () => void;
@@ -163,8 +158,7 @@ export default function SpotInfoModal({
             lang,
             title,
             spotName,
-            prefecture,
-            municipality
+            region
           );
           if (resolvedTitle) data = await fetchWikiSummary(lang, resolvedTitle);
           else data = { ...data, extract: "" }; // 解決できなければ「見つからなかった」扱い
@@ -180,7 +174,7 @@ export default function SpotInfoModal({
     return () => {
       cancelled = true;
     };
-  }, [spotName, prefecture, municipality, lang]);
+  }, [spotName, region, lang]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -210,10 +204,7 @@ export default function SpotInfoModal({
             <h2 className="font-bold leading-tight">
               {summary?.title ?? spotName}
             </h2>
-            <p className="text-xs text-gray-500">
-              {prefecture}
-              {municipality && ` ${municipality}`}
-            </p>
+            <p className="text-xs text-gray-500">{region}</p>
           </div>
           <button
             onClick={onClose}
