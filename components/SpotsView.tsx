@@ -119,6 +119,10 @@ function Pager({
  * (ランクから探すタブはサーバー側ページング(SPOTS_PAGE_SIZE)を使うため対象外) */
 const CLIENT_PAGE_SIZE = 50;
 
+/** 「ランクから探す」のランク切り替えをボタン列で出す上限。これを超える種別
+ * (ランク=放送回番号のように値が多い種別)はセレクトボックスに切り替える */
+const MANAGEMENT_RANK_BUTTONS_MAX = 12;
+
 /** 手元に持っている配列(取得済み・全件)をクライアント側でページ分割する */
 function usePagedItems<T>(items: T[], pageSize: number) {
   const [page, setPage] = useState(1);
@@ -686,7 +690,23 @@ export default function SpotsView({
                     検索
                   </button>
                 </form>
-                {managementAvailableRanks.length > 0 && (
+                {managementAvailableRanks.length > MANAGEMENT_RANK_BUTTONS_MAX ? (
+                  // ランクが多い種別(放送回番号など)はボタンを並べきれないのでセレクトにする
+                  <select
+                    value={managementRank}
+                    onChange={(e) =>
+                      handleManagementRankChange(e.target.value as Rank | "all")
+                    }
+                    className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
+                  >
+                    <option value="all">すべてのランク</option>
+                    {managementAvailableRanks.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                ) : managementAvailableRanks.length > 0 ? (
                   <div className="mb-2 flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
                     {([...managementAvailableRanks, "all"] as const).map((r) => (
                       <button
@@ -703,7 +723,7 @@ export default function SpotsView({
                       </button>
                     ))}
                   </div>
-                )}
+                ) : null}
                 {managementLoaded && managementTotal > 0 && (
                   <PagedListHeader
                     page={managementPage}
