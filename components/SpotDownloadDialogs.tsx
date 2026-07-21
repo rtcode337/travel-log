@@ -56,6 +56,9 @@ export default function SpotDownloadDialogs({ cache }: { cache: SpotCache }) {
               {formatBytes(cache.manualConfirm.sizeBytes)}
               の更新公開スポットデータをダウンロードします。よろしいですか?
             </p>
+            <p className="mt-1 text-xs text-gray-400">
+              (実際に端末に保存されるサイズはこれより小さくなります)
+            </p>
             <div className="mt-4 flex gap-2">
               <button
                 type="button"

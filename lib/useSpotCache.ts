@@ -5,9 +5,9 @@ import type { Spot } from "@/lib/types";
 import {
   readSpotCacheDb,
   writeSpotCacheDb,
+  deleteSpotCacheDb,
   trimSpot,
   expandSpot,
-  type CachedSpot,
   type StoredSpotCache,
 } from "@/lib/spotCacheDb";
 
@@ -19,6 +19,7 @@ export interface SpotCacheEntry {
 
 const SAVE_ERROR =
   "スポットデータの保存に失敗しました。次に開いたときは再ダウンロードが必要です。";
+const DELETE_ERROR = "スポットデータの削除に失敗しました。";
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -66,17 +67,34 @@ export function useSpotCache(typeKey: string) {
   const [entry, setEntry] = useState<SpotCacheEntry | null>(null);
   const [ready, setReady] = useState(false);
   const [showMissingPrompt, setShowMissingPrompt] = useState(false);
-  const [manualConfirm, setManualConfirm] = useState<
-    { sizeBytes: number; data: CachedSpot[] } | null
-  >(null);
+  // ダウンロード本体を読む前に、サイズが分かった時点で見せる確認ダイアログ
+  // (sizeBytesはContent-Lengthそのもの=これから受信する生JSONのバイト数。
+  // 実際にIndexedDBへ保存するのは間引き後のデータのため、保存サイズはこれより小さくなる)
+  const [manualConfirm, setManualConfirm] = useState<{ sizeBytes: number } | null>(
+    null
+  );
+  // 手動ダウンロードのヘッダー確認中(まだ本体は読んでいない)。この間はまだ
+  // downloading=falseなので、全画面の進捗ダイアログは出さずボタン側だけ待機表示にする
+  const [checkingSize, setCheckingSize] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoPromptedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // manualConfirm表示中、ヘッダーだけ受信済みでまだ読んでいないレスポンスを保持する
+  const pendingResponseRef = useRef<
+    { response: Response; controller: AbortController } | null
+  >(null);
 
-  // アンマウント時(ダイアログごと画面が消えるページ遷移等)は進行中のダウンロードを打ち切る
-  useEffect(() => () => abortRef.current?.abort(), []);
+  // アンマウント時(ダイアログごと画面が消えるページ遷移等)は進行中・保留中の
+  // ダウンロードを打ち切る
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      pendingResponseRef.current?.controller.abort();
+    },
+    []
+  );
 
   // 種別が変わったらキャッシュを非同期に読み直す(IndexedDBアクセスは非同期のため、
   // 読み込み完了までready=falseにして、その間は未ダウンロード扱いのプロンプトを出さない)
@@ -111,15 +129,14 @@ export function useSpotCache(typeKey: string) {
   );
 
   /**
-   * 公開スポットを取得する。進捗ダイアログに受信バイト数を出すため、api-clientではなく
-   * fetchのReadableStreamを直接読む(レスポンスが大きく数MBになりうるため)。
-   * キャンセル時はエラー扱いにせずnullを返す。
+   * リクエストを送り、レスポンスのヘッダーまで受け取った時点で返す(ボディはまだ読まない)。
+   * ここでContent-Lengthが分かれば、ボディを読み始める前にサイズを確認できる。
+   * 失敗時はerrorをセットしてnullを返す。
    */
-  const fetchPublished = useCallback(async (): Promise<Spot[] | null> => {
+  const openFetch = useCallback(async (): Promise<
+    { response: Response; controller: AbortController } | null
+  > => {
     const controller = new AbortController();
-    abortRef.current = controller;
-    setDownloading(true);
-    setProgress({ loadedBytes: 0, totalBytes: null });
     setError(null);
     try {
       const qs = new URLSearchParams({ status: "published", type: typeKey });
@@ -131,76 +148,129 @@ export function useSpotCache(typeKey: string) {
         setError(body?.error ?? res.statusText);
         return null;
       }
-
-      // gzip等の圧縮転送ではContent-Lengthは圧縮後サイズで、reader側で数える
-      // 展開後バイト数とは比較できないため、その場合は割合なし(バイト数のみ)で表示する
-      const contentLength = Number(res.headers.get("content-length"));
-      const totalBytes =
-        contentLength > 0 && !res.headers.get("content-encoding")
-          ? contentLength
-          : null;
-
-      let text: string;
-      if (res.body) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        const chunks: string[] = [];
-        let loadedBytes = 0;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          loadedBytes += value.byteLength;
-          chunks.push(decoder.decode(value, { stream: true }));
-          setProgress({ loadedBytes, totalBytes });
-        }
-        chunks.push(decoder.decode());
-        text = chunks.join("");
-      } else {
-        text = await res.text();
-      }
-
-      const data = (JSON.parse(text) as { data?: Spot[] }).data;
-      if (!data) {
-        setError("取得に失敗しました");
-        return null;
-      }
-      return data;
+      return { response: res, controller };
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : "取得に失敗しました");
       }
       return null;
-    } finally {
-      abortRef.current = null;
-      setDownloading(false);
-      setProgress(null);
     }
   }, [typeKey]);
+
+  // gzip等の圧縮転送ではContent-Lengthは圧縮後サイズで、展開後バイト数とは
+  // 比較できないため、その場合はサイズ不明(=事前確認できない)扱いにする
+  const knownContentLength = (response: Response): number | null => {
+    const contentLength = Number(response.headers.get("content-length"));
+    return contentLength > 0 && !response.headers.get("content-encoding")
+      ? contentLength
+      : null;
+  };
+
+  /**
+   * openFetchが返したレスポンスのボディを、進捗ダイアログに受信バイト数を出しながら
+   * 読み切ってSpot[]にパースする。api-clientではなくfetchのReadableStreamを直接読む
+   * (レスポンスが大きく数MBになりうるため)。キャンセル時はエラー扱いにせずnullを返す。
+   */
+  const readBody = useCallback(
+    async (response: Response, controller: AbortController): Promise<Spot[] | null> => {
+      abortRef.current = controller;
+      const totalBytes = knownContentLength(response);
+      setDownloading(true);
+      setProgress({ loadedBytes: 0, totalBytes });
+      try {
+        let text: string;
+        if (response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          const chunks: string[] = [];
+          let loadedBytes = 0;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            loadedBytes += value.byteLength;
+            chunks.push(decoder.decode(value, { stream: true }));
+            setProgress({ loadedBytes, totalBytes });
+          }
+          chunks.push(decoder.decode());
+          text = chunks.join("");
+        } else {
+          text = await response.text();
+        }
+
+        const data = (JSON.parse(text) as { data?: Spot[] }).data;
+        if (!data) {
+          setError("取得に失敗しました");
+          return null;
+        }
+        return data;
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setError(err instanceof Error ? err.message : "取得に失敗しました");
+        }
+        return null;
+      } finally {
+        abortRef.current = null;
+        setDownloading(false);
+        setProgress(null);
+      }
+    },
+    []
+  );
+
+  /** ヘッダー確認を挟まず、一気に取得する(「未ダウンロードです」ダイアログ用) */
+  const fetchPublished = useCallback(async (): Promise<Spot[] | null> => {
+    const opened = await openFetch();
+    if (!opened) return null;
+    return readBody(opened.response, opened.controller);
+  }, [openFetch, readBody]);
 
   /** 進捗ダイアログの「キャンセル」ボタン: 進行中のダウンロードを打ち切る */
   const cancelDownload = useCallback(() => abortRef.current?.abort(), []);
 
-  /** 歯車メニューの「ダウンロード」ボタン: 先に取得して(間引き後の)サイズを確認ダイアログに出す */
+  /**
+   * 歯車メニューの「ダウンロード」ボタン: まずヘッダーだけ受け取り、サイズ
+   * (Content-Length、間引き前の生JSONバイト数)が事前にわかる場合だけ本文を読む前に
+   * 確認ダイアログを出す。圧縮転送等でサイズが事前にわからない場合は、ダウンロード後に
+   * 今さら「ダウンロードしますか?」と聞いても意味がない(既に受信済みのため)ので、
+   * 確認なしでそのままダウンロードする。
+   */
   const startManualDownload = useCallback(async () => {
-    const data = await fetchPublished();
+    setCheckingSize(true);
+    const opened = await openFetch();
+    setCheckingSize(false);
+    if (!opened) return;
+
+    const sizeBytes = knownContentLength(opened.response);
+    if (sizeBytes !== null) {
+      pendingResponseRef.current = opened;
+      setManualConfirm({ sizeBytes });
+      return;
+    }
+
+    const data = await readBody(opened.response, opened.controller);
     if (!data) return;
-    const trimmed = data.map(trimSpot);
-    const sizeBytes = new TextEncoder().encode(JSON.stringify(trimmed)).length;
-    setManualConfirm({ sizeBytes, data: trimmed });
-  }, [fetchPublished]);
-
-  const confirmManualDownload = useCallback(() => {
-    if (!manualConfirm) return;
-    const stored: StoredSpotCache = {
-      downloadedAt: new Date().toISOString(),
-      spots: manualConfirm.data,
-    };
+    const stored = toStored(data);
     setEntry(toEntry(stored));
-    setManualConfirm(null);
     persist(stored);
-  }, [manualConfirm, persist]);
+  }, [openFetch, readBody, persist]);
 
-  const cancelManualDownload = useCallback(() => setManualConfirm(null), []);
+  const confirmManualDownload = useCallback(async () => {
+    const pending = pendingResponseRef.current;
+    pendingResponseRef.current = null;
+    setManualConfirm(null);
+    if (!pending) return;
+    const data = await readBody(pending.response, pending.controller);
+    if (!data) return;
+    const stored = toStored(data);
+    setEntry(toEntry(stored));
+    persist(stored);
+  }, [readBody, persist]);
+
+  const cancelManualDownload = useCallback(() => {
+    pendingResponseRef.current?.controller.abort();
+    pendingResponseRef.current = null;
+    setManualConfirm(null);
+  }, []);
 
   /** 「未ダウンロードです」ダイアログで同意したとき */
   const confirmMissingDownload = useCallback(async () => {
@@ -217,6 +287,22 @@ export function useSpotCache(typeKey: string) {
   }, [fetchPublished, persist]);
 
   const dismissMissingPrompt = useCallback(() => setShowMissingPrompt(false), []);
+
+  /** ダウンロード済みの公開スポットキャッシュを削除する(歯車メニューから明示的に実行) */
+  const clearCache = useCallback(async () => {
+    // 通常は「entryがnullになった」だけでは未ダウンロードプロンプトの自動表示
+    // (autoPromptedRefがまだfalseの場合のみ発火)は起きないが、ダウンロード済みの
+    // まま一度もこのプロンプトを出したことのないセッションで削除すると、このタイミングで
+    // 初めてentryがnullになるため誤って発火してしまう。削除は明示的な操作なので、
+    // 削除直後に「ダウンロードしますか?」を自動で聞き返さないよう先にフラグを立てておく
+    autoPromptedRef.current = true;
+    setEntry(null);
+    try {
+      await deleteSpotCacheDb(typeKey);
+    } catch {
+      setError(DELETE_ERROR);
+    }
+  }, [typeKey]);
 
   /**
    * スポット詳細からの編集・承認/却下でこの端末が直接変更した1件だけを、
@@ -259,6 +345,7 @@ export function useSpotCache(typeKey: string) {
     publicSpots: entry?.spots ?? null,
     downloadedAt: entry?.downloadedAt ?? null,
     ready,
+    checkingSize,
     downloading,
     progress,
     error,
@@ -270,6 +357,7 @@ export function useSpotCache(typeKey: string) {
     cancelManualDownload,
     confirmMissingDownload,
     dismissMissingPrompt,
+    clearCache,
     applySpotChange,
     applySpotDelete,
   };
