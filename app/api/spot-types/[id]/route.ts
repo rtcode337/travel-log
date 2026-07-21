@@ -5,6 +5,12 @@ import { getSpotTypeSetting, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { deleteVisitPhotos } from "@/lib/photos";
 import { parseRankStyles, RANK_STYLES_SETTING_KEY } from "@/lib/rankStyle";
+import {
+  isValidRegionScope,
+  isValidWikipediaLang,
+  REGION_SCOPE_SETTING_KEY,
+  WIKIPEDIA_LANG_SETTING_KEY,
+} from "@/lib/region";
 
 export async function PATCH(
   request: Request,
@@ -31,9 +37,9 @@ export async function PATCH(
   }
 
   // スポット種別ごとの追加設定(口コミ・Wikipediaリンク・管理者以外閲覧不可・
-  // ランク設定等)。spot_typesに列を増やさずキーを増やせるよう、
-  // spot_type_settings(key, value)へupsertする。値はboolean('true'/'false'の
-  // 文字列で保存)か、rank_stylesのようなJSON文字列(そのまま保存)のどちらか
+  // ランク設定・対象地域・Wikipedia言語等)。spot_typesに列を増やさずキーを増やせる
+  // よう、spot_type_settings(key, value)へupsertする。値はboolean('true'/'false'の
+  // 文字列で保存)か、rank_styles等のような文字列(そのまま保存)のどちらか
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
@@ -48,6 +54,26 @@ export async function PATCH(
           { status: 400 }
         );
       }
+    }
+    if (
+      key === REGION_SCOPE_SETTING_KEY &&
+      (typeof value !== "string" || !isValidRegionScope(value))
+    ) {
+      return NextResponse.json(
+        {
+          error: `${REGION_SCOPE_SETTING_KEY}は 'jp'・'world'・ISO 3166-1の国コード小文字のいずれかである必要があります。`,
+        },
+        { status: 400 }
+      );
+    }
+    if (
+      key === WIKIPEDIA_LANG_SETTING_KEY &&
+      (typeof value !== "string" || !isValidWikipediaLang(value))
+    ) {
+      return NextResponse.json(
+        { error: `${WIKIPEDIA_LANG_SETTING_KEY}は 'ja'・'en' のような言語コードである必要があります。` },
+        { status: 400 }
+      );
     }
     if (key === "public_visible" && !value) {
       // ログイン後の既定(app_settings.active_spot_type_id)がこの種別のままだと

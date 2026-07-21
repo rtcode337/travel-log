@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 
 /**
- * Wikipedia(ja)のREST API(page/summary)のレスポンスのうち、表示に使う部分。
+ * WikipediaのREST API(page/summary)のレスポンスのうち、表示に使う部分。
+ * 参照先の言語版はスポット種別ごとのwikipedia_lang設定(既定'ja')で切り替える。
  * https://ja.wikipedia.org/api/rest_v1/#/Page%20content/get_page_summary__title_
  */
 interface WikiSummary {
@@ -41,9 +42,12 @@ function coreOf(name: string): string {
  * 「森戸神社」の正式記事名が「森戸大明神」であるような、通称/正式名称の食い違いは
  * 全文検索の文字列一致だけでは拾えないため、まずこちらで解決を試みる
  */
-async function resolveExactTitle(spotName: string): Promise<string | null> {
+async function resolveExactTitle(
+  lang: string,
+  spotName: string
+): Promise<string | null> {
   const url =
-    "https://ja.wikipedia.org/w/api.php?action=query&redirects=1&format=json&formatversion=2&origin=*&titles=" +
+    `https://${lang}.wikipedia.org/w/api.php?action=query&redirects=1&format=json&formatversion=2&origin=*&titles=` +
     encodeURIComponent(spotName);
   const res = await fetch(url);
   if (!res.ok) return null;
@@ -60,9 +64,12 @@ async function resolveExactTitle(spotName: string): Promise<string | null> {
  * のような無関係な記事が上位に来やすいため、名前単体で検索したうえで、上位数件の中から
  * タイトルにスポット名が含まれるものだけを採用する(同名の別記事の誤爆を避ける)
  */
-async function searchWikiTitle(spotName: string): Promise<string | null> {
+async function searchWikiTitle(
+  lang: string,
+  spotName: string
+): Promise<string | null> {
   const url =
-    "https://ja.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*" +
+    `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*` +
     `&srlimit=5&srsearch=${encodeURIComponent(spotName)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`検索に失敗しました (${res.status})`);
@@ -74,9 +81,9 @@ async function searchWikiTitle(spotName: string): Promise<string | null> {
   return match?.title ?? null;
 }
 
-async function fetchWikiSummary(title: string): Promise<WikiSummary> {
+async function fetchWikiSummary(lang: string, title: string): Promise<WikiSummary> {
   const res = await fetch(
-    `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+    `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
       title.replace(/ /g, "_")
     )}`
   );
@@ -91,13 +98,14 @@ async function fetchWikiSummary(title: string): Promise<WikiSummary> {
  * スポット名を含まないリンク=「伊勢原市」のような市区町村ページ自体は候補から除く)
  */
 async function resolveDisambiguation(
+  lang: string,
   disambigTitle: string,
   spotName: string,
   prefecture: string,
   municipality: string | null
 ): Promise<string | null> {
   const url =
-    "https://ja.wikipedia.org/w/api.php?action=query&prop=links&pllimit=500&plnamespace=0&format=json&formatversion=2&origin=*&titles=" +
+    `https://${lang}.wikipedia.org/w/api.php?action=query&prop=links&pllimit=500&plnamespace=0&format=json&formatversion=2&origin=*&titles=` +
     encodeURIComponent(disambigTitle);
   const res = await fetch(url);
   if (!res.ok) return null;
@@ -113,18 +121,23 @@ async function resolveDisambiguation(
 }
 
 /**
- * スポット名+所在地からWikipedia(ja)の記事を検索し、代表画像と概要をモーダルで表示する。
+ * スポット名+所在地からWikipediaの記事を検索し、代表画像と概要をモーダルで表示する。
+ * 参照する言語版はスポット種別ごとのwikipedia_lang設定(既定'ja')に従う。
  * 名前による自動検索のため、同名の別の場所がヒットする可能性がある点は画面上でも注記する。
  */
 export default function SpotInfoModal({
   spotName,
   prefecture,
   municipality,
+  lang,
   onClose,
 }: {
   spotName: string;
+  /** 地域(都道府県/州・県/国)。表示と曖昧さ回避ページの解決に使う */
   prefecture: string;
   municipality: string | null;
+  /** 参照するWikipediaの言語版(サブドメイン)。例: 'ja'、'en' */
+  lang: string;
   onClose: () => void;
 }) {
   const [summary, setSummary] = useState<WikiSummary | null>(null);
@@ -136,22 +149,24 @@ export default function SpotInfoModal({
     (async () => {
       try {
         const title =
-          (await resolveExactTitle(spotName)) ?? (await searchWikiTitle(spotName));
+          (await resolveExactTitle(lang, spotName)) ??
+          (await searchWikiTitle(lang, spotName));
         if (cancelled) return;
         if (!title) {
           setSummary(null);
           return;
         }
-        let data = await fetchWikiSummary(title);
+        let data = await fetchWikiSummary(lang, title);
         // 曖昧さ回避ページに当たった場合は、所在地が一致するリンク先に差し替える
         if (!cancelled && data.type === "disambiguation") {
           const resolvedTitle = await resolveDisambiguation(
+            lang,
             title,
             spotName,
             prefecture,
             municipality
           );
-          if (resolvedTitle) data = await fetchWikiSummary(resolvedTitle);
+          if (resolvedTitle) data = await fetchWikiSummary(lang, resolvedTitle);
           else data = { ...data, extract: "" }; // 解決できなければ「見つからなかった」扱い
         }
         if (!cancelled) setSummary(data);
@@ -165,7 +180,7 @@ export default function SpotInfoModal({
     return () => {
       cancelled = true;
     };
-  }, [spotName, prefecture, municipality]);
+  }, [spotName, prefecture, municipality, lang]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
