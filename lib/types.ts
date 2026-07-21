@@ -1,10 +1,13 @@
 import { isValidRankStyle, type RankStyleDefinition } from "./rankStyle";
+import { isValidCategoryList } from "./category";
 
 /**
  * rank/categoryはスポットの「種別(SpotType)」ごとに意味が異なりうるため、
- * DB上は自由入力(nullable text)。以下は観光地(spot_type='tourist')が実際に
- * 使っている値で、UIのサジェスト(datalist)用の参考値として残している。
- * 他の種別は独自のrank/categoryを使うか、全く使わなくてよい。
+ * DB上は自由入力(nullable text)。種別ごとに「使う値の一覧」を持たせる仕組みは
+ * ランクがlib/rankStyle.ts(rank_styles設定)、カテゴリがlib/category.ts
+ * (categories設定)にあり、どちらも未設定時は観光地(spot_type='tourist')の
+ * 現行の値にフォールバックする。他の種別は独自のrank/categoryを使うか、
+ * 全く使わなくてよい。
  */
 export type Rank = string;
 export type Category = string;
@@ -18,16 +21,6 @@ export type Category = string;
  * C: 次30%(地方の定番) / D: 次30%(地元で知られている) / E: 残り20%(穴場)
  */
 export const RANKS: Rank[] = ["A", "B", "C", "D", "E"];
-
-export const CATEGORIES = [
-  "神社仏閣",
-  "自然",
-  "城",
-  "温泉",
-  "街並み",
-  "美術館博物館",
-  "その他",
-] as const;
 
 /** values配列から null/空文字を除いた重複なしリストを返す(rank/categoryのサジェスト用) */
 export function distinctValues(values: (string | null | undefined)[]): string[] {
@@ -138,13 +131,16 @@ export function getSpotTypeSetting(
  * region_scope('jp'/国コード/'world')・wikipedia_lang('en'等)のような文字列値の
  * 設定もそのまま指定できる(妥当性はPATCH /api/spot-types/[id]側で検証される)。
  * ranksを省略した場合(または画面から手入力で種別を追加した場合)は観光地の
- * A〜E(DEFAULT_RANK_STYLES、lib/rankStyle.ts参照)がそのまま既定のランク設定になる。
+ * A〜E(DEFAULT_RANK_STYLES、lib/rankStyle.ts参照)がそのまま既定のランク設定になり、
+ * categoriesを省略した場合も同様に観光地の現行カテゴリ
+ * (DEFAULT_CATEGORIES、lib/category.ts参照)が既定になる。
  */
 export interface SpotTypeDefinitionFile {
   key: string;
   label: string;
   settings?: Partial<Record<string, boolean | string>>;
   ranks?: RankStyleDefinition[];
+  categories?: Category[];
 }
 
 /** JSONをparseした後の値がSpotTypeDefinitionFileとして使える形か検証する */
@@ -181,6 +177,11 @@ export function parseSpotTypeDefinition(
       };
     }
   }
+  if (obj.categories !== undefined && !isValidCategoryList(obj.categories)) {
+    return {
+      error: "categoriesは空でない文字列の配列である必要があります。",
+    };
+  }
   return {
     data: {
       key: obj.key.trim(),
@@ -189,6 +190,7 @@ export function parseSpotTypeDefinition(
         | Partial<Record<string, boolean | string>>
         | undefined,
       ranks: obj.ranks as RankStyleDefinition[] | undefined,
+      categories: obj.categories as Category[] | undefined,
     },
   };
 }

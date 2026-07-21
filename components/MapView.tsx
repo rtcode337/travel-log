@@ -19,6 +19,7 @@ import type { Role, Spot } from "@/lib/types";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
 import { useRankStyles } from "@/lib/useRankStyles";
+import { useCategories } from "@/lib/useCategories";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
@@ -241,6 +242,8 @@ export default function MapView({
 
   const spotCache = useSpotCache(spotTypeKey);
   const rankStyles = useRankStyles(spotTypeKey);
+  // 種別のカテゴリ設定。絞り込みチップの並び順に使う
+  const categories = useCategories(spotTypeKey);
   // 種別の対象地域スコープ。地名検索の対象国と、初回表示時の挙動
   // (日本=現在地へズーム、それ以外=スポット全体にフィット)に使う
   const regionScope = useRegionScope(spotTypeKey);
@@ -604,7 +607,7 @@ export default function MapView({
     let cancelled = false;
 
     const filteredSpots = spots.filter((spot) =>
-      passesFilters(filters, spot.rank, visitedIds.has(spot.id))
+      passesFilters(filters, spot.rank, spot.category, visitedIds.has(spot.id))
     );
 
     const renderSpots = async () => {
@@ -742,6 +745,7 @@ export default function MapView({
               filters={filters}
               onChange={setFilters}
               rankStyles={rankStyles}
+              categories={categories}
             />
 
             <div className="border-t border-gray-100 pt-3">

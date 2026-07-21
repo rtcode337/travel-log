@@ -15,6 +15,7 @@ import {
 } from "@/lib/types";
 import { DEFAULT_REGION_SCOPE, regionFieldLabel } from "@/lib/region";
 import { useRegionScope } from "@/lib/useRegionScope";
+import { useCategories } from "@/lib/useCategories";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 
 export default function AddSpotModal({
@@ -100,10 +101,16 @@ export default function AddSpotModal({
     () => distinctValues(spots.map((s) => s.region)),
     [spots]
   );
-  const availableCategories = useMemo(
-    () => distinctValues(spots.map((s) => s.category)),
-    [spots]
-  );
+  // カテゴリのサジェストは種別のカテゴリ設定(並び順どおり)を先頭に、
+  // 設定に無い既存スポットの値(過去データ等)を後ろに足して出す
+  const definedCategories = useCategories(typeKey);
+  const availableCategories = useMemo(() => {
+    const existing = distinctValues(spots.map((s) => s.category));
+    return [
+      ...definedCategories,
+      ...existing.filter((c) => !definedCategories.includes(c)),
+    ];
+  }, [spots, definedCategories]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
