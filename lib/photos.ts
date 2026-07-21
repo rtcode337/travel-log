@@ -28,6 +28,11 @@ const CONTENT_TYPE_BY_EXT: Record<string, string> = {
   webp: "image/webp",
 };
 
+// クライアント側(VisitFormModal)は1280px程度に縮小してから送るが、それを信頼せず
+// サーバー側でも上限を設ける(ブラウザを経由しない直接APIコールでの
+// ディスク圧迫・DoSを防ぐため)。1visitあたりの枚数上限は app/api/visits/route.ts 側
+const MAX_PHOTO_BASE64_LENGTH = 8_000_000; // base64で約8MB(デコード後 約6MB)
+
 // saveVisitPhotoが生成する相対パスにのみ一致する。DB由来の値であっても
 // ファイルシステムに触る前に必ずこれで検証する(パストラバーサル対策)
 const UUID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -62,6 +67,9 @@ export async function saveVisitPhoto(
   userId: string,
   dataUrl: string
 ): Promise<string> {
+  if (dataUrl.length > MAX_PHOTO_BASE64_LENGTH) {
+    throw new Error("画像サイズが大きすぎます。");
+  }
   const match = /^data:(image\/[a-z+.-]+);base64,([A-Za-z0-9+/=]+)$/.exec(
     dataUrl
   );
