@@ -27,6 +27,7 @@ import SpotDetailModal from "@/components/SpotDetailModal";
 import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getRankOrder } from "@/lib/rankStyle";
 import { useRankStyles } from "@/lib/useRankStyles";
+import { useCategories } from "@/lib/useCategories";
 import { useSpotCache } from "@/lib/useSpotCache";
 
 type SortKey = "rank" | "name" | "visited";
@@ -181,6 +182,8 @@ export default function SpotsView({
 }) {
   const spotCache = useSpotCache(spotTypeKey);
   const rankStyles = useRankStyles(spotTypeKey);
+  // 種別のカテゴリ設定。絞り込みチップの並び順に使う
+  const categories = useCategories(spotTypeKey);
   // 種別の対象地域スコープ。地域タブの名称(都道府県/州・県/国)と並び順に使う
   const regionScope = useRegionScope(spotTypeKey) ?? DEFAULT_REGION_SCOPE;
   const regionLabel = regionFieldLabel(regionScope);
@@ -382,7 +385,7 @@ export default function SpotsView({
   const filteredSpots = useMemo(() => {
     const list = spots.filter((s) => {
       if (s.region !== selectedRegion) return false;
-      return passesFilters(filters, s.rank, visitedIds.has(s.id));
+      return passesFilters(filters, s.rank, s.category, visitedIds.has(s.id));
     });
     list.sort((a, b) => {
       switch (sortKey) {
@@ -799,6 +802,7 @@ export default function SpotsView({
           filters={filters}
           onChange={setFilters}
           rankStyles={rankStyles}
+          categories={categories}
         />
         <select
           value={sortKey}
