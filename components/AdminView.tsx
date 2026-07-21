@@ -89,6 +89,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [newTypeLabel, setNewTypeLabel] = useState("");
   const [typeMessage, setTypeMessage] = useState<string | null>(null);
   const [importingType, setImportingType] = useState(false);
+  const [applyingTypeJson, setApplyingTypeJson] = useState(false);
   const [defaultTypeMessage, setDefaultTypeMessage] = useState<string | null>(
     null
   );
@@ -485,6 +486,61 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     }
   };
 
+  const handleApplyTypeFromJson = async (file: File) => {
+    if (!currentType) return;
+    setApplyingTypeJson(true);
+    setTypeSettingsMessage(null);
+    try {
+      let json: unknown;
+      try {
+        json = JSON.parse(await file.text());
+      } catch {
+        setTypeSettingsMessage("JSONの読み込みに失敗しました(構文エラー)。");
+        return;
+      }
+      const parsed = parseSpotTypeDefinition(json);
+      if ("error" in parsed) {
+        setTypeSettingsMessage("JSONの内容が不正です: " + parsed.error);
+        return;
+      }
+      const { key, label, settings, ranks, categories } = parsed.data;
+      // キーが変わると種別を差し替えたのと同じ扱いになり影響が大きいため、
+      // 一致しない場合は何も反映せずエラーにする(labelは反映してよい)
+      if (key !== currentType.key) {
+        setTypeSettingsMessage(
+          `JSONのkey(${key})が現在の種別のkey(${currentType.key})と一致しません。keyの変更はこの機能では行えません。`
+        );
+        return;
+      }
+
+      const settingsToApply: Record<string, boolean | string> = {};
+      for (const [k, v] of Object.entries(settings ?? {})) {
+        if (v !== undefined) settingsToApply[k] = v;
+      }
+      if (ranks) {
+        settingsToApply[RANK_STYLES_SETTING_KEY] = JSON.stringify(ranks);
+      }
+      if (categories) {
+        settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
+      }
+
+      const { error: settingsError } = await api.spotTypes.applySettings(
+        currentType.id,
+        settingsToApply,
+        label
+      );
+      if (settingsError) {
+        setTypeSettingsMessage("設定の反映に失敗しました: " + settingsError.message);
+        return;
+      }
+
+      setTypeSettingsMessage(`「${label}」の設定をJSONの内容に反映しました。`);
+      loadSpotTypes();
+    } finally {
+      setApplyingTypeJson(false);
+    }
+  };
+
   // name+region+lat+lng の完全一致を「同じスポット」とみなす差分更新用のキー
   const spotDiffKey = (
     name: string,
@@ -722,19 +778,6 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">
-                  ニックネーム(任意)
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  value={newUserNickname}
-                  onChange={(e) => setNewUserNickname(e.target.value)}
-                  placeholder="口コミ等に表示する名前(未設定なら「匿名」)"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">
                   初期パスワード
                 </label>
                 <input
@@ -744,6 +787,19 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                   value={newUserPassword}
                   onChange={(e) => setNewUserPassword(e.target.value)}
                   placeholder="8文字以上"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  ニックネーム(任意)
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={newUserNickname}
+                  onChange={(e) => setNewUserNickname(e.target.value)}
+                  placeholder="口コミ等に表示する名前(未設定なら「匿名」)"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 />
               </div>
@@ -896,6 +952,36 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                     </button>
                   </div>
                 </form>
+
+                <div className="mt-3 border-t border-gray-100 pt-3">
+                  <p className="mb-1 text-sm font-medium">
+                    JSONファイルから設定を反映
+                  </p>
+                  <p className="mb-2 text-xs text-gray-500">
+                    種別追加時と同じ形式(
+                    <code>{"{ key, label, settings?, ranks?, categories? }"}</code>
+                    )のJSONファイルをアップロードすると、label・settings・ranks・
+                    categoriesをまとめてこの種別に反映できる(JSON側で省略した
+                    JSONキーの内容は変更しない)。ただしkeyの変更は影響が大きいため、
+                    JSONのkeyが現在のkey(
+                    <span className="font-mono">{typeKey}</span>
+                    )と一致しない場合はエラーにして何も反映しない。
+                  </p>
+                  <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                    {applyingTypeJson ? "反映中…" : "JSONファイルから反映"}
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      disabled={applyingTypeJson}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleApplyTypeFromJson(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
               </section>
             )}
 
