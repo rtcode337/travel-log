@@ -83,10 +83,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const rank = searchParams.get("rank");
-  if (rank) {
-    listParams.push(rank);
-    conditions.push(`rank = $${listParams.length}`);
+  const ranks = searchParams.getAll("rank");
+  if (ranks.length > 0) {
+    listParams.push(ranks);
+    conditions.push(`rank = any($${listParams.length}::text[])`);
   }
 
   // ランクの並び順はこの種別のランク設定(activeType.settings.rank_styles、無ければ

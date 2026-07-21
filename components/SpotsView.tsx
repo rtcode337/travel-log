@@ -26,6 +26,7 @@ import RankBadge from "@/components/RankBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getRankOrder } from "@/lib/rankStyle";
+import RankFilter from "@/components/RankFilter";
 import { useRankStyles } from "@/lib/useRankStyles";
 import { useCategories } from "@/lib/useCategories";
 import { useSpotCache } from "@/lib/useSpotCache";
@@ -119,10 +120,6 @@ function Pager({
  * (ランクから探すタブはサーバー側ページング(SPOTS_PAGE_SIZE)を使うため対象外) */
 const CLIENT_PAGE_SIZE = 50;
 
-/** 「ランクから探す」のランク切り替えをボタン列で出す上限。これを超える種別
- * (ランク=放送回番号のように値が多い種別)はセレクトボックスに切り替える */
-const MANAGEMENT_RANK_BUTTONS_MAX = 12;
-
 /** 手元に持っている配列(取得済み・全件)をクライアント側でページ分割する */
 function usePagedItems<T>(items: T[], pageSize: number) {
   const [page, setPage] = useState(1);
@@ -214,9 +211,9 @@ export default function SpotsView({
   const [managementSearchInput, setManagementSearchInput] = useState("");
   const [managementSearch, setManagementSearch] = useState("");
   // A〜Eのランク段階はtourist種別専用(CLAUDE.md参照)。それ以外の種別では
-  // 「A」を既定にすると該当スポットが無く常に0件表示になるため、すべて を既定にする
-  const [managementRank, setManagementRank] = useState<Rank | "all">(
-    spotTypeKey === "tourist" ? "A" : "all"
+  // 「A」を既定にすると該当スポットが無く常に0件表示になるため、すべて(空配列)を既定にする
+  const [managementRanks, setManagementRanks] = useState<Rank[]>(
+    spotTypeKey === "tourist" ? ["A"] : []
   );
   const [managementPage, setManagementPage] = useState(1);
 
@@ -226,7 +223,7 @@ export default function SpotsView({
       type: spotTypeKey,
       page: managementPage,
       search: managementSearch || undefined,
-      rank: managementRank === "all" ? undefined : managementRank,
+      ranks: managementRanks,
     });
     if (data) {
       setManagementItems(data.items);
@@ -239,7 +236,7 @@ export default function SpotsView({
     }
     setManagementLoaded(true);
     setManagementLoading(false);
-  }, [spotTypeKey, managementPage, managementSearch, managementRank, rankStyles]);
+  }, [spotTypeKey, managementPage, managementSearch, managementRanks, rankStyles]);
 
   useEffect(() => {
     if (browseMode === "rank") loadManagementSpots();
@@ -251,8 +248,8 @@ export default function SpotsView({
     setManagementSearch(managementSearchInput.trim());
   };
 
-  const handleManagementRankChange = (rank: Rank | "all") => {
-    setManagementRank(rank);
+  const handleManagementRanksChange = (ranks: Rank[]) => {
+    setManagementRanks(ranks);
     setManagementPage(1);
   };
 
@@ -690,40 +687,16 @@ export default function SpotsView({
                     検索
                   </button>
                 </form>
-                {managementAvailableRanks.length > MANAGEMENT_RANK_BUTTONS_MAX ? (
-                  // ランクが多い種別(放送回番号など)はボタンを並べきれないのでセレクトにする
-                  <select
-                    value={managementRank}
-                    onChange={(e) =>
-                      handleManagementRankChange(e.target.value as Rank | "all")
-                    }
-                    className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
-                  >
-                    <option value="all">すべてのランク</option>
-                    {managementAvailableRanks.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                ) : managementAvailableRanks.length > 0 ? (
-                  <div className="mb-2 flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
-                    {([...managementAvailableRanks, "all"] as const).map((r) => (
-                      <button
-                        key={r}
-                        type="button"
-                        onClick={() => handleManagementRankChange(r)}
-                        className={`flex-1 px-2 py-1.5 font-medium ${
-                          managementRank === r
-                            ? "bg-blue-600 text-white"
-                            : "text-gray-500 hover:bg-gray-50"
-                        }`}
-                      >
-                        {r === "all" ? "すべて" : r}
-                      </button>
-                    ))}
+                {managementAvailableRanks.length > 1 && (
+                  <div className="mb-2">
+                    <RankFilter
+                      ranks={managementAvailableRanks}
+                      selected={managementRanks}
+                      onChange={handleManagementRanksChange}
+                      rankStyles={rankStyles}
+                    />
                   </div>
-                ) : null}
+                )}
                 {managementLoaded && managementTotal > 0 && (
                   <PagedListHeader
                     page={managementPage}

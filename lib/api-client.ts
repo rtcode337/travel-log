@@ -92,13 +92,13 @@ export const api = {
       type: string;
       page: number;
       search?: string;
-      rank?: string;
+      ranks?: string[];
     }) => {
       const qs = new URLSearchParams();
       qs.set("type", opts.type);
       qs.set("page", String(opts.page));
       if (opts.search) qs.set("search", opts.search);
-      if (opts.rank) qs.set("rank", opts.rank);
+      for (const rank of opts.ranks ?? []) qs.append("rank", rank);
       return request<{ items: Spot[]; total: number; availableRanks: string[] }>(
         `/api/spots?${qs.toString()}`
       );
