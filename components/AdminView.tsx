@@ -7,6 +7,16 @@ import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
 import { RANK_STYLES_SETTING_KEY } from "@/lib/rankStyle";
 import {
+  countryDisplayName,
+  DEFAULT_WIKIPEDIA_LANG,
+  isValidWikipediaLang,
+  REGION_SCOPE_SETTING_KEY,
+  regionFieldLabel,
+  resolveRegionScope,
+  resolveWikipediaLang,
+  WIKIPEDIA_LANG_SETTING_KEY,
+} from "@/lib/region";
+import {
   getSpotTypeSetting,
   parseSpotTypeDefinition,
   ROLE_LABELS,
@@ -87,11 +97,32 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     string | null
   >(null);
 
+  // 対象地域(region_scope)・Wikipedia言語(wikipedia_lang)の編集用下書き。
+  // セレクトで「国を指定」を選んだときだけ国コード入力欄を出す
+  const [regionScopeKind, setRegionScopeKind] = useState<
+    "jp" | "country" | "world"
+  >("jp");
+  const [regionCountryCode, setRegionCountryCode] = useState("");
+  const [wikiLangDraft, setWikiLangDraft] = useState(DEFAULT_WIKIPEDIA_LANG);
+  const [savingRegionSettings, setSavingRegionSettings] = useState(false);
+
   const currentType = useMemo(
     () => spotTypes.find((t) => t.key === typeKey) ?? null,
     [spotTypes, typeKey]
   );
   const currentTypeLabel = currentType?.label ?? typeKey;
+  const currentRegionScope = resolveRegionScope(currentType);
+
+  // 種別の読み込み・再読み込みのたびに、保存済みの値で下書きを初期化する
+  useEffect(() => {
+    if (!currentType) return;
+    const scope = resolveRegionScope(currentType);
+    setRegionScopeKind(
+      scope === "jp" ? "jp" : scope === "world" ? "world" : "country"
+    );
+    setRegionCountryCode(scope === "jp" || scope === "world" ? "" : scope);
+    setWikiLangDraft(resolveWikipediaLang(currentType));
+  }, [currentType]);
 
   useEffect(() => {
     api.auth.me().then(({ data }) => {
@@ -274,6 +305,44 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     }
     setTypeSettingsMessage(
       `「${type.label}」の${label}を${!current ? "有効" : "無効"}にしました。`
+    );
+    loadSpotTypes();
+  };
+
+  const handleSaveRegionSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentType) return;
+    const scope =
+      regionScopeKind === "country"
+        ? regionCountryCode.trim().toLowerCase()
+        : regionScopeKind;
+    if (regionScopeKind === "country" && !/^[a-z]{2}$/.test(scope)) {
+      setTypeSettingsMessage(
+        "国コードはISO 3166-1 alpha-2(例: us、fr)の2文字で入力してください。"
+      );
+      return;
+    }
+    const lang = wikiLangDraft.trim().toLowerCase();
+    if (!isValidWikipediaLang(lang)) {
+      setTypeSettingsMessage(
+        "Wikipedia言語は 'ja'・'en' のような言語コードで入力してください。"
+      );
+      return;
+    }
+    setSavingRegionSettings(true);
+    const { error } = await api.spotTypes.applySettings(currentType.id, {
+      [REGION_SCOPE_SETTING_KEY]: scope,
+      [WIKIPEDIA_LANG_SETTING_KEY]: lang,
+    });
+    setSavingRegionSettings(false);
+    if (error) {
+      setTypeSettingsMessage("対象地域の保存に失敗しました: " + error.message);
+      return;
+    }
+    setTypeSettingsMessage(
+      `「${currentType.label}」の対象地域を「${
+        scope === "jp" ? "日本" : scope === "world" ? "世界" : countryDisplayName(scope)
+      }」、Wikipedia言語を「${lang}」にしました。`
     );
     loadSpotTypes();
   };
@@ -702,6 +771,68 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                     </label>
                   ))}
                 </div>
+
+                <form
+                  onSubmit={handleSaveRegionSettings}
+                  className="mt-3 border-t border-gray-100 pt-3"
+                >
+                  <p className="mb-1 text-sm font-medium">対象地域とWikipedia言語</p>
+                  <p className="mb-2 text-xs text-gray-500">
+                    対象地域は、地図の地名検索の対象国と、スポットの「地域」欄の扱い
+                    (日本=都道府県、国を指定=その国の州・県、世界=国ごと)を決める。
+                    Wikipedia言語は、スポット詳細から開くWikipedia検索の言語版
+                    (ja・enなどのサブドメイン)。
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={regionScopeKind}
+                      onChange={(e) =>
+                        setRegionScopeKind(
+                          e.target.value as "jp" | "country" | "world"
+                        )
+                      }
+                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    >
+                      <option value="jp">日本(既定)</option>
+                      <option value="country">国を指定</option>
+                      <option value="world">世界(国ごと)</option>
+                    </select>
+                    {regionScopeKind === "country" && (
+                      <>
+                        <input
+                          value={regionCountryCode}
+                          onChange={(e) => setRegionCountryCode(e.target.value)}
+                          placeholder="国コード(例: fr)"
+                          maxLength={2}
+                          autoComplete="off"
+                          className="w-36 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                        />
+                        {/^[a-zA-Z]{2}$/.test(regionCountryCode.trim()) && (
+                          <span className="text-xs text-gray-500">
+                            = {countryDisplayName(regionCountryCode.trim())}
+                          </span>
+                        )}
+                      </>
+                    )}
+                    <label className="flex items-center gap-1 text-sm">
+                      <span className="text-xs text-gray-500">Wikipedia言語</span>
+                      <input
+                        value={wikiLangDraft}
+                        onChange={(e) => setWikiLangDraft(e.target.value)}
+                        placeholder="ja"
+                        autoComplete="off"
+                        className="w-20 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={savingRegionSettings}
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                    >
+                      {savingRegionSettings ? "保存中…" : "保存"}
+                    </button>
+                  </div>
+                </form>
               </section>
             )}
 
@@ -765,7 +896,10 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
               </div>
 
               <p className="mt-2 text-xs text-gray-400">
-                CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。rank/categoryは自由入力で空でも可)
+                CSV列: {CSV_COLUMNS.join(", ")}(name, prefecture, lat, lng は必須。
+                prefecture列にはこの種別の地域(
+                {regionFieldLabel(currentRegionScope)})を入れる。
+                rank/categoryは自由入力で空でも可)
               </p>
             </section>
 
@@ -920,7 +1054,10 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                     <code>{"{ key, label, settings?, ranks? }"}</code>
                     形式。<code>ranks</code>はそのスポット種別で使えるランクの一覧と
                     表示スタイル(色・縁取り線の色・地図ピンの大きさ・ラベル)の配列で、
-                    省略すると観光地のA〜Eが既定になる。travel-log-dataリポジトリの
+                    省略すると観光地のA〜Eが既定になる。<code>settings</code>には
+                    true/falseの設定のほか、対象地域<code>region_scope</code>
+                    ('jp'/国コード/'world')・<code>wikipedia_lang</code>('en'等)も
+                    指定できる。travel-log-dataリポジトリの
                     各スポットキーフォルダ内の<code>settings.json</code>を参照)。
                   </p>
                   <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">

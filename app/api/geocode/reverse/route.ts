@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import { PREFECTURES } from "@/lib/types";
+import { DEFAULT_REGION_SCOPE, isValidRegionScope } from "@/lib/region";
 
 interface NominatimReverseResult {
   address?: {
+    country?: string;
     state?: string;
     province?: string;
     city?: string;
@@ -22,7 +24,9 @@ interface NominatimReverseResult {
  * PREFECTURESの並び順(北海道=1〜沖縄=47)ともそのまま対応するため、
  * これを最優先の情報源として使う。
  */
-function resolvePrefecture(address: NominatimReverseResult["address"]): string | null {
+function resolveJpPrefecture(
+  address: NominatimReverseResult["address"]
+): string | null {
   const isoCode = address?.["ISO3166-2-lvl4"];
   const match = isoCode?.match(/^JP-(\d{2})$/);
   if (match) {
@@ -30,6 +34,20 @@ function resolvePrefecture(address: NominatimReverseResult["address"]): string |
     if (prefecture) return prefecture;
   }
   return address?.state ?? address?.province ?? null;
+}
+
+/**
+ * スポット種別の対象地域スコープ(region_scope)に応じて、spots.prefecture列に
+ * 入れる「地域」を解決する。'jp'=都道府県、'world'=国名、国コード=州・県
+ * (国により state/province/county のどれで返るかまちまちなため順に試す)
+ */
+function resolveRegion(
+  address: NominatimReverseResult["address"],
+  scope: string
+): string | null {
+  if (scope === "jp") return resolveJpPrefecture(address);
+  if (scope === "world") return address?.country ?? null;
+  return address?.state ?? address?.province ?? address?.county ?? null;
 }
 
 export async function GET(request: Request) {
@@ -44,6 +62,9 @@ export async function GET(request: Request) {
   if (!lat || !lng) {
     return NextResponse.json({ error: "lat, lng is required" }, { status: 400 });
   }
+  const scopeParam = searchParams.get("scope");
+  const scope =
+    scopeParam && isValidRegionScope(scopeParam) ? scopeParam : DEFAULT_REGION_SCOPE;
 
   const url =
     "https://nominatim.openstreetmap.org/reverse?" +
@@ -70,7 +91,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     data: {
-      prefecture: resolvePrefecture(address),
+      region: resolveRegion(address, scope),
       // 東京23区は city_district(区)、それ以外は city/town/village のどれかに入る
       municipality:
         address.city_district ?? address.city ?? address.town ?? address.village ?? null,
