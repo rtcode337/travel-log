@@ -166,11 +166,12 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 既定にできない)。ユーザーは`/[type]/account`の「別のスポットを見る」リンクから、
 公開範囲が許す他の種別にいつでも切り替えられる。管理者は同じ画面から
 新しい種別(キー+表示名)を追加できる。設定情報(公開範囲・口コミ等のON/OFF、ランクの
-一覧と見た目)込みでまとめて作りたい場合は、`{ key, label, settings?, ranks? }`形式の
+一覧と見た目、カテゴリの一覧)込みでまとめて作りたい場合は、
+`{ key, label, settings?, ranks?, categories? }`形式の
 JSONファイルをアップロードしても追加できる(travel-log-dataリポジトリの各スポットキー
 フォルダに`settings.json`として置いてあるものが例。詳細はtravel-log-data/README.md参照)。
-`settings`/`ranks`とも省略可で、省略時は既定値(`public_visible`はfalse=非公開、
-ランクは観光地の現行A〜E)になる。
+`settings`/`ranks`/`categories`とも省略可で、省略時は既定値(`public_visible`はfalse=非公開、
+ランクは観光地の現行A〜E、カテゴリは観光地の現行カテゴリ)になる。
 
 | 種別キー | 表示名 | 件数 | データソース・ランク基準 |
 |---|---|---|---|
@@ -219,8 +220,8 @@ name,name_kana,region,lat,lng,rank,category,description
   概要を表示する機能)自体を出さなくなる。大半のスポットにWikipedia記事が
   存在せずリンクが機能しない種別向け
 
-同じ画面で、ON/OFF以外の設定として**対象地域**(`region_scope`)と
-**Wikipedia言語**(`wikipedia_lang`)も種別ごとに変えられる。
+同じ画面で、ON/OFF以外の設定として**対象地域**(`region_scope`)・
+**Wikipedia言語**(`wikipedia_lang`)・**カテゴリの一覧**(`categories`)も種別ごとに変えられる。
 
 - **対象地域**: 「日本」(既定)・「国を指定」(ISO 3166-1 alpha-2の国コード)・
   「世界」の3択。スポットの「地域」欄の扱い(日本=47都道府県のセレクト、それ以外=
@@ -230,12 +231,18 @@ name,name_kana,region,lat,lng,rank,category,description
   (日本=現在地へズーム、それ以外=登録スポット全体にフィット)が切り替わる
 - **Wikipedia言語**: スポット詳細から開くWikipedia検索が参照する言語版
   (`ja`・`en`などのサブドメイン)。既定は`ja`
+- **カテゴリ**: この種別で使うカテゴリの一覧(カンマ・読点区切りで入力)。並び順が
+  そのまま地図・スポット一覧のカテゴリ絞り込みチップと、スポット追加・編集フォームの
+  サジェストの並びになる。何も保存していない種別は観光地の現行カテゴリ
+  (`lib/category.ts`の`DEFAULT_CATEGORIES`)が既定。空で保存すると「定義済みカテゴリなし」
+  になり、既存スポットに入っている値だけが絞り込み・サジェストに出る。`category`列自体は
+  従来どおり自由入力のため、一覧に無い値のスポットもそのまま動く(並びは一覧の後ろ)
 
 この手の設定はDBの`spot_type_settings`テーブル(`spot_type_id`/`key`/`value`のEAV形式)に
 保存しており、`spot_types`テーブル自体に列を増やさなくても新しい設定を追加できる
 (ON/OFF設定の追加時は`lib/types.ts`の`SPOT_TYPE_SETTING_DEFAULTS`/`SPOT_TYPE_SETTING_LABELS`に
 登録するだけでよく、管理画面には自動的にチェックボックスが増える。文字列値の設定は
-`lib/region.ts`・`lib/rankStyle.ts`のように個別に持つ)。
+`lib/region.ts`・`lib/rankStyle.ts`・`lib/category.ts`のように個別に持つ)。
 
 ## ランクの一覧・見た目のカスタマイズ
 
@@ -249,6 +256,10 @@ JSONで持たせられる(下記「スポット種別のJSONによる追加」�
 - ラベル文字の色(`textColor`)は省略可。省略時は背景色の明度から自動で白/濃色を選ぶ
 - 非公開スポット(status=`private`)は縁取り線の色は変えず破線にするだけで、
   色・大きさ・ラベルはそのランクと同じ見た目のまま(公開スポットは常に実線で縁取る)
+
+カテゴリの一覧も同様に種別ごとに持たせられる(こちらは見た目を持たない文字列配列のみ。
+JSONの`categories`フィールド、または管理画面「スポット種別の設定」のカテゴリ欄から指定する。
+上記「スポット種別の設定」参照)。
 
 ## スポット全削除
 
@@ -302,8 +313,8 @@ JSONで持たせられる(下記「スポット種別のJSONによる追加」�
 `spot_types`(スポット種別マスタ)/
 `spot_type_settings`(`spot_types`ごとの設定を`key`/`value`で持つEAV形式のテーブル。
 公開範囲(`public_visible`)・口コミ・Wikipediaリンクの有効/無効のほか、文字列値の
-対象地域(`region_scope`)・Wikipedia言語(`wikipedia_lang`)・ランク定義(`rank_styles`)も
-ここに入る。設定を増やしてもテーブル定義の変更が要らないようこのテーブルへの追加だけで
+対象地域(`region_scope`)・Wikipedia言語(`wikipedia_lang`)・ランク定義(`rank_styles`)・
+カテゴリ一覧(`categories`)もここに入る。設定を増やしてもテーブル定義の変更が要らないようこのテーブルへの追加だけで
 済むようにしてある。詳細は「CSVインポート形式」の次の「スポット種別の設定」参照)/
 `app_settings`(ログイン後・`/`アクセス時の既定の種別を1行だけ保持)/
 `spots`(スポットマスタ。`spot_type_id`で種別を持つ)/ `visits`(訪問記録・写真は非公開)/

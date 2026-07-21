@@ -1,25 +1,29 @@
 "use client";
 
 import { useMemo } from "react";
-import { distinctValues, type Rank, type Spot } from "@/lib/types";
+import { distinctValues, type Category, type Rank, type Spot } from "@/lib/types";
 import {
   autoTextColor,
   findRankStyle,
   getRankOrder,
   type RankStyleDefinition,
 } from "@/lib/rankStyle";
+import { getCategoryOrder } from "@/lib/category";
 
 export type VisitedValue = "visited" | "unvisited";
 
 export interface SpotFilters {
   /** 空配列 = ランクによる絞り込みなし(「すべて」選択中、全件表示) */
   ranks: Rank[];
+  /** 空配列 = カテゴリによる絞り込みなし(「すべて」選択中、全件表示) */
+  categories: Category[];
   /** 空配列 = 訪問状況による絞り込みなし(「すべて」選択中、全件表示) */
   visited: VisitedValue[];
 }
 
 export const DEFAULT_FILTERS: SpotFilters = {
   ranks: [],
+  categories: [],
   visited: [],
 };
 
@@ -29,10 +33,16 @@ export const DEFAULT_FILTERS: SpotFilters = {
 export function passesFilters(
   filters: SpotFilters,
   rank: Rank | null,
+  category: Category | null,
   isVisited: boolean
 ): boolean {
   if (filters.ranks.length > 0) {
     if (rank === null || !filters.ranks.includes(rank)) return false;
+  }
+  if (filters.categories.length > 0) {
+    if (category === null || !filters.categories.includes(category)) {
+      return false;
+    }
   }
   if (filters.visited.length > 0) {
     const value: VisitedValue = isVisited ? "visited" : "unvisited";
@@ -94,13 +104,16 @@ export default function FilterBar({
   filters,
   onChange,
   rankStyles,
+  categories,
 }: {
-  /** 現在アクティブなスポット種別の実データから、ランクの選択肢を動的に作る */
+  /** 現在アクティブなスポット種別の実データから、ランク・カテゴリの選択肢を動的に作る */
   spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;
   /** このスポット種別のランク設定(lib/useRankStyles.ts参照) */
   rankStyles: RankStyleDefinition[];
+  /** このスポット種別のカテゴリ設定(並び順に使う。lib/useCategories.ts参照) */
+  categories: Category[];
 }) {
   const availableRanks = useMemo(
     () =>
@@ -108,6 +121,15 @@ export default function FilterBar({
         (a, b) => getRankOrder(a, rankStyles) - getRankOrder(b, rankStyles)
       ),
     [spots, rankStyles]
+  );
+  // 選択肢は実データに存在する値から作り、種別のカテゴリ設定の並び順に揃える
+  // (設定に無い値はdistinctValuesの五十音順のまま末尾に出す)
+  const availableCategories = useMemo(
+    () =>
+      distinctValues(spots.map((s) => s.category)).sort(
+        (a, b) => getCategoryOrder(a, categories) - getCategoryOrder(b, categories)
+      ),
+    [spots, categories]
   );
 
   return (
@@ -144,6 +166,36 @@ export default function FilterBar({
               active={filters.ranks.length === 0}
               activeClassName={ALL_CHIP_ACTIVE_CLASS}
               onClick={() => onChange({ ...filters, ranks: [] })}
+            />
+          </div>
+        </div>
+      )}
+
+      {availableCategories.length > 0 && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-gray-500">
+            カテゴリ
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {availableCategories.map((category) => (
+              <Chip
+                key={category}
+                label={category}
+                active={filters.categories.includes(category)}
+                activeClassName={ALL_CHIP_ACTIVE_CLASS}
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    categories: toggleSelection(filters.categories, category),
+                  })
+                }
+              />
+            ))}
+            <Chip
+              label="すべて"
+              active={filters.categories.length === 0}
+              activeClassName={ALL_CHIP_ACTIVE_CLASS}
+              onClick={() => onChange({ ...filters, categories: [] })}
             />
           </div>
         </div>
