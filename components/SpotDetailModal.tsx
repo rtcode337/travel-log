@@ -318,9 +318,7 @@ export default function SpotDetailModal({
                     <p className="mt-1 text-xs text-red-600">{actionError}</p>
                   )}
                   <p className="text-xs text-gray-500">
-                    {spot.prefecture}
-                    {spot.municipality && ` ${spot.municipality}`} ・{" "}
-                    {spot.category}
+                    {spot.region} ・ {spot.category}
                     {reviewsEnabled && reviewsTotal > 0 && (
                       <span className="ml-2 text-gray-400">
                         口コミ{reviewsTotal}件
@@ -414,16 +412,6 @@ export default function SpotDetailModal({
                   <DirectionsIcon className="size-5" />
                 </a>
               </div>
-              {spot.official_url && (
-                <a
-                  href={spot.official_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-block text-sm text-blue-600 underline"
-                >
-                  公式サイト ↗
-                </a>
-              )}
             </div>
 
             {/* 訪問履歴 */}
@@ -601,8 +589,7 @@ export default function SpotDetailModal({
       {showInfo && spot && (
         <SpotInfoModal
           spotName={spot.name}
-          prefecture={spot.prefecture}
-          municipality={spot.municipality}
+          region={spot.region}
           lang={wikipediaLang}
           onClose={() => setShowInfo(false)}
         />

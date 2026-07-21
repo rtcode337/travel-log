@@ -59,8 +59,7 @@ export default function AddSpotModal({
 
   const [name, setName] = useState(spot?.name ?? "");
   const [nameKana, setNameKana] = useState(spot?.name_kana ?? "");
-  const [prefecture, setPrefecture] = useState(spot?.prefecture ?? "");
-  const [municipality, setMunicipality] = useState(spot?.municipality ?? "");
+  const [region, setRegion] = useState(spot?.region ?? "");
   const [spotLat, setSpotLat] = useState(String(spot?.lat ?? lat ?? ""));
   const [spotLng, setSpotLng] = useState(String(spot?.lng ?? lng ?? ""));
   const [rank, setRank] = useState<Rank>(spot?.rank ?? "");
@@ -72,7 +71,7 @@ export default function AddSpotModal({
   const [error, setError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
 
-  // 新規追加時のみ、置いた座標から地域(都道府県/州・県/国)・市区町村を自動入力する
+  // 新規追加時のみ、置いた座標から地域(都道府県/州・県/国)を自動入力する
   // (手で上書き可能)。地域の解決方法がスコープに依存するため、スコープの取得完了を待つ
   useEffect(() => {
     if (isEdit || lat == null || lng == null || regionScope === null) return;
@@ -80,17 +79,14 @@ export default function AddSpotModal({
     api.geocode.reverse(lat, lng, regionScope).then(({ data }) => {
       setLocating(false);
       if (!data) return;
-      const region = data.region;
+      const resolved = data.region;
       // 'jp'では既知の都道府県名のみ採用(セレクトボックスに無い値を入れない)
       if (
-        region &&
+        resolved &&
         (regionScope !== "jp" ||
-          PREFECTURES.includes(region as (typeof PREFECTURES)[number]))
+          PREFECTURES.includes(resolved as (typeof PREFECTURES)[number]))
       ) {
-        setPrefecture((prev) => prev || region);
-      }
-      if (data.municipality) {
-        setMunicipality((prev) => prev || data.municipality!);
+        setRegion((prev) => prev || resolved);
       }
     });
   }, [isEdit, lat, lng, regionScope]);
@@ -101,7 +97,7 @@ export default function AddSpotModal({
   );
   // 'jp'以外のスコープでは地域は自由入力のため、既存スポットの地域をサジェストする
   const availableRegions = useMemo(
-    () => distinctValues(spots.map((s) => s.prefecture)),
+    () => distinctValues(spots.map((s) => s.region)),
     [spots]
   );
   const availableCategories = useMemo(
@@ -116,14 +112,12 @@ export default function AddSpotModal({
     const payload = {
       name: name.trim(),
       name_kana: nameKana.trim() || null,
-      prefecture: prefecture.trim(),
-      municipality: municipality.trim() || null,
+      region: region.trim(),
       lat: Number(spotLat),
       lng: Number(spotLng),
       rank: rank.trim() || null,
       category: category.trim() || null,
       description: description.trim() || null,
-      official_url: spot?.official_url ?? null,
     };
     const { data, error } = isEdit
       ? await api.spots.update(spot!.id, payload)
@@ -227,53 +221,41 @@ export default function AddSpotModal({
         {locating && (
           <p className="text-xs text-gray-400">座標から住所を自動取得中…</p>
         )}
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              {regionFieldLabel(scope)} *
-            </label>
-            {scope === "jp" ? (
-              <select
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            {regionFieldLabel(scope)} *
+          </label>
+          {scope === "jp" ? (
+            <select
+              required
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+            >
+              <option value="">選択</option>
+              {PREFECTURES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <>
+              <input
                 required
-                value={prefecture}
-                onChange={(e) => setPrefecture(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-              >
-                <option value="">選択</option>
-                {PREFECTURES.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
+                autoComplete="off"
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                list="add-spot-region-suggestions"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+              <datalist id="add-spot-region-suggestions">
+                {availableRegions.map((r) => (
+                  <option key={r} value={r} />
                 ))}
-              </select>
-            ) : (
-              <>
-                <input
-                  required
-                  autoComplete="off"
-                  value={prefecture}
-                  onChange={(e) => setPrefecture(e.target.value)}
-                  list="add-spot-region-suggestions"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                />
-                <datalist id="add-spot-region-suggestions">
-                  {availableRegions.map((r) => (
-                    <option key={r} value={r} />
-                  ))}
-                </datalist>
-              </>
-            )}
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              市区町村
-            </label>
-            <input
-              value={municipality}
-              onChange={(e) => setMunicipality(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
+              </datalist>
+            </>
+          )}
         </div>
         {(isEdit || lat == null) && (
           <div className="grid grid-cols-2 gap-2">
