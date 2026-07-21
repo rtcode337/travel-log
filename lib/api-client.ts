@@ -148,7 +148,7 @@ export const api = {
         `/api/geocode?q=${encodeURIComponent(q)}&scope=${encodeURIComponent(scope)}`
       ),
     reverse: (lat: number, lng: number, scope: string) =>
-      request<{ region: string | null; municipality: string | null }>(
+      request<{ region: string | null }>(
         `/api/geocode/reverse?lat=${lat}&lng=${lng}&scope=${encodeURIComponent(scope)}`
       ),
   },

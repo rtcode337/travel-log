@@ -81,8 +81,8 @@ export async function saveVisitPhoto(
 }
 
 /**
- * visits.photosの値からファイルを削除する。移行前の旧データ(data URL)や
- * 既に存在しないファイルは黙ってスキップする(訪問記録の削除自体は妨げない)
+ * visits.photosの値からファイルを削除する。パスとして解釈できない値や既に
+ * 存在しないファイルは黙ってスキップする(訪問記録の削除自体は妨げない)
  */
 export async function deleteVisitPhotos(photos: string[]): Promise<void> {
   await Promise.all(
