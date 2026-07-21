@@ -51,9 +51,9 @@
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-初回起動時、Postgres コンテナが `db/init/` 配下のSQL(`01_schema.sql`=スキーマ一式、
-`02_tourist_spots_by_prefecture.sh`=`tourist_by_prefecture/`配下の観光地データ(都道府県別ファイル)を
-順に読み込むラッパー)を自動実行してテーブルを作成する。他のスポット種別を追加したい場合は、
+初回起動時、Postgres コンテナが `db/init/` 配下(`01_schema.sql`=スキーマ一式、
+`02_tourist_spots.sh`=観光地データ全件(`tourist_spots.csv`)を読み込むラッパー)を
+自動実行してテーブルを作成する。他のスポット種別を追加したい場合は、
 後述の「外部データ(travel-log-data)」の通り管理画面から別途取り込む。
 
 http://localhost:3000 を開くと `/login` にリダイレクトされる。初回はアカウントが
@@ -65,8 +65,9 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 ローカルに Postgres を別途用意し、`.env.example` を `.env.local` としてコピーして
 `DATABASE_URL` / `SESSION_SECRET` を設定した上で `npm install && npm run dev` でも
-起動できる。その場合は `db/init/` 配下のSQL(`tourist_by_prefecture/*.sql`を含む)を
-ファイル名の順(`01_`→`02_`)に手動で実行する。
+起動できる。その場合は `db/init/` 配下をファイル名の順(`01_`→`02_`)に手動で実行する
+(`02_tourist_spots.sh`はpsqlへの`-f`指定ではなくシェルスクリプトなので、
+そのまま実行するか、中身の`\copy`+`insert`を直接流し込む)。
 
 ## Googleログインの設定(任意)
 
@@ -175,7 +176,7 @@ JSONファイルをアップロードしても追加できる(travel-log-dataリ
 
 | 種別キー | 表示名 | 件数 | データソース・ランク基準 |
 |---|---|---|---|
-| `tourist` | 観光地 | 7,039件 | Wikipedia(ja)月次ページビュー数によるA〜E区分(詳細は次節)。都道府県別に`db/init/tourist_by_prefecture/`配下のファイルに分割 |
+| `tourist` | 観光地 | 7,039件 | Wikipedia(ja)月次ページビュー数によるA〜E区分(詳細は次節)。全件`db/init/tourist_spots.csv`から`db/init/02_tourist_spots.sh`経由でアプリ初期化時に自動投入 |
 
 ## 外部データ(travel-log-data)
 
@@ -183,8 +184,11 @@ JSONファイルをアップロードしても追加できる(travel-log-dataリ
 コミットせず、別リポジトリ[travel-log-data](https://github.com/rtcode337/travel-log-data)に
 `<スポットキー>/`フォルダ単位(例: `<スポットキー>/spots.csv`)で置く運用にできる。取り込みは
 新しい仕組みを用意せず、下記「CSVインポート形式」の通り`/[type]/admin`の既存のCSVインポート
-機能をそのまま使う(自動取り込みの仕組みはない)。既に`db/init/`に同梱している観光地は
-当面そのままだが、今後追加する種別は基本的にこちらの形に揃える。
+機能をそのまま使う(自動取り込みの仕組みはない)。`tourist`だけは例外で、唯一の既定種別として
+アプリ初期化時に自動で入っている必要があるため、travel-log-data側の`tourist/spots.csv`と
+同内容をtravel-log本体の`db/init/tourist_spots.csv`にも複製し、`db/init/02_tourist_spots.sh`が
+自動投入する(手動CSVインポートは不要)。今後追加する種別はこの例外に倣わず、
+travel-log-data側のみに置いて手動CSVインポートで取り込む形に揃える。
 
 ## CSVインポート形式
 

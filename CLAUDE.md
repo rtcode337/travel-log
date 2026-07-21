@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## コマンド
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。db/init/*.sqlは db/data/ が空の場合のみ自動実行される
+docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。db/init/配下は db/data/ が空の場合のみ自動実行される
 docker compose up --build                              # 本番用(NAS等): next buildの成果物で起動。SESSION_SECRET環境変数が必須
 npm run dev                                             # Next.js開発サーバー(ローカルPostgresを直接使う場合のみ)
 npm run build                                            # 本番ビルド
@@ -20,15 +20,15 @@ npm run lint                                              # next lint
 
 このプロジェクトにテストスイート/テストコマンドは存在しない。
 
-`db/init/*.sql`は既存の`db/data/`(Postgresの実データ。リポジトリ直下にbindマウントされるが`.gitignore`対象)に対しては自動実行されない。`db/data/`が既に存在する場合、新規または変更したinitファイルは手動で適用する。
+`db/init/`配下は既存の`db/data/`(Postgresの実データ。リポジトリ直下にbindマウントされるが`.gitignore`対象)に対しては自動実行されない。`db/data/`が既に存在する場合、新規または変更したinitファイルは手動で適用する(`.sql`ファイルはそのままpsqlに流し込めばよいが、`02_tourist_spots.sh`はpsqlへのファイル読み込みではなくシェルスクリプトなので、既存データへの反映が必要な場合は中身のSQL(`\copy`+`insert`)を直接実行する)。
 
 ```bash
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d travel_log < db/init/<file>.sql
 ```
 
-`db/init/tourist_by_prefecture/*.sql`(都道府県ごとの観光地データをINSERTするファイル。`02_tourist_spots_by_prefecture.sh`が全件読み込む)を編集する際は、本番の`spots`/`spot_types`テーブルではなく使い捨てのスキーマで検証すること(このリポジトリの過去のやり方: `create schema lint_check`→`create table lint_check.spots (like public.spots including all)`→`search_path`をそこに向けてファイルを流し込む→`drop schema lint_check cascade`)。シードファイルの検証のために本物の`public.spots`を`truncate`・再投入しないこと。
+`db/init/tourist_spots.csv`(観光地データ全件。列は`name,name_kana,region,lat,lng,rank,category,description`で、travel-log-dataリポジトリの`tourist/spots.csv`と同内容)を編集する際は、本番の`spots`/`spot_types`テーブルではなく使い捨てのスキーマで検証すること(このリポジトリの過去のやり方: `create schema lint_check`→`create table lint_check.spots (like public.spots including all)`→`search_path`をそこに向けてCOPYする→`drop schema lint_check cascade`)。シードファイルの検証のために本物の`public.spots`を`truncate`・再投入しないこと。編集したら[travel-log-data](../travel-log-data)側の`tourist/spots.csv`にも同じ内容を反映すること(2つのリポジトリで同じデータを別々に持っている)。
 
-`docker-entrypoint-initdb.d`(=`db/init/`)はサブディレクトリを走査しない(postgres公式イメージの`docker-entrypoint.sh`は`/docker-entrypoint-initdb.d/*`を1階層のみglobし、ディレクトリは`ignoring`されて無視される)。そのため`tourist_by_prefecture/`配下は`db/init/02_tourist_spots_by_prefecture.sh`という実行可能なラッパースクリプトを通じて読み込ませている。新しく都道府県別以外のサブフォルダ構成を追加する場合も、同様のラッパー(または`docker-entrypoint-initdb.d`直下への配置)が必要になる点に注意。
+`docker-entrypoint-initdb.d`(=`db/init/`)は`*.sql`ファイルしか自動実行しない(postgres公式イメージの`docker-entrypoint.sh`が拡張子で判定するため、CSVを置くだけでは読み込まれず、サブディレクトリも1階層しかglobせず`ignoring`されて無視される)。そのため観光地データは`db/init/02_tourist_spots.sh`という実行可能なラッパースクリプトが、一時テーブルへ`tourist_spots.csv`を`\copy`した上で`spots`へINSERTする形で読み込ませている。他の種別はこの自動初期化の対象ではなく、`/[type]/admin`のCSVインポートから手動で取り込む(下記「外部データソース」の段落参照)。
 
 ## アーキテクチャ
 
@@ -36,7 +36,7 @@ docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d travel
 
 **認証はNextAuthではなく自前実装。** `lib/auth/session.ts`がHMAC-SHA256で署名したCookie(Web Crypto APIのみ使用、外部依存なし)を発行し、Edge実行の`middleware.ts`とNode実行のRoute Handlersの両方で同じロジックにより検証できるようにしている。Cookieには`{ sub: userId, exp }`のみを持たせ、roleは意図的にCookieに含めていない — `lib/auth/current-user.ts`経由で毎リクエストDBから引き直すことで、管理者によるロール変更やDB作り直しが古いCookieのまま反映されない事態を防いでいる。`middleware.ts`は`/login`と`/api/**`以外の全ルートをガードする。
 
-**単一の`spots`テーブルを`spot_types`により複数の「種別」で使い回す設計。** `tourist`(観光地。都道府県別に`db/init/tourist_by_prefecture/`配下へ分割)がアプリ初期化時(`db/init/01_schema.sql`)に必ず作成される唯一の既定種別で、それ以外の種別は管理者が`/[type]/admin`から追加する(空の種別ではデータが入らないだけで、削除しない限り存在し続ける)。データ量の大きい種別を追加する場合は、シードデータを`db/init/`に直接コミットせず外部リポジトリ[travel-log-data](../travel-log-data)にCSVとして置き、`/[type]/admin`のCSVインポートから取り込む運用にできる(下記「外部データソース」の段落参照)。画面は`/[type]/map`のように`spot_types.key`をURLの動的セグメントとして持ち、種別ごとに独立してアクセスする(`app_settings.active_spot_type_id`はログイン後・ルート`/`アクセス時の既定リダイレクト先を1つだけ保持するのみで、他の種別を隠すものではない)。種別ごとの公開範囲は`spot_type_settings`の`public_visible`設定(既定false=admin/spot_admin限定)で制御し、`lib/spot-type-access.ts`の`canViewSpotType`で判定する(`/[type]/admin`だけは`public_visible`に関わらず常にアクセス可)。かつてあった`spot_types.visibility`列(`public`/`admin_only`/`disabled`の3値)は廃止し、`disabled`(誰にも見せない)相当は種別自体の削除で代替するようにした。新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, ranks?, categories? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/ranks/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/ranks/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。`spots.rank`/`category`は自由入力で、`spot_type = 'tourist'`のときのみ「ランクの決め方」の基準が意味を持つ(値の一覧は`lib/types.ts`の`RANKS`と`lib/category.ts`の`DEFAULT_CATEGORIES`とそのコメントを参照)。
+**単一の`spots`テーブルを`spot_types`により複数の「種別」で使い回す設計。** `tourist`(観光地。全件`db/init/tourist_spots.csv`から`db/init/02_tourist_spots.sh`経由で投入)がアプリ初期化時(`db/init/01_schema.sql`)に必ず作成される唯一の既定種別で、それ以外の種別は管理者が`/[type]/admin`から追加する(空の種別ではデータが入らないだけで、削除しない限り存在し続ける)。データ量の大きい種別を追加する場合は、シードデータを`db/init/`に直接コミットせず外部リポジトリ[travel-log-data](../travel-log-data)にCSVとして置き、`/[type]/admin`のCSVインポートから取り込む運用にできる(下記「外部データソース」の段落参照)。画面は`/[type]/map`のように`spot_types.key`をURLの動的セグメントとして持ち、種別ごとに独立してアクセスする(`app_settings.active_spot_type_id`はログイン後・ルート`/`アクセス時の既定リダイレクト先を1つだけ保持するのみで、他の種別を隠すものではない)。種別ごとの公開範囲は`spot_type_settings`の`public_visible`設定(既定false=admin/spot_admin限定)で制御し、`lib/spot-type-access.ts`の`canViewSpotType`で判定する(`/[type]/admin`だけは`public_visible`に関わらず常にアクセス可)。かつてあった`spot_types.visibility`列(`public`/`admin_only`/`disabled`の3値)は廃止し、`disabled`(誰にも見せない)相当は種別自体の削除で代替するようにした。新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, ranks?, categories? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/ranks/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/ranks/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。`spots.rank`/`category`は自由入力で、`spot_type = 'tourist'`のときのみ「ランクの決め方」の基準が意味を持つ(値の一覧は`lib/types.ts`の`RANKS`と`lib/category.ts`の`DEFAULT_CATEGORIES`とそのコメントを参照)。
 
 **スポット種別ごとに「対象地域」(`region_scope`)を持ち、日本以外・世界全体の種別も作れる。** `spot_type_settings`の`region_scope`キー(文字列値。`lib/region.ts`)に`'jp'`(既定)・ISO 3166-1 alpha-2の国コード小文字・`'world'`のいずれかを保存し、`resolveRegionScope`で解決する(未設定・不正値は`'jp'`)。DBの`spots.region`列はどのスコープでもそのまま使い、「地域」(日本=都道府県、国指定=州・県、世界=国名)として読み替える。スコープに連動するのは、(1)スポット追加・編集フォームの地域欄(`'jp'`のみ`PREFECTURES`のセレクト、他は自由入力+既存値datalist)、(2)`/[type]/spots`の地域タブの名称(`regionFieldLabel`: 都道府県/州・県/国)と並び順(`compareRegions`: `'jp'`はJIS順・リスト外の値も末尾に表示、他は五十音順)、(3)地名検索`/api/geocode`の`countrycodes`(`scope`クエリパラメータで渡す。`'world'`は絞り込みなし)、(4)逆ジオ`/api/geocode/reverse`の地域解決(`'jp'`=ISO3166-2コード→都道府県、国指定=state/province/county、`'world'`=国名。レスポンスのキーは`region`)、(5)`/[type]/map`初回表示(`'jp'`=従来どおり現在地取得、他=登録スポット全体へfitBounds・スポット0件時は世界全体表示)。地図の表示位置の記憶(`MapView`の`lastViews`)も種別ごとに分けている。あわせて`wikipedia_lang`キー(既定`'ja'`、`resolveWikipediaLang`)でスポット詳細のWikipedia検索(`SpotInfoModal`)の言語版サブドメインを種別ごとに切り替えられる。どちらも`/[type]/admin`「スポット種別の設定」の「対象地域とWikipedia言語」フォーム(admin専用)から変更し、PATCH `/api/spot-types/[id]`が値の妥当性を検証する。`PREFECTURES`(47都道府県ハードコード)を「地域の全集合」として使ってよいのは`'jp'`スコープの文脈だけ、という点に注意。かつては列名が`spots.prefecture`のままだったが、日本以外の種別で意味が合わなくなるため`spots.region`に改名した(CSVインポートのヘッダ・travel-log-data側のCSVも`region`に統一済み。旧名の後方互換は持たせていない)。同時に`municipality`(市区町村)・`official_url`(公式サイト)・`source`(データ出所)の3列も廃止した — `municipality`は`region_scope`と連動しておらず海外スコープでは州・県が抜けて粒度が飛ぶうえ重複判定にも検索にも使っていなかったため、`official_url`は表示コードはあったが入力手段がCSVのみで実データが1件も無かったため、`source`は書き込むだけでどこからも読んでいなかったため。
 
@@ -52,7 +52,7 @@ docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d travel
 
 **`reviews`と`visits`は意図的に非対称な設計。** `reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、必訪ランクの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される。`photos`(text[])にはBase64ではなく、`photos/`フォルダ(docker-composeでbindマウント、`lib/photos.ts`)へ保存したファイルの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
 
-**tourist spotsの`rank`はこのリポジトリの外で一度だけ計算されたパイプラインの成果物であり、アプリ側が動的に計算するものではない。** Wikipedia(ja)月次ページビュー数に基づく相対順位(パーセンタイル)の機械分類(README「ランクの決め方」および`db/init/tourist_by_prefecture/`配下の各ファイル冒頭のコメント参照)。手動でスポットを追加する場合も、この基準に沿ったランクを付けること。
+**tourist spotsの`rank`はこのリポジトリの外で一度だけ計算されたパイプラインの成果物であり、アプリ側が動的に計算するものではない。** Wikipedia(ja)月次ページビュー数に基づく相対順位(パーセンタイル)の機械分類(README「ランクの決め方」参照)。手動でスポットを追加する場合も、この基準に沿ったランクを付けること。
 
 ## 外部データソース(Wikipedia、OSM Overpass/Nominatim、政府オープンデータ等)を扱う際の注意
 
@@ -62,7 +62,7 @@ docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d travel
 - レンダリング済みHTMLのスクレイピングより、公式API(MediaWiki REST/Action API、Overpass QL)を優先すること
 - 政府や第三者のオープンデータには、このアプリのライセンスと整合しない利用制限(非商用限定など)が付いていることが多い。そうしたデータセットの中身(名称・座標・説明文)をそのまま`db/init/`に転記しないこと。せいぜい「抜けているスポットに気づくためのヒント」として使い、実際のデータ(座標・説明文)はライセンス面で問題のない別ソースから取り直すこと
 - 一括でスポットを追加した後は、コミット前に既存行との重複(名前一致・近接座標)がないか確認すること — 既存の`tourist`のシードデータ(7,039件)にも、過去のインポートで名前だけの突き合わせをすり抜けた重複に近いものが存在する
-- 容量の大きいシードデータ(数千〜数万件規模)は、travel-logリポジトリ本体の`db/init/`に直接コミットせず、外部リポジトリ[travel-log-data](../travel-log-data)側に`<スポットキー>/`フォルダ単位のCSVとして置き、`/[type]/admin`の既存CSVインポート機能で取り込む(詳細はtravel-log-data/README.md参照)。`tourist`は現状`db/init/`に同梱したままだが、新規追加する種別は基本的にこちらの形に揃えること
+- 容量の大きいシードデータ(数千〜数万件規模)は、travel-logリポジトリ本体の`db/init/`に直接コミットせず、外部リポジトリ[travel-log-data](../travel-log-data)側に`<スポットキー>/`フォルダ単位のCSVとして置き、`/[type]/admin`の既存CSVインポート機能で取り込む(詳細はtravel-log-data/README.md参照)。`tourist`だけは例外で、アプリ初期化時に自動で入っている必要がある(唯一の既定種別のため)ことから、travel-log-data側の`tourist/spots.csv`と同内容を`db/init/tourist_spots.csv`としてtravel-log本体にも複製し、`db/init/02_tourist_spots.sh`経由で自動投入している。新規追加する種別はこの例外に倣わず、travel-log-data側のみに置いて手動CSVインポートで取り込む形に揃えること
 
 ## コミット前に
 
