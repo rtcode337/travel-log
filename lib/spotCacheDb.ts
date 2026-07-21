@@ -133,6 +133,22 @@ export async function writeSpotCacheDb(
   }
 }
 
+export async function deleteSpotCacheDb(typeKey: string): Promise<void> {
+  if (!idbAvailable()) return;
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(typeKey);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * 旧localStorage方式(種別ごとに1つのJSON文字列)のキャッシュを掃除する。
  * 中身はprefecture/municipality時代の形なので引き継がず、キーを消すだけにして

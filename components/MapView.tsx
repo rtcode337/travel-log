@@ -761,10 +761,34 @@ export default function MapView({
               <button
                 type="button"
                 onClick={spotCache.startManualDownload}
-                disabled={spotCache.downloading}
+                disabled={spotCache.checkingSize || spotCache.downloading}
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
               >
-                {spotCache.downloading ? "確認中…" : "公開スポットをダウンロード"}
+                {spotCache.checkingSize
+                  ? "確認中…"
+                  : spotCache.downloading
+                    ? "ダウンロード中…"
+                    : "公開スポットをダウンロード"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    confirm(
+                      "ダウンロード済みの公開スポットデータを削除しますか?次にこの画面を開いたとき、再ダウンロードが必要になります。"
+                    )
+                  ) {
+                    spotCache.clearCache();
+                  }
+                }}
+                disabled={
+                  !spotCache.downloadedAt ||
+                  spotCache.checkingSize ||
+                  spotCache.downloading
+                }
+                className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-red-600 disabled:opacity-50"
+              >
+                ダウンロードした公開スポットを削除
               </button>
             </div>
           </div>
