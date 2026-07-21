@@ -5,6 +5,7 @@ import { getSpotTypeSetting, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { deleteVisitPhotos } from "@/lib/photos";
 import { parseRankStyles, RANK_STYLES_SETTING_KEY } from "@/lib/rankStyle";
+import { CATEGORIES_SETTING_KEY, parseCategories } from "@/lib/category";
 import {
   isValidRegionScope,
   isValidWikipediaLang,
@@ -54,6 +55,17 @@ export async function PATCH(
           { status: 400 }
         );
       }
+    }
+    if (
+      key === CATEGORIES_SETTING_KEY &&
+      (typeof value !== "string" || parseCategories(value) === null)
+    ) {
+      return NextResponse.json(
+        {
+          error: `${CATEGORIES_SETTING_KEY}は文字列配列のJSONである必要があります。`,
+        },
+        { status: 400 }
+      );
     }
     if (
       key === REGION_SCOPE_SETTING_KEY &&
