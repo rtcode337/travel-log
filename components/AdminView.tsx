@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
 import { RANK_STYLES_SETTING_KEY } from "@/lib/rankStyle";
+import { CATEGORIES_SETTING_KEY, resolveCategories } from "@/lib/category";
 import {
   countryDisplayName,
   DEFAULT_WIKIPEDIA_LANG,
@@ -104,6 +105,10 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
   const [wikiLangDraft, setWikiLangDraft] = useState(DEFAULT_WIKIPEDIA_LANG);
   const [savingRegionSettings, setSavingRegionSettings] = useState(false);
 
+  // この種別で使うカテゴリ一覧(カンマ区切り)の編集用下書き
+  const [categoriesDraft, setCategoriesDraft] = useState("");
+  const [savingCategories, setSavingCategories] = useState(false);
+
   const currentType = useMemo(
     () => spotTypes.find((t) => t.key === typeKey) ?? null,
     [spotTypes, typeKey]
@@ -120,6 +125,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     );
     setRegionCountryCode(scope === "jp" || scope === "world" ? "" : scope);
     setWikiLangDraft(resolveWikipediaLang(currentType));
+    setCategoriesDraft(resolveCategories(currentType).join("、"));
   }, [currentType]);
 
   useEffect(() => {
@@ -345,6 +351,35 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
     loadSpotTypes();
   };
 
+  const handleSaveCategories = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentType) return;
+    // 読点・カンマのどちらで区切ってもよい。重複と空要素は除いて保存する
+    const list = Array.from(
+      new Set(
+        categoriesDraft
+          .split(/[,、]/)
+          .map((c) => c.trim())
+          .filter((c) => c !== "")
+      )
+    );
+    setSavingCategories(true);
+    const { error } = await api.spotTypes.applySettings(currentType.id, {
+      [CATEGORIES_SETTING_KEY]: JSON.stringify(list),
+    });
+    setSavingCategories(false);
+    if (error) {
+      setTypeSettingsMessage("カテゴリの保存に失敗しました: " + error.message);
+      return;
+    }
+    setTypeSettingsMessage(
+      list.length > 0
+        ? `「${currentType.label}」のカテゴリを「${list.join("、")}」にしました。`
+        : `「${currentType.label}」のカテゴリを未定義(空)にしました。`
+    );
+    loadSpotTypes();
+  };
+
   const handleDeleteType = async (type: SpotType) => {
     if (
       !confirm(
@@ -406,7 +441,7 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
         setTypeMessage("JSONの内容が不正です: " + parsed.error);
         return;
       }
-      const { key, label, settings, ranks } = parsed.data;
+      const { key, label, settings, ranks, categories } = parsed.data;
 
       const { data: created, error } = await api.spotTypes.create(key, label);
       if (error || !created) {
@@ -414,14 +449,18 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
         return;
       }
 
-      // ranksが指定されていれば、真偽値の設定と合わせて1回のPATCHで反映する
-      // (省略時はDEFAULT_RANK_STYLES=観光地のA〜Eにフォールバックするので何もしない)
+      // ranks/categoriesが指定されていれば、真偽値の設定と合わせて1回のPATCHで反映する
+      // (省略時はDEFAULT_RANK_STYLES=観光地のA〜E、DEFAULT_CATEGORIES=観光地の
+      // カテゴリにフォールバックするので何もしない)
       const settingsToApply: Record<string, boolean | string> = {};
       for (const [k, v] of Object.entries(settings ?? {})) {
         if (v !== undefined) settingsToApply[k] = v;
       }
       if (ranks) {
         settingsToApply[RANK_STYLES_SETTING_KEY] = JSON.stringify(ranks);
+      }
+      if (categories) {
+        settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
       }
 
       if (Object.keys(settingsToApply).length > 0) {
@@ -826,6 +865,37 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                     </button>
                   </div>
                 </form>
+
+                <form
+                  onSubmit={handleSaveCategories}
+                  className="mt-3 border-t border-gray-100 pt-3"
+                >
+                  <p className="mb-1 text-sm font-medium">カテゴリ</p>
+                  <p className="mb-2 text-xs text-gray-500">
+                    この種別で使うカテゴリの一覧(カンマまたは読点区切り。並び順が
+                    そのまま絞り込みチップ・スポット追加時のサジェストの並びになる)。
+                    空で保存するとカテゴリ未定義になり、既存スポットに入っている値
+                    だけが絞り込み・サジェストに出る。未保存の種別は観光地の
+                    カテゴリが既定。カテゴリ自体は自由入力のため、一覧に無い値の
+                    スポットもそのまま動く(並びは一覧の後ろになる)。
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={categoriesDraft}
+                      onChange={(e) => setCategoriesDraft(e.target.value)}
+                      placeholder="神社仏閣、自然、城、…"
+                      autoComplete="off"
+                      className="min-w-60 flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingCategories}
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                    >
+                      {savingCategories ? "保存中…" : "保存"}
+                    </button>
+                  </div>
+                </form>
               </section>
             )}
 
@@ -1044,10 +1114,12 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                   <p className="mb-2 text-xs text-gray-500">
                     設定情報込みのJSONファイルからも追加できる
                     (
-                    <code>{"{ key, label, settings?, ranks? }"}</code>
+                    <code>{"{ key, label, settings?, ranks?, categories? }"}</code>
                     形式。<code>ranks</code>はそのスポット種別で使えるランクの一覧と
                     表示スタイル(色・縁取り線の色・地図ピンの大きさ・ラベル)の配列で、
-                    省略すると観光地のA〜Eが既定になる。<code>settings</code>には
+                    省略すると観光地のA〜Eが既定になる。<code>categories</code>は
+                    使うカテゴリの一覧(文字列配列)で、省略すると観光地のカテゴリが
+                    既定になる。<code>settings</code>には
                     true/falseの設定のほか、対象地域<code>region_scope</code>
                     ('jp'/国コード/'world')・<code>wikipedia_lang</code>('en'等)も
                     指定できる。travel-log-dataリポジトリの
