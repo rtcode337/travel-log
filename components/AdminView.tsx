@@ -1117,9 +1117,9 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
               <h2 className="mb-2 text-base font-bold">別のスポット種別の管理</h2>
               <section className="rounded-xl border border-gray-200 bg-white p-3">
                 <p className="mb-3 text-xs text-gray-500">
-                  現在開いている「{currentTypeLabel}」以外のスポット種別の一覧。種別名を
-                  クリックするとそのページに移動する(公開/非公開の切り替えは、移動先の
-                  「スポット種別の設定」から行う)。削除は非公開の種別のみ行える
+                  スポット種別の一覧。種別名をクリックするとそのページに移動する
+                  (公開/非公開の切り替えは、移動先の「スポット種別の設定」から行う)。
+                  削除は非公開の種別のみ行える
                   (スポットが残っていれば全件削除してから種別自体を削除する)。
                 </p>
                 {typeMessage && (
@@ -1129,25 +1129,29 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
                 )}
                 <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
                   {spotTypes
-                    .filter((t) => t.key !== typeKey)
                     .map((t) => {
                       const isPublic = getSpotTypeSetting(t, "public_visible");
+                      const isCurrent = t.key === typeKey;
                       return (
                         <li key={t.id} className="flex items-center gap-3 px-3 py-2">
                           <span className="flex-1 text-sm">
-                            <Link
-                              href={`/${t.key}/admin`}
-                              className="text-blue-600 underline"
-                            >
-                              {t.label}
-                            </Link>{" "}
+                            {isCurrent ? (
+                              <span>{t.label}</span>
+                            ) : (
+                              <Link
+                                href={`/${t.key}/admin`}
+                                className="text-blue-600 underline"
+                              >
+                                {t.label}
+                              </Link>
+                            )}{" "}
                             <span className="text-gray-400">({t.key})</span>
                           </span>
                           <span className="w-12 shrink-0 text-xs text-gray-500">
                             {isPublic ? "公開" : "非公開"}
                           </span>
                           <span className="w-10 shrink-0 text-right">
-                            {!isPublic && (
+                            {!isPublic && !isCurrent && (
                               <button
                                 type="button"
                                 onClick={() => handleDeleteType(t)}
