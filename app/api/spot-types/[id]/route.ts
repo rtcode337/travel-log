@@ -26,15 +26,27 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const { settings } = await request.json();
+  const { settings, label } = await request.json();
 
-  if (settings === undefined) {
+  if (settings === undefined && label === undefined) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
 
   const { rows: existingRows } = await query("select 1 from spot_types where id = $1", [id]);
   if (!existingRows[0]) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
+  if (label !== undefined) {
+    if (typeof label !== "string" || !label.trim()) {
+      return NextResponse.json({ error: "labelは空でない文字列である必要があります。" }, { status: 400 });
+    }
+    await query("update spot_types set label = $1 where id = $2", [label.trim(), id]);
+  }
+
+  if (settings === undefined) {
+    const { rows } = await query<SpotType>(`${SPOT_TYPE_SELECT} where t.id = $1`, [id]);
+    return NextResponse.json({ data: rows[0] });
   }
 
   // スポット種別ごとの追加設定(口コミ・Wikipediaリンク・管理者以外閲覧不可・

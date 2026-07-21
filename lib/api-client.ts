@@ -164,10 +164,14 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ settings: { [key]: value } }),
       }),
-    applySettings: (id: string, settings: Partial<Record<string, boolean | string>>) =>
+    applySettings: (
+      id: string,
+      settings: Partial<Record<string, boolean | string>>,
+      label?: string
+    ) =>
       request<SpotType>(`/api/spot-types/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ settings }),
+        body: JSON.stringify({ settings, label }),
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/spot-types/${id}`, { method: "DELETE" }),
