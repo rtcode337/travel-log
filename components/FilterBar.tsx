@@ -2,13 +2,9 @@
 
 import { useMemo } from "react";
 import { distinctValues, type Category, type Rank, type Spot } from "@/lib/types";
-import {
-  autoTextColor,
-  findRankStyle,
-  getRankOrder,
-  type RankStyleDefinition,
-} from "@/lib/rankStyle";
+import { getRankOrder, type RankStyleDefinition } from "@/lib/rankStyle";
 import { getCategoryOrder } from "@/lib/category";
+import RankFilter from "@/components/RankFilter";
 
 export type VisitedValue = "visited" | "unvisited";
 
@@ -71,21 +67,17 @@ function Chip({
   label,
   active,
   activeClassName,
-  activeStyle,
   onClick,
 }: {
   label: string;
   active: boolean;
   activeClassName?: string;
-  /** ランクごとの動的な配色はTailwindの静的クラスで表現できないためinline styleで渡す */
-  activeStyle?: React.CSSProperties;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      style={active ? activeStyle : undefined}
       className={`rounded-full border px-3 py-1 font-medium ${
         active
           ? activeClassName ?? "border-transparent"
@@ -98,10 +90,6 @@ function Chip({
 }
 
 const ALL_CHIP_ACTIVE_CLASS = "border-blue-600 bg-blue-600 text-white";
-
-/** ランクのチップをこれ以上の件数になったら折りたたむ(ランク=放送回番号の
- * ように値が多い種別で、絞り込みモーダルがチップで埋まるのを避ける) */
-const RANK_CHIPS_COLLAPSE_MIN = 30;
 
 export default function FilterBar({
   spots,
@@ -138,63 +126,21 @@ export default function FilterBar({
 
   return (
     <div className="space-y-3 text-sm">
-      {availableRanks.length > 0 &&
-        (() => {
-          const rankChips = (
-            <div className="flex flex-wrap gap-1.5">
-              {availableRanks.map((rank) => {
-                const style = findRankStyle(rank, rankStyles);
-                return (
-                  <Chip
-                    key={rank}
-                    label={rank}
-                    active={filters.ranks.includes(rank)}
-                    activeStyle={{
-                      backgroundColor: style.color,
-                      color: style.textColor ?? autoTextColor(style.color),
-                      borderColor: style.borderColor,
-                    }}
-                    onClick={() =>
-                      onChange({
-                        ...filters,
-                        ranks: toggleSelection(filters.ranks, rank),
-                      })
-                    }
-                  />
-                );
-              })}
-              <Chip
-                label="すべて"
-                active={filters.ranks.length === 0}
-                activeClassName={ALL_CHIP_ACTIVE_CLASS}
-                onClick={() => onChange({ ...filters, ranks: [] })}
-              />
-            </div>
-          );
-          if (availableRanks.length < RANK_CHIPS_COLLAPSE_MIN) {
-            return (
-              <div>
-                <span className="mb-1 block text-xs font-medium text-gray-500">
-                  ランク
-                </span>
-                {rankChips}
-              </div>
-            );
-          }
-          // ランクによる絞り込み中は、何で絞っているか見えるよう開いた状態にする
-          return (
-            <details open={filters.ranks.length > 0}>
-              <summary className="mb-1 cursor-pointer text-xs font-medium text-gray-500">
-                ランク(全{availableRanks.length}件
-                {filters.ranks.length > 0 && `・${filters.ranks.length}件で絞り込み中`}
-                )
-              </summary>
-              {rankChips}
-            </details>
-          );
-        })()}
+      {availableRanks.length > 1 && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-gray-500">
+            ランク
+          </span>
+          <RankFilter
+            ranks={availableRanks}
+            selected={filters.ranks}
+            onChange={(ranks) => onChange({ ...filters, ranks })}
+            rankStyles={rankStyles}
+          />
+        </div>
+      )}
 
-      {availableCategories.length > 0 && (
+      {availableCategories.length > 1 && (
         <div>
           <span className="mb-1 block text-xs font-medium text-gray-500">
             カテゴリ
