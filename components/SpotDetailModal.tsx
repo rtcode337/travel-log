@@ -19,6 +19,7 @@ import {
 import RankBadge from "@/components/RankBadge";
 import MiniMap from "@/components/MiniMap";
 import { resolveRankStyles } from "@/lib/rankStyle";
+import { resolveWikipediaLang } from "@/lib/region";
 import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
@@ -190,6 +191,11 @@ export default function SpotDetailModal({
   // 大半のスポットにWikipedia記事が存在しない種別では、リンクが機能しないため出さない
   const wikipediaEnabled = useMemo(
     () => getSpotTypeSetting(currentSpotType, "wikipedia_enabled"),
+    [currentSpotType]
+  );
+  // 参照するWikipediaの言語版(種別ごとのwikipedia_lang設定、既定'ja')
+  const wikipediaLang = useMemo(
+    () => resolveWikipediaLang(currentSpotType),
     [currentSpotType]
   );
 
@@ -597,6 +603,7 @@ export default function SpotDetailModal({
           spotName={spot.name}
           prefecture={spot.prefecture}
           municipality={spot.municipality}
+          lang={wikipediaLang}
           onClose={() => setShowInfo(false)}
         />
       )}

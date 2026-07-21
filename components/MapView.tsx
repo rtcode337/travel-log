@@ -9,8 +9,12 @@ import {
   osmStyle,
   JAPAN_CENTER,
   JAPAN_ZOOM,
+  WORLD_CENTER,
+  WORLD_ZOOM,
   CURRENT_LOCATION_ZOOM,
 } from "@/lib/mapStyle";
+import { useRegionScope } from "@/lib/useRegionScope";
+import { DEFAULT_REGION_SCOPE } from "@/lib/region";
 import type { Role, Spot } from "@/lib/types";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
@@ -172,12 +176,15 @@ function showClusterLayers(map: maplibregl.Map) {
 }
 
 /**
- * 直前に表示していた地図の中心・ズームを覚えておく(モジュールスコープの変数なので
- * 他画面へ遷移してMapViewがアンマウントされても、同じセッション内であれば保持される)。
- * これがあれば再訪時は現在地取得をせずそのまま復元し、なければ(このセッションで
- * 初めて/map を開いたとき)従来通り現在地取得を試みる。
+ * 直前に表示していた地図の中心・ズームをスポット種別ごとに覚えておく
+ * (モジュールスコープの変数なので他画面へ遷移してMapViewがアンマウントされても、
+ * 同じセッション内であれば保持される)。これがあれば再訪時は現在地取得をせず
+ * そのまま復元し、なければ(このセッションで初めてその種別の/mapを開いたとき)
+ * 初期表示の決定(日本の種別は現在地取得、それ以外はスポット全体へのフィット)に進む。
+ * 種別ごとに分けるのは、日本の種別と海外の種別を行き来したとき、直前の種別の
+ * 表示位置を引き継いでも意味がないため。
  */
-let lastView: { center: [number, number]; zoom: number } | null = null;
+const lastViews = new Map<string, { center: [number, number]; zoom: number }>();
 
 /**
  * 現在地の青い丸を表示していたかどうかも同様にモジュールスコープで記憶する。
@@ -234,6 +241,9 @@ export default function MapView({
 
   const spotCache = useSpotCache(spotTypeKey);
   const rankStyles = useRankStyles(spotTypeKey);
+  // 種別の対象地域スコープ。地名検索の対象国と、初回表示時の挙動
+  // (日本=現在地へズーム、それ以外=スポット全体にフィット)に使う
+  const regionScope = useRegionScope(spotTypeKey);
   const [privateSpots, setPrivateSpots] = useState<Spot[]>([]);
   const spots = useMemo(
     () => [...(spotCache.publicSpots ?? []), ...privateSpots],
@@ -269,6 +279,14 @@ export default function MapView({
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchMarkerRef = useRef<maplibregl.Marker | null>(null);
 
+  // 初期表示の決定に使う状態。hadSavedView=この種別の表示位置を復元したか、
+  // geolocateTriggered/autoFit系=初回表示の調整を一度だけ行うためのフラグ
+  const geolocateRef = useRef<maplibregl.GeolocateControl | null>(null);
+  const hadSavedViewRef = useRef(false);
+  const geolocateTriggeredRef = useRef(false);
+  const autoFitDoneRef = useRef(false);
+  const worldJumpDoneRef = useRef(false);
+
   useEffect(() => {
     roleRef.current = role;
   }, [role]);
@@ -280,11 +298,13 @@ export default function MapView({
   // 地図の初期化
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    const savedView = lastViews.get(spotTypeKey);
+    hadSavedViewRef.current = !!savedView;
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: osmStyle,
-      center: lastView?.center ?? JAPAN_CENTER,
-      zoom: lastView?.zoom ?? JAPAN_ZOOM,
+      center: savedView?.center ?? JAPAN_CENTER,
+      zoom: savedView?.zoom ?? JAPAN_ZOOM,
       attributionControl: { compact: true },
     });
     mapReadyRef.current = false;
@@ -303,14 +323,14 @@ export default function MapView({
       positionOptions: { enableHighAccuracy: true, timeout: 10000 },
     });
     map.addControl(geolocate, "top-right");
+    geolocateRef.current = geolocate;
     mapRef.current = map;
 
-    // このセッションで初めて/mapを開いたときだけ、起動時に現在地を自動取得して
-    // その周辺にズームインする(現在地を示す青い丸も表示される)。他画面から
-    // 戻ってきたときは直前に表示していた位置・ズームをそのまま復元する
-    if (!lastView) {
-      map.on("load", () => geolocate.trigger());
-    } else if (lastLocationVisible && lastLocation) {
+    // このセッションで初めてこの種別の/mapを開いたときの初期表示調整
+    // (日本の種別=現在地の自動取得、それ以外=スポット全体へのフィット)は、
+    // スコープの取得完了を待つ必要があるため下の別のuseEffectで行う。
+    // 他画面から戻ってきたときは直前に表示していた位置・ズームをそのまま復元する
+    if (savedView && lastLocationVisible && lastLocation) {
       // 前回青い丸を表示していた場合、地図は動かさずその場に仮の丸だけ復元する
       // (新たな位置情報取得はしない。実際に取得できたら下のgeolocateイベントで
       // 本物の丸に置き換わる)
@@ -340,10 +360,10 @@ export default function MapView({
     geolocate.on("error", handleGeolocateEnd);
 
     const saveView = () => {
-      lastView = {
+      lastViews.set(spotTypeKey, {
         center: map.getCenter().toArray() as [number, number],
         zoom: map.getZoom(),
-      };
+      });
     };
     map.on("moveend", saveView);
 
@@ -437,8 +457,59 @@ export default function MapView({
       searchMarkerRef.current = null;
       map.remove();
       mapRef.current = null;
+      geolocateRef.current = null;
     };
-  }, []);
+  }, [spotTypeKey]);
+
+  // このセッションで初めてこの種別の/mapを開いたときの初期表示。スコープの取得を
+  // 待ってから一度だけ行う: 日本('jp')の種別は従来どおり現在地を自動取得して
+  // 周辺にズームインし、それ以外の種別は現在地ではなく登録スポット全体が入る範囲に
+  // フィットする(スポットが未取得・0件の間は世界全体を表示しておく)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || regionScope === null || hadSavedViewRef.current) return;
+
+    if (regionScope === "jp") {
+      if (geolocateTriggeredRef.current) return;
+      geolocateTriggeredRef.current = true;
+      const trigger = () => geolocateRef.current?.trigger();
+      if (map.loaded()) trigger();
+      else map.on("load", trigger);
+      return;
+    }
+
+    if (autoFitDoneRef.current) return;
+    // /map?spot=<id> で特定スポットに飛ぶ場合は全体フィットで邪魔をしない
+    if (focusSpotId) {
+      autoFitDoneRef.current = true;
+      return;
+    }
+    if (spots.length === 0) {
+      if (!worldJumpDoneRef.current) {
+        worldJumpDoneRef.current = true;
+        map.jumpTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM });
+      }
+      return;
+    }
+    autoFitDoneRef.current = true;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+    for (const s of spots) {
+      if (s.lat < minLat) minLat = s.lat;
+      if (s.lat > maxLat) maxLat = s.lat;
+      if (s.lng < minLng) minLng = s.lng;
+      if (s.lng > maxLng) maxLng = s.lng;
+    }
+    map.fitBounds(
+      [
+        [minLng, minLat],
+        [maxLng, maxLat],
+      ],
+      { padding: 60, maxZoom: 10, animate: false }
+    );
+  }, [regionScope, spots, focusSpotId]);
 
   const loadVisits = async () => {
     const { data } = await api.visits.list();
@@ -451,7 +522,10 @@ export default function MapView({
     if (!q) return;
     setSearching(true);
     setSearchError(null);
-    const { data, error } = await api.geocode.search(q);
+    const { data, error } = await api.geocode.search(
+      q,
+      regionScope ?? DEFAULT_REGION_SCOPE
+    );
     setSearching(false);
     if (error || !data) {
       setSearchError(error?.message ?? "検索に失敗しました");

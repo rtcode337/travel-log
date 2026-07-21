@@ -141,13 +141,15 @@ export const api = {
       ),
   },
   geocode: {
-    search: (q: string) =>
+    // scopeはスポット種別のregion_scope('jp' | 国コード | 'world')。検索対象の国と
+    // 逆ジオでregionに入れる区分(都道府県/州・県/国)を決める。省略時は'jp'扱い
+    search: (q: string, scope: string) =>
       request<{ name: string; lat: number; lng: number }[]>(
-        `/api/geocode?q=${encodeURIComponent(q)}`
+        `/api/geocode?q=${encodeURIComponent(q)}&scope=${encodeURIComponent(scope)}`
       ),
-    reverse: (lat: number, lng: number) =>
-      request<{ prefecture: string | null; municipality: string | null }>(
-        `/api/geocode/reverse?lat=${lat}&lng=${lng}`
+    reverse: (lat: number, lng: number, scope: string) =>
+      request<{ region: string | null; municipality: string | null }>(
+        `/api/geocode/reverse?lat=${lat}&lng=${lng}&scope=${encodeURIComponent(scope)}`
       ),
   },
   spotTypes: {
