@@ -66,6 +66,10 @@ export async function fetchGoogleProfile(
   if (!res.ok) return null;
   const body = await res.json();
   if (typeof body.sub !== "string" || typeof body.email !== "string") return null;
+  // email_verifiedがfalseの場合、本人が所有していないメールアドレスを名乗れてしまう
+  // (Google Workspaceの未検証セカンダリメール等)。findOrCreateGoogleUserはメール一致
+  // だけで既存アカウントに紐付けるため、ここで弾かないとアカウント乗っ取りに繋がる
+  if (body.email_verified !== true) return null;
   return { sub: body.sub, email: body.email };
 }
 

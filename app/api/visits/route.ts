@@ -42,6 +42,14 @@ export async function POST(request: Request) {
   ) {
     return NextResponse.json({ error: "invalid photos" }, { status: 400 });
   }
+  // ブラウザを経由しない直接APIコールで大量の写真を送りつけるディスク圧迫を防ぐ
+  const MAX_PHOTOS_PER_VISIT = 10;
+  if (inputPhotos.length > MAX_PHOTOS_PER_VISIT) {
+    return NextResponse.json(
+      { error: `写真は1件の訪問記録につき${MAX_PHOTOS_PER_VISIT}枚までです。` },
+      { status: 400 }
+    );
+  }
   const photoPaths: string[] = [];
   try {
     for (const dataUrl of inputPhotos as string[]) {

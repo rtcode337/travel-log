@@ -1,13 +1,30 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { getCurrentUserId } from "@/lib/auth/current-user";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { MODERATION_ROLES, SPOT_ADMIN_ROLES, type Role } from "@/lib/types";
 import type { MyReview, PublicReview, Review } from "@/lib/types";
 
 const PAGE_SIZE = 10;
 
+/**
+ * 口コミの閲覧可否をスポット本体の可視性に合わせる(spots/[id]/route.tsのcanViewと同じ
+ * 考え方)。spot_idはUUIDで推測されにくいとはいえ、それだけを根拠に非公開スポット・
+ * 非公開種別の口コミを晒さないための認可チェック。
+ */
+function canViewReviews(
+  user: { id: string; role: Role },
+  spot: { status: string; created_by: string | null; type_public_visible: boolean }
+): boolean {
+  if (!spot.type_public_visible && !SPOT_ADMIN_ROLES.includes(user.role)) return false;
+  if (spot.status === "published") return true;
+  if (spot.created_by === user.id) return true;
+  if (spot.status === "private") return false;
+  return MODERATION_ROLES.includes(user.role);
+}
+
 export async function GET(request: Request) {
-  const userId = await getCurrentUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -34,7 +51,7 @@ export async function GET(request: Request) {
        join spots s on s.id = r.spot_id
        where r.user_id = $1 and s.spot_type_id = $2
        order by r.created_at desc`,
-      [userId, typeRows[0].id]
+      [user.id, typeRows[0].id]
     );
     return NextResponse.json({ data: rows });
   }
@@ -43,6 +60,27 @@ export async function GET(request: Request) {
   if (!spotId) {
     return NextResponse.json({ error: "spot_id is required" }, { status: 400 });
   }
+
+  const { rows: spotRows } = await query<{
+    status: string;
+    created_by: string | null;
+    type_public_visible: boolean;
+  }>(
+    `select s.status, s.created_by,
+       coalesce(
+         (select value from spot_type_settings
+          where spot_type_id = s.spot_type_id and key = 'public_visible'),
+         'false'
+       ) = 'true' as type_public_visible
+     from spots s
+     where s.id = $1`,
+    [spotId]
+  );
+  const spot = spotRows[0];
+  if (!spot || !canViewReviews(user, spot)) {
+    return NextResponse.json({ error: "存在しないスポットです。" }, { status: 404 });
+  }
+
   const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
 
   const [{ rows }, { rows: countRows }] = await Promise.all([
@@ -67,10 +105,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const userId = await getCurrentUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const userId = user.id;
 
   const { spot_id, body } = await request.json();
   if (typeof spot_id !== "string" || typeof body !== "string" || !body.trim()) {
@@ -99,9 +138,9 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (spotRows[0].status === "private") {
+  if (spotRows[0].status !== "published") {
     return NextResponse.json(
-      { error: "非公開スポットには口コミを投稿できません。" },
+      { error: "公開されているスポットにのみ口コミを投稿できます。" },
       { status: 400 }
     );
   }

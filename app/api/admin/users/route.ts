@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   try {
     const { rows } = await query<AppUser>(
       `insert into users (email, password_hash, role, nickname)
-       values ($1, crypt($2, gen_salt('bf')), $3, $4)
+       values ($1, crypt($2, gen_salt('bf', 12)), $3, $4)
        returning id, email, nickname, role, created_at,
          (password_hash is not null) as has_password,
          (google_id is not null) as has_google`,

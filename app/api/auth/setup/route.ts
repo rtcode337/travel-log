@@ -18,7 +18,7 @@ export async function POST(request: Request) {
 
   const { rows } = await query<{ id: string }>(
     `insert into users (email, password_hash, role)
-     select $1, crypt($2, gen_salt('bf')), 'admin'
+     select $1, crypt($2, gen_salt('bf', 12)), 'admin'
      where not exists (select 1 from users)
      returning id`,
     [email, password]
