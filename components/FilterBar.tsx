@@ -81,6 +81,45 @@ export function passesFilters(
   return true;
 }
 
+/** 何らかの絞り込みが掛かっているか(リセットボタンの表示条件) */
+export function hasActiveFilters(filters: SpotFilters): boolean {
+  return (
+    filters.series.length > 0 ||
+    filters.categories.length > 0 ||
+    filters.visited.length > 0 ||
+    filters.visitedDate !== null
+  );
+}
+
+/**
+ * 全条件を「すべて」に戻すボタン(条件を1つずつ戻す手間を省く)。常に出しておき、
+ * 戻す対象があるとき(`hasActiveFilters`)だけチップと同じ青にして知らせる
+ * (出し入れするとボタンの位置が動くため)。
+ * 置き場所が呼び出し側で異なる(地図は絞り込みモーダルの見出し行、
+ * スポット一覧は`FilterBar`の先頭)ため、`FilterBar`から切り出してある
+ */
+export function FilterResetButton({
+  filters,
+  onChange,
+}: {
+  filters: SpotFilters;
+  onChange: (filters: SpotFilters) => void;
+}) {
+  const active = hasActiveFilters(filters);
+  return (
+    <button
+      type="button"
+      disabled={!active}
+      onClick={() => onChange(DEFAULT_FILTERS)}
+      className={`rounded-full border px-3 py-1 text-xs font-medium ${
+        active ? ALL_CHIP_ACTIVE_CLASS : "border-gray-300 bg-white text-gray-400"
+      }`}
+    >
+      リセット
+    </button>
+  );
+}
+
 /**
  * 「すべて」(空配列)の状態から特定の1件を選ぶと、それ単独の絞り込みになる
  * (他をすべて手で外す手間を省くため)。それ以外は通常のトグル(追加/除外)。
@@ -132,6 +171,7 @@ export default function FilterBar({
   seriesStyles,
   categories,
   visitDates,
+  showReset = true,
 }: {
   /** 現在アクティブなスポット種別の実データから、シリーズ・カテゴリの選択肢を動的に作る */
   spots: Spot[];
@@ -146,6 +186,8 @@ export default function FilterBar({
   seriesStyles: SeriesStyleDefinition[];
   /** このスポット種別のカテゴリ設定(並び順に使う。lib/useCategories.ts参照) */
   categories: Category[];
+  /** falseにすると内蔵のリセットボタンを出さない(呼び出し側で別の場所に置く場合) */
+  showReset?: boolean;
 }) {
   const availableSeries = useMemo(
     () =>
@@ -175,6 +217,12 @@ export default function FilterBar({
 
   return (
     <div className="space-y-3 text-sm">
+      {showReset && (
+        <div className="flex justify-end">
+          <FilterResetButton filters={filters} onChange={onChange} />
+        </div>
+      )}
+
       {availableSeries.length > 1 && (
         <div>
           <span className="mb-1 block text-xs font-medium text-gray-500">
