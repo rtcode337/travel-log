@@ -19,6 +19,11 @@ RUN npm run build
 FROM node:22-alpine AS prod
 WORKDIR /app
 ENV NODE_ENV=production
+# GitHub Actionsが --build-arg BUILD_NUMBER=<JST日時>-<短縮コミットハッシュ> で渡すビルド番号。
+# 管理画面(app/[type]/admin)がリクエスト時にこの環境変数を読んで表示する。
+# ビルド時に埋め込まず実行時に読むためnext buildのキャッシュには影響しない(未指定なら空=開発ビルド扱い)
+ARG BUILD_NUMBER=""
+ENV BUILD_NUMBER=$BUILD_NUMBER
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 EXPOSE 3000

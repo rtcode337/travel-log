@@ -13,5 +13,7 @@ export default async function TypedAdminPage({
   const { rows } = await query("select 1 from spot_types where key = $1", [type]);
   if (!rows[0]) notFound();
 
-  return <AdminView typeKey={type} />;
+  // ビルド番号(Dockerfileのprodステージが --build-arg BUILD_NUMBER で受け取る)。
+  // 開発時など未設定の場合はnullを渡し、管理画面側で「開発ビルド」と表示する
+  return <AdminView typeKey={type} buildNumber={process.env.BUILD_NUMBER || null} />;
 }
