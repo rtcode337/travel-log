@@ -20,6 +20,7 @@ import { useRegionScope } from "@/lib/useRegionScope";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
+  toVisitDateKey,
   type SpotFilters,
 } from "@/components/FilterBar";
 import SeriesBadge from "@/components/SeriesBadge";
@@ -329,6 +330,30 @@ export default function SpotsView({
     [visits]
   );
 
+  /** spot_id → そのスポットを訪問した日(ローカル日付。日時不明の訪問は含めない) */
+  const visitedDatesBySpot = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const v of visits) {
+      const date = toVisitDateKey(v.visited_on);
+      if (!date) continue;
+      const list = m.get(v.spot_id);
+      if (list) list.push(date);
+      else m.set(v.spot_id, [date]);
+    }
+    return m;
+  }, [visits]);
+
+  /** 訪問日ドロップダウンの選択肢(新しい順。この種別のスポットへの訪問のみ) */
+  const visitDates = useMemo(() => {
+    const set = new Set<string>();
+    for (const v of visits) {
+      if (!spotById.has(v.spot_id)) continue;
+      const date = toVisitDateKey(v.visited_on);
+      if (date) set.add(date);
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [visits, spotById]);
+
   /** spot_id → 最新訪問日(ソート用) */
   const latestVisitDate = useMemo(() => {
     const m = new Map<string, string>();
@@ -389,7 +414,13 @@ export default function SpotsView({
   const filteredSpots = useMemo(() => {
     const list = spots.filter((s) => {
       if (s.region !== selectedRegion) return false;
-      return passesFilters(filters, s.series, s.categories, visitedIds.has(s.id));
+      return passesFilters(
+        filters,
+        s.series,
+        s.categories,
+        visitedIds.has(s.id),
+        visitedDatesBySpot.get(s.id)
+      );
     });
     list.sort((a, b) => {
       switch (sortKey) {
@@ -411,7 +442,16 @@ export default function SpotsView({
       }
     });
     return list;
-  }, [spots, selectedRegion, filters, visitedIds, sortKey, latestVisitDate, seriesStyles]);
+  }, [
+    spots,
+    selectedRegion,
+    filters,
+    visitedIds,
+    visitedDatesBySpot,
+    sortKey,
+    latestVisitDate,
+    seriesStyles,
+  ]);
 
   const plannedPager = usePagedItems(plannedSpots, CLIENT_PAGE_SIZE);
   const recentVisitsPager = usePagedItems(recentVisits, CLIENT_PAGE_SIZE);
@@ -847,6 +887,7 @@ export default function SpotsView({
           onChange={setFilters}
           seriesStyles={seriesStyles}
           categories={categories}
+          visitDates={visitDates}
         />
         <select
           value={sortKey}
