@@ -184,7 +184,8 @@ type ClusterFeatureProps = {
 
 function buildClusterGeoJSON(
   spots: Spot[],
-  visitedIds: Set<string>
+  visitedIds: Set<string>,
+  seriesStyles: SeriesStyleDefinition[]
 ): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
   return {
     type: "FeatureCollection",
@@ -198,7 +199,8 @@ function buildClusterGeoJSON(
         icon: pinIconId(
           spot.series,
           visitedIds.has(spot.id),
-          spot.status === "private"
+          spot.status === "private",
+          seriesStyles
         ),
       },
     })),
@@ -840,7 +842,7 @@ export default function MapView({
       const source = map.getSource(CLUSTER_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
-      source?.setData(buildClusterGeoJSON(filteredSpots, visitedIds));
+      source?.setData(buildClusterGeoJSON(filteredSpots, visitedIds, seriesStyles));
     };
     runWhenMapReady(() => {
       renderSpots();
