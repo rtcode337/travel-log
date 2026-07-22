@@ -101,8 +101,10 @@ echo "SESSION_SECRET=$(openssl rand -base64 32)" >> .env
 docker compose pull app && docker compose up -d
 ```
 
-- GHCRのパッケージは初回公開時点では非公開のため、GitHubのPackages設定でPublicに
-  切り替えるか、本番ホストで`docker login ghcr.io`(`read:packages`権限のPAT)しておく
+- GitHub Actions(`GITHUB_TOKEN`)から公開したパッケージはリポジトリに自動リンクされ、
+  可視性もリポジトリと同じ(=public)になるため、追加設定なしで匿名pullできる。
+  リポジトリをprivateにした場合は本番ホストで`docker login ghcr.io`
+  (`read:packages`権限のPAT)が必要になる
 - イメージは`linux/amd64`と`linux/arm64`のマルチアーキで公開しており、pull時に
   ホストに合う方が自動選択される
 - 特定時点に戻したいときは`docker-compose.yml`のイメージタグを`latest`から
