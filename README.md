@@ -135,7 +135,7 @@ docker compose pull && docker compose up -d
 |---|---|
 | `/[type]/map` | 地図(ホーム)。シリーズ・訪問状態・カテゴリでフィルタ。ピンタップ→スポット詳細モーダルへ |
 | `/[type]/spots` | 「都道府県から探す」(地域別ドリルダウン)と「シリーズから探す」(検索+絞り込み+ページング)の2タブ |
-| `/[type]/admin` | (管理者・スポット管理者専用)スポットの承認待ちキュー・追加・編集・削除・CSVインポート・ルート(巡った順の矢印)のインポート。adminのみスポット種別の管理・ユーザー管理も可能 |
+| `/[type]/admin` | (管理者・スポット管理者専用)スポットの承認待ちキュー・追加・編集・削除・CSVインポート・ルート(巡った順の矢印)のインポート。adminのみキー一覧を指定しての削除・スポット種別の管理・ユーザー管理も可能 |
 | `/[type]/account` | 自分のロール表示、ログアウト、他のスポット種別への切り替え |
 | `/login` | メールログイン、または Google でログイン(任意、要設定) |
 
@@ -191,6 +191,10 @@ name,name_kana,lat,lng,region,series,categories,description,key
 - スポットを巡った順に矢印で繋ぐルートは、別ファイル`routes.csv`(列:
   `route,series,seq,spot_key`)を同じ管理画面からスポットCSVの後に取り込む
   (スキーマの詳細はtravel-log-data/README.md参照)
+- **CSVから行を消してもDBからは消えない**(差分更新はCSVに無い行に触らないため)。
+  削除は`/[type]/admin`の「キー一覧を指定して削除」(admin専用)に`key`を1行1つ
+  貼り付けて行う。travel-log-data側の`exclude.txt`(削除したスポットのkeyを追記して
+  いくファイル)をそのまま貼る想定で、該当が無いキーはエラーにせず読み飛ばす
 
 観光地(`tourist`)データの`description`はWikipedia記事冒頭文の引用(CC BY-SA 4.0)、
 `name`/`lat`/`lng`の一部はOpenStreetMap由来(ODbL)のため、それぞれの出典表示は

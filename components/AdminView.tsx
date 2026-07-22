@@ -107,6 +107,17 @@ export default function AdminView({
   const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
   const [purgeConfirmText, setPurgeConfirmText] = useState("");
 
+  // キー一覧を貼り付けての一括削除(travel-log-data側のexclude.txtを想定)
+  const [deleteKeysText, setDeleteKeysText] = useState("");
+  const [deleteKeysPreview, setDeleteKeysPreview] = useState<{
+    matchedCount: number;
+    notFoundKeys: string[];
+    sampleNames: string[];
+  } | null>(null);
+  const [deleteKeysChecking, setDeleteKeysChecking] = useState(false);
+  const [deleteKeysApplying, setDeleteKeysApplying] = useState(false);
+  const [deleteKeysMessage, setDeleteKeysMessage] = useState<string | null>(null);
+
   const [users, setUsers] = useState<AppUser[]>([]);
   // ロール・ニックネームは選択/入力しただけでは保存せず、ユーザーごとの
   // 「変更」ボタンを押した時だけAPIに反映する下書き
@@ -266,6 +277,75 @@ export default function AdminView({
       load();
     } finally {
       setPurgeApplying(false);
+    }
+  };
+
+  /**
+   * 貼り付けたテキストからキーの一覧を作る。1行1キーを基本とし、空行と
+   * `#`で始まる行(除外リストのコメント)は無視する。
+   */
+  const parseDeleteKeys = (text: string) =>
+    [
+      ...new Set(
+        text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line && !line.startsWith("#"))
+      ),
+    ];
+
+  const handleCheckDeleteKeys = async () => {
+    const keys = parseDeleteKeys(deleteKeysText);
+    setDeleteKeysPreview(null);
+    setDeleteKeysMessage(null);
+    if (keys.length === 0) {
+      setDeleteKeysMessage("キーが1件も入力されていません。");
+      return;
+    }
+    setDeleteKeysChecking(true);
+    try {
+      const { data, error } = await api.spots.deleteByKeysPreview(typeKey, keys);
+      if (error) {
+        setDeleteKeysMessage("確認に失敗しました: " + error.message);
+        return;
+      }
+      setDeleteKeysPreview(data ?? null);
+    } finally {
+      setDeleteKeysChecking(false);
+    }
+  };
+
+  const handleApplyDeleteKeys = async () => {
+    const keys = parseDeleteKeys(deleteKeysText);
+    if (keys.length === 0 || !deleteKeysPreview) return;
+    if (deleteKeysPreview.matchedCount === 0) return;
+    if (
+      !confirm(
+        `「${currentTypeLabel}」(${typeKey})の公開スポット` +
+          `${deleteKeysPreview.matchedCount}件を削除しますか?` +
+          `紐づく訪問記録・訪問予定・口コミ・写真も全ユーザー分削除されます。` +
+          `この操作は取り消せません。`
+      )
+    )
+      return;
+    setDeleteKeysApplying(true);
+    setDeleteKeysMessage(null);
+    try {
+      const { data, error } = await api.spots.deleteByKeysApply(typeKey, keys);
+      if (error) {
+        setDeleteKeysMessage("削除に失敗しました: " + error.message);
+        return;
+      }
+      setDeleteKeysMessage(
+        `${data?.deletedCount ?? 0}件削除しました` +
+          (data?.notFoundKeys.length
+            ? `(${data.notFoundKeys.length}件のキーは該当なしのため無視)。`
+            : "。")
+      );
+      setDeleteKeysPreview(null);
+      load();
+    } finally {
+      setDeleteKeysApplying(false);
     }
   };
 
@@ -1411,6 +1491,79 @@ export default function AdminView({
                 />
               </label>
             </section>
+
+          {isAdmin && (
+            <section className="rounded-xl border border-red-200 bg-white p-3">
+              <h3 className="mb-2 text-base font-bold text-red-700">
+                キー一覧を指定して削除
+              </h3>
+              <p className="mb-3 text-xs text-gray-500">
+                スポットのキー(CSVの「key」列)を1行に1つ貼り付けると、一致する公開
+                スポットを削除する(travel-log-data側の「exclude.txt」をそのまま貼る想定。
+                空行と「#」で始まる行は無視され、該当が無いキーはエラーにせず読み飛ばす)。紐づく訪問記録・
+                訪問予定・口コミ・写真は全ユーザー分まとめて削除され、元に戻せない。
+                CSVから外したスポットをDB側からも消すための機能。
+              </p>
+
+              {deleteKeysMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-red-50 p-2 text-sm text-red-800">
+                  {deleteKeysMessage}
+                </p>
+              )}
+
+              <textarea
+                value={deleteKeysText}
+                onChange={(e) => {
+                  setDeleteKeysText(e.target.value);
+                  setDeleteKeysPreview(null);
+                }}
+                rows={6}
+                spellCheck={false}
+                placeholder={"鶴見区 (横浜市)\n大阪湾\n江戸川"}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs"
+              />
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleCheckDeleteKeys}
+                  disabled={deleteKeysChecking || !deleteKeysText.trim()}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {deleteKeysChecking ? "確認中…" : "対象を確認"}
+                </button>
+                {deleteKeysPreview && deleteKeysPreview.matchedCount > 0 && (
+                  <button
+                    onClick={handleApplyDeleteKeys}
+                    disabled={deleteKeysApplying}
+                    className="rounded-lg border border-red-400 bg-white px-3 py-1.5 text-sm font-medium text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {deleteKeysApplying
+                      ? "削除中…"
+                      : `${deleteKeysPreview.matchedCount}件を削除`}
+                  </button>
+                )}
+              </div>
+
+              {deleteKeysPreview && (
+                <div className="mt-3 text-sm text-gray-600">
+                  <p>
+                    入力{parseDeleteKeys(deleteKeysText).length}件のうち、
+                    削除対象 {deleteKeysPreview.matchedCount}件
+                    {deleteKeysPreview.notFoundKeys.length > 0 &&
+                      `(${deleteKeysPreview.notFoundKeys.length}件は該当なし)`}
+                    。
+                  </p>
+                  {deleteKeysPreview.sampleNames.length > 0 && (
+                    <p className="mt-1 text-xs text-gray-500">
+                      例: {deleteKeysPreview.sampleNames.join("、")}
+                      {deleteKeysPreview.matchedCount >
+                        deleteKeysPreview.sampleNames.length && " …"}
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
 
           {isAdmin && (
             <section className="rounded-xl border border-red-200 bg-white p-3">
