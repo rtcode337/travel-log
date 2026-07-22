@@ -2,8 +2,16 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api-client";
+import { readPhotoTakenAt } from "@/lib/exif";
 
 const MAX_PHOTO_SIZE = 1280;
+
+/** Dateをdatetime-localのvalue(ローカル時刻の`YYYY-MM-DDTHH:mm`)にする */
+function toDateTimeLocalValue(date: Date): string {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
+}
 
 function resizeImageToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -47,14 +55,13 @@ export default function VisitFormModal({
 }) {
   // datetime-localは「ローカル時刻のYYYY-MM-DDTHH:mm」を扱うため、現在時刻を
   // UTCではなくローカルのまま初期値にする(toISOStringだとUTCにずれる)
-  const now = new Date();
-  const nowLocal = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
-  const [visitedOn, setVisitedOn] = useState(nowLocal);
+  const [visitedOn, setVisitedOn] = useState(() => toDateTimeLocalValue(new Date()));
   const [memo, setMemo] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
   const [processingPhotos, setProcessingPhotos] = useState(false);
+  // photosと同じ並びの、各写真のExif撮影日時(取得できなければnull)。
+  // 「写真の撮影日時にする」ボタンの表示・適用値に使う
+  const [photoTakenAts, setPhotoTakenAts] = useState<(Date | null)[]>([]);
   const [reviewBody, setReviewBody] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,8 +72,11 @@ export default function VisitFormModal({
     if (files.length === 0) return;
     setProcessingPhotos(true);
     try {
+      // 撮影日時は縮小前の元ファイルから読む(canvasで描き直すとExifは失われる)
+      const takenAts = await Promise.all(files.map(readPhotoTakenAt));
       const dataUrls = await Promise.all(files.map(resizeImageToDataUrl));
       setPhotos((prev) => [...prev, ...dataUrls]);
+      setPhotoTakenAts((prev) => [...prev, ...takenAts]);
     } catch {
       setError("写真の読み込みに失敗しました。");
     } finally {
@@ -76,7 +86,16 @@ export default function VisitFormModal({
 
   const removePhoto = (index: number) => {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
+    setPhotoTakenAts((prev) => prev.filter((_, i) => i !== index));
   };
+
+  // 複数枚を選んだときは最も古い撮影日時=その場所に着いた時刻を採用する
+  const earliestTakenAt = photoTakenAts.reduce<Date | null>(
+    (earliest, takenAt) =>
+      takenAt && (!earliest || takenAt < earliest) ? takenAt : earliest,
+    null
+  );
+  const takenAtValue = earliestTakenAt ? toDateTimeLocalValue(earliestTakenAt) : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,6 +152,23 @@ export default function VisitFormModal({
               onChange={(e) => setVisitedOn(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
             />
+            {earliestTakenAt && takenAtValue && takenAtValue !== visitedOn && (
+              <button
+                type="button"
+                onClick={() => setVisitedOn(takenAtValue)}
+                className="mt-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700"
+              >
+                写真の撮影日時にする(
+                {earliestTakenAt.toLocaleString("ja-JP", {
+                  year: "numeric",
+                  month: "2-digit",
+                  day: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                )
+              </button>
+            )}
             <p className="mt-1 text-xs text-gray-400">
               空欄のままにすると「時期不明」として記録されます。
             </p>
