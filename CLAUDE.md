@@ -154,6 +154,8 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 地図上での右クリック追加、`/[type]/admin`の追加フォーム、CSVインポート(`lib/csv.ts`+`/[type]/admin`)いずれも`app/api/spots/route.ts`の同じ挿入ロジックを通る。status未指定時の既定はroleにより`user`は`private`、それ以外(moderator/spot_admin/admin)は`pending`(`ALLOWED_STATUS_BY_ROLE`が許す範囲でstatusを明示すれば`published`等も選べる)。CSVインポートは`/[type]/admin`(spot_admin/admin専用)からのみ行える経路のため、`AdminView`側で常に`status: 'published'`を明示し、承認待ちを経由せず即座に公開する。それ以外の経路(右クリック追加・追加フォームでの既定)は引き続き承認待ちを通り、承認・却下は`/[type]/admin`側の別ステップで行う。
 
+CSVのヘッダーに`CSV_COLUMNS`(ルートCSVは`ROUTE_CSV_COLUMNS`)に無い列があるときは、`unknownCsvColumns`が検出してインポートを中止する。知らない列は読み飛ばされるだけなので、綴り違いや旧フォーマットのCSV(シリーズ改名前の`rank`/`category`など)を取り込んでもエラーが出ず、該当の値だけが欠けた状態で登録されてしまうため(実際に郵便局データ2.4万件が`series`なしで入り、地図が白いピンになった)。必須列(`name`/`lat`/`lng`/`region`)の存在チェックとは別。
+
 CSVインポートは差分更新で、`AdminView`側が事前読み込み済みの全件(status問わず)と突き合わせる。同一判定は`key`一致を最優先し、keyで見つからなければ`name`+`lat`+`lng`の完全一致で行う。一致した既存行は内容がCSVと異なればCSVの内容でPATCH上書きし(keyが同じなら改名・座標修正もCSVから反映される)、同一ならスキップ、どちらにも一致しない行だけを新規として`app/api/spots/route.ts`に送る(上書きは公開スポットのみ。公開以外=他ユーザーの承認待ち等は編集権限が投稿者本人に限られるため触らない。CSVにkey列が無い場合は既存行のkeyを消さず維持する)。かつてあった「SQLシードとの同期」「重複スポットの削除」機能はこの差分インポートに一本化して廃止した。新規分は`AdminView`側で1,000件ずつのチャンクに分けて順番に送信し、進捗(◯件/◯件)を画面に表示する(1リクエストにまとめると大量データでタイムアウトする恐れがあるため)。
 
 ロールは`admin`/`spot_admin`/`moderator`/`user`の4種類(`lib/types.ts`の`Role`参照)。ユーザー管理(`app/api/admin/users/**`)はadmin専用でspot_adminには許可されない。

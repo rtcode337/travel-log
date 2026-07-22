@@ -59,6 +59,19 @@ const CSV_COLUMNS = [
 // seriesは省略可(ルートを地図でどのシリーズの色に塗るか。同じrouteの全行に同じ値を書く)
 const ROUTE_CSV_COLUMNS = ["route", "series", "seq", "spot_key"] as const;
 
+/**
+ * ヘッダーに定義外の列があれば、その一覧を返す(無ければ空配列)。
+ * 知らない列は黙って無視されるため、列名の綴り違いや旧フォーマットのCSV
+ * (rank/category など、シリーズ改名前の列名)を取り込むと、エラーも警告も
+ * 出ないまま該当の値だけが欠けた状態で登録されてしまう。それを防ぐための検査
+ */
+function unknownCsvColumns(
+  header: string[],
+  columns: readonly string[]
+): string[] {
+  return header.filter((h) => h !== "" && !columns.includes(h));
+}
+
 export default function AdminView({
   typeKey,
   buildNumber,
@@ -612,6 +625,15 @@ export default function AdminView({
           return;
         }
       }
+      const unknownColumns = unknownCsvColumns(header, CSV_COLUMNS);
+      if (unknownColumns.length > 0) {
+        setMessage(
+          `CSVヘッダーに未対応の列があります: ${unknownColumns.join(", ")}\n` +
+            `使える列は ${CSV_COLUMNS.join(", ")} です。` +
+            `(rank・category は series・categories に改名されています)`
+        );
+        return;
+      }
 
       const records: CsvSpotRecord[] = [];
       const errors: string[] = [];
@@ -807,6 +829,14 @@ export default function AdminView({
           setRouteMessage(`CSVヘッダーに ${required} 列がありません。`);
           return;
         }
+      }
+      const unknownColumns = unknownCsvColumns(header, ROUTE_CSV_COLUMNS);
+      if (unknownColumns.length > 0) {
+        setRouteMessage(
+          `CSVヘッダーに未対応の列があります: ${unknownColumns.join(", ")}\n` +
+            `使える列は ${ROUTE_CSV_COLUMNS.join(", ")} です。`
+        );
+        return;
       }
 
       // spot_keyはスポットのkey列(種別内一意)を指す。先に全行を検証してから送る

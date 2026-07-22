@@ -23,12 +23,33 @@ function pinTailHeight(size: number): number {
   return Math.max(5, Math.round(size * 0.45));
 }
 
+/**
+ * 見た目そのものを短いハッシュにした値。画像IDに混ぜることで、同じシリーズでも
+ * 見た目が変われば別の画像IDになる(=作り直される)ようにする。
+ * seriesStylesは`/api/spot-types`の取得完了まで暫定でDEFAULT_SERIES_STYLESになるため、
+ * シリーズ名だけをIDにすると暫定の見た目で登録した画像がそのまま使われ続けてしまう
+ * (ensurePinImageはmap.hasImage()で早期returnする)。
+ */
+function styleSignature(style: SeriesStyleDefinition): string {
+  const label = isImageLabel(style.label) ? `img:${style.label.image}` : `txt:${style.label}`;
+  const raw = `${style.color}|${style.borderColor}|${style.size}|${style.textColor ?? ""}|${label}`;
+  // FNV-1a(ラベルが画像(base64)のこともあるため、IDに全文を入れず固定長にする)
+  let h = 0x811c9dc5;
+  for (let i = 0; i < raw.length; i += 1) {
+    h ^= raw.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
 export function pinIconId(
   series: Series | null,
   visited: boolean,
-  isPrivate: boolean
+  isPrivate: boolean,
+  seriesStyles: SeriesStyleDefinition[]
 ): string {
-  return `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}-${series ?? "__null__"}`;
+  const sig = styleSignature(findSeriesStyle(series, seriesStyles));
+  return `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}-${sig}-${series ?? "__null__"}`;
 }
 
 /** data URL画像をHTMLImageElementとして読み込む(base64は同期的に近いが、確実性のためdecode()を待つ) */
@@ -48,7 +69,7 @@ export async function ensurePinImage(
   isPrivate: boolean,
   seriesStyles: SeriesStyleDefinition[]
 ): Promise<string> {
-  const id = pinIconId(series, visited, isPrivate);
+  const id = pinIconId(series, visited, isPrivate, seriesStyles);
   if (map.hasImage(id)) return id;
 
   const style = findSeriesStyle(series, seriesStyles);
