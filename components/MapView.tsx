@@ -23,6 +23,7 @@ import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useCategories } from "@/lib/useCategories";
 import FilterBar, {
   DEFAULT_FILTERS,
+  FilterResetButton,
   passesFilters,
   toVisitDateKey,
   type SpotFilters,
@@ -130,26 +131,47 @@ function ensureRouteLayers(map: maplibregl.Map) {
 }
 
 /**
- * シリーズ絞り込みを適用した表示対象のルート(経由地2点以上)を返す。
- * シリーズが「すべて」(絞り込みなし)のときは全ルートの線が重なって地図が
- * 見づらくなるため、ルートは一切表示しない。シリーズで絞り込んでいるときは、
- * ルートのseriesがこの種別のシリーズ一覧にあるものだけ絞り込みに連動して
- * 出し分け、シリーズ未指定・一覧に無いシリーズのルートは対象外として表示する
+ * シリーズ・カテゴリの絞り込みを適用した表示対象のルート(経由地2点以上)を返す。
+ * どちらも「すべて」(絞り込みなし)のときは全ルートの線が重なって地図が
+ * 見づらくなるため、ルートは一切表示しない。
+ *
+ * シリーズで絞り込んでいるときは、ルートのseriesがこの種別のシリーズ一覧に
+ * あるものだけ絞り込みに連動して出し分け、シリーズ未指定・一覧に無いシリーズの
+ * ルートは対象外として表示する。カテゴリで絞り込んでいるときは、ルート自体は
+ * カテゴリを持たない(`spot_routes`にcategories相当の列は無い)ため、
+ * 経由地に選択中のカテゴリを持つスポットが1つでもあるルートを表示する。
+ * 両方で絞り込んでいるときは両方の条件を満たすルートのみ。
  */
 function filterVisibleRoutes(
   routes: SpotRoute[],
   filters: SpotFilters,
-  seriesStyles: SeriesStyleDefinition[]
+  seriesStyles: SeriesStyleDefinition[],
+  spotById: Map<string, Spot>
 ): SpotRoute[] {
-  if (filters.series.length === 0) return [];
+  if (filters.series.length === 0 && filters.categories.length === 0) return [];
   const knownSeries = new Set(seriesStyles.map((s) => s.series));
-  return routes.filter(
-    (route) =>
-      route.points.length >= 2 &&
-      (route.series === null ||
-        !knownSeries.has(route.series) ||
-        filters.series.includes(route.series))
-  );
+  return routes.filter((route) => {
+    if (route.points.length < 2) return false;
+    if (
+      filters.series.length > 0 &&
+      route.series !== null &&
+      knownSeries.has(route.series) &&
+      !filters.series.includes(route.series)
+    ) {
+      return false;
+    }
+    if (
+      filters.categories.length > 0 &&
+      !route.points.some((p) =>
+        spotById
+          .get(p.spot_id)
+          ?.categories.some((c) => filters.categories.includes(c))
+      )
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -901,12 +923,13 @@ export default function MapView({
     if (!map) return;
     let cancelled = false;
 
-    // 表示対象のルート(と訪問順の経路)の経由地は、スポット自体のシリーズが
-    // 絞り込みで外れていてもピンを表示する(別のシリーズに属する再訪スポットが、
-    // 線だけ通ってピンが無い状態になるのを防ぐ)。免除するのはシリーズ条件のみで、
-    // カテゴリ・訪問状況・訪問日の絞り込みは通常どおり適用する
+    // 表示対象のルート(と訪問順の経路)の経由地は、スポット自体のシリーズ・
+    // カテゴリが絞り込みで外れていてもピンを表示する(別のシリーズ・カテゴリに
+    // 属する経由地の上を、線だけ通ってピンが無い状態になるのを防ぐ)。
+    // 免除するのはルートの表示条件と同じシリーズ・カテゴリのみで、
+    // 訪問状況・訪問日の絞り込みは通常どおり適用する
     const routeMemberIds = new Set([
-      ...filterVisibleRoutes(routes, filters, seriesStyles).flatMap((route) =>
+      ...filterVisibleRoutes(routes, filters, seriesStyles, spotById).flatMap((route) =>
         route.points.map((p) => p.spot_id)
       ),
       ...buildVisitPath(visits, filters, spotById).map((s) => s.id),
@@ -922,7 +945,7 @@ export default function MapView({
         ) ||
         (routeMemberIds.has(spot.id) &&
           passesFilters(
-            { ...filters, series: [] },
+            { ...filters, series: [], categories: [] },
             spot.series,
             spot.categories,
             visitedIds.has(spot.id),
@@ -971,13 +994,13 @@ export default function MapView({
   ]);
 
   // ルートの矢印描画。経由地2点以上のルートを、巡った順(seq昇順)に繋いだ
-  // ラインと進行方向の矢印で描く。シリーズ絞り込みとの連動はfilterVisibleRoutes参照。
+  // ラインと進行方向の矢印で描く。シリーズ・カテゴリ絞り込みとの連動はfilterVisibleRoutes参照。
   // 訪問日で絞り込んでいるときは、同じ見た目で自分の訪問順の経路も重ねて描く
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const visibleRoutes = filterVisibleRoutes(routes, filters, seriesStyles);
+    const visibleRoutes = filterVisibleRoutes(routes, filters, seriesStyles, spotById);
     const visitPath = buildVisitPath(visits, filters, spotById);
 
     runWhenMapReady(() => {
@@ -1084,21 +1107,25 @@ export default function MapView({
             onClick={(e) => e.stopPropagation()}
             className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h2 className="font-bold">絞り込み</h2>
-              <button
-                type="button"
-                onClick={() => setShowFilterModal(false)}
-                aria-label="閉じる"
-                className="text-xl leading-none text-gray-400"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-3">
+                <FilterResetButton filters={filters} onChange={setFilters} />
+                <button
+                  type="button"
+                  onClick={() => setShowFilterModal(false)}
+                  aria-label="閉じる"
+                  className="text-xl leading-none text-gray-400"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             <FilterBar
               spots={spots}
               filters={filters}
               onChange={setFilters}
+              showReset={false}
               seriesStyles={seriesStyles}
               categories={categories}
               visitDates={visitDates}
