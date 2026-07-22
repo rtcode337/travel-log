@@ -13,6 +13,7 @@
 - **口コミ**(公開・本文のみのシンプルな投稿)
 - スポットには「種別」があり(観光地・郵便局・御朱印など)、種別ごとに独立したURL・独自のランク/カテゴリ/対象地域を持てる。管理者が自由に追加・削除できる
 - 種別ごとに**対象地域**を選べる(既定は日本=都道府県、特定の国=州・県、世界全体=国ごと)
+- **PWA対応**(インストール可能)。スマホの「ホーム画面に追加」やPCブラウザのインストール機能で、アドレスバーなしの独立アプリとして起動できる(オフライン対応は未実装)
 
 ## スクリーンショット
 
@@ -84,6 +85,28 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 自由なサインアップはできず、管理者が作成したアカウントのみログインできる。
 
 </details>
+
+### 本番運用
+
+`main`へのpushでGitHub Actions(`.github/workflows/docker-publish.yml`)が本番用イメージを
+ビルドして`ghcr.io/rtcode337/travel-log:latest`(+コミットSHAタグ)へ公開する。
+本番ホストでは本リポジトリのクローン(`docker-compose.yml`と`db/init/`を使う)を置き、
+イメージはビルドせずpullして使う。
+
+```bash
+# 初回のみ: SESSION_SECRETを設定(リポジトリ直下の.envに書いておくのが楽)
+echo "SESSION_SECRET=$(openssl rand -base64 32)" >> .env
+
+# 初回・更新とも共通
+docker compose pull app && docker compose up -d
+```
+
+- GHCRのパッケージは初回公開時点では非公開のため、GitHubのPackages設定でPublicに
+  切り替えるか、本番ホストで`docker login ghcr.io`(`read:packages`権限のPAT)しておく
+- イメージは`linux/amd64`と`linux/arm64`のマルチアーキで公開しており、pull時に
+  ホストに合う方が自動選択される
+- 特定時点に戻したいときは`docker-compose.yml`のイメージタグを`latest`から
+  `sha-xxxxxxx`(Actionsが付けるコミットSHAタグ)に一時的に変えてpullし直す
 
 ## 画面
 
@@ -159,7 +182,7 @@ JSONファイルアップロードでも一括設定できる(travel-log-dataリ
 ## 今後
 
 - ダッシュボード(都道府県塗り分け、制覇率)
-- PWA化、オープンデータ一括インポート
+- PWAのオフライン対応(Service Worker)、オープンデータ一括インポート
 
 ## ライセンス
 

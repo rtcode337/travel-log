@@ -24,6 +24,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // manifest.webmanifest(app/manifest.ts)を除外しているのは、ブラウザのmanifest取得が
+    // 既定でCookieなしで行われるため。ガード対象のままだと/loginリダイレクトが返り
+    // PWAとしてインストールできなくなる
+    "/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
