@@ -5,8 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
-import { RANK_STYLES_SETTING_KEY } from "@/lib/rankStyle";
-import { CATEGORIES_SETTING_KEY, resolveCategories } from "@/lib/category";
+import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
+import {
+  CATEGORIES_SETTING_KEY,
+  parseCategoryList,
+  resolveCategories,
+  sameCategories,
+} from "@/lib/category";
 import {
   countryDisplayName,
   DEFAULT_WIKIPEDIA_LANG,
@@ -42,16 +47,17 @@ const CSV_COLUMNS = [
   "key",
   "name",
   "name_kana",
-  "region",
   "lat",
   "lng",
-  "rank",
-  "category",
+  "region",
+  "series",
+  "categories",
   "description",
 ] as const;
 
 // ルートCSV(スポットを巡った順に矢印で繋ぐ)の列。spot_keyはスポットCSVのkey列を指す
-const ROUTE_CSV_COLUMNS = ["route", "seq", "spot_key"] as const;
+// seriesは省略可(ルートを地図でどのシリーズの色に塗るか。同じrouteの全行に同じ値を書く)
+const ROUTE_CSV_COLUMNS = ["route", "series", "seq", "spot_key"] as const;
 
 export default function AdminView({
   typeKey,
@@ -67,7 +73,7 @@ export default function AdminView({
   const [myId, setMyId] = useState<string | null>(null);
   const isAdmin = myRole === "admin";
 
-  // スポット種別設定の非表示ランクトグル・CSV取り込み後の件数把握のためだけに、
+  // スポット種別設定の非表示シリーズトグル・CSV取り込み後の件数把握のためだけに、
   // このスポット種別の全件(status問わず)を軽く保持しておく(一覧UIとしては出さない)
   const [spots, setSpots] = useState<Spot[]>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -464,7 +470,7 @@ export default function AdminView({
         setTypeMessage("JSONの内容が不正です: " + parsed.error);
         return;
       }
-      const { key, label, settings, ranks, categories } = parsed.data;
+      const { key, label, settings, series, categories } = parsed.data;
 
       const { data: created, error } = await api.spotTypes.create(key, label);
       if (error || !created) {
@@ -472,15 +478,15 @@ export default function AdminView({
         return;
       }
 
-      // ranks/categoriesが指定されていれば、真偽値の設定と合わせて1回のPATCHで反映する
-      // (省略時はDEFAULT_RANK_STYLES=観光地のA〜E、DEFAULT_CATEGORIES=観光地の
+      // series/categoriesが指定されていれば、真偽値の設定と合わせて1回のPATCHで反映する
+      // (省略時はDEFAULT_SERIES_STYLES=観光地のA〜E、DEFAULT_CATEGORIES=観光地の
       // カテゴリにフォールバックするので何もしない)
       const settingsToApply: Record<string, boolean | string> = {};
       for (const [k, v] of Object.entries(settings ?? {})) {
         if (v !== undefined) settingsToApply[k] = v;
       }
-      if (ranks) {
-        settingsToApply[RANK_STYLES_SETTING_KEY] = JSON.stringify(ranks);
+      if (series) {
+        settingsToApply[SERIES_STYLES_SETTING_KEY] = JSON.stringify(series);
       }
       if (categories) {
         settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
@@ -525,7 +531,7 @@ export default function AdminView({
         setTypeSettingsMessage("JSONの内容が不正です: " + parsed.error);
         return;
       }
-      const { key, label, settings, ranks, categories } = parsed.data;
+      const { key, label, settings, series, categories } = parsed.data;
       // キーが変わると種別を差し替えたのと同じ扱いになり影響が大きいため、
       // 一致しない場合は何も反映せずエラーにする(labelは反映してよい)
       if (key !== currentType.key) {
@@ -539,8 +545,8 @@ export default function AdminView({
       for (const [k, v] of Object.entries(settings ?? {})) {
         if (v !== undefined) settingsToApply[k] = v;
       }
-      if (ranks) {
-        settingsToApply[RANK_STYLES_SETTING_KEY] = JSON.stringify(ranks);
+      if (series) {
+        settingsToApply[SERIES_STYLES_SETTING_KEY] = JSON.stringify(series);
       }
       if (categories) {
         settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
@@ -573,11 +579,12 @@ export default function AdminView({
     key: string | null;
     name: string;
     name_kana: string | null;
-    region: string;
     lat: number;
     lng: number;
-    rank: string | null;
-    category: string | null;
+    region: string;
+    series: string | null;
+    /** null = CSVにcategories列が無い(既存のカテゴリを触らない) */
+    categories: string[] | null;
     description: string | null;
     status: string;
   }
@@ -593,10 +600,13 @@ export default function AdminView({
         return;
       }
       const header = rows[0].map((h) => h.trim());
+      // categories列を持たないCSVは「カテゴリを指定していない」だけなので、
+      // 既存スポットのカテゴリを消さずに維持する(key列と同じ扱い)
+      const hasCategoriesColumn = header.includes("categories");
       const idx = Object.fromEntries(
         CSV_COLUMNS.map((c) => [c, header.indexOf(c)])
       ) as Record<(typeof CSV_COLUMNS)[number], number>;
-      for (const required of ["name", "region", "lat", "lng"] as const) {
+      for (const required of ["name", "lat", "lng", "region"] as const) {
         if (idx[required] === -1) {
           setMessage(`CSVヘッダーに ${required} 列がありません。`);
           return;
@@ -608,8 +618,11 @@ export default function AdminView({
       for (let i = 1; i < rows.length; i++) {
         const get = (c: (typeof CSV_COLUMNS)[number]) =>
           idx[c] === -1 ? "" : (rows[i][idx[c]] ?? "").trim();
-        const rank = get("rank") || null;
-        const category = get("category") || null;
+        const series = get("series") || null;
+        // カテゴリはパイプ区切りの1列で複数持てる(例: 自然|夜景|展望)
+        const categories = hasCategoriesColumn
+          ? parseCategoryList(get("categories"))
+          : null;
         const lat = Number(get("lat"));
         const lng = Number(get("lng"));
         if (!get("name")) errors.push(`${i + 1}行目: name が空`);
@@ -620,11 +633,11 @@ export default function AdminView({
             key: get("key") || null,
             name: get("name"),
             name_kana: get("name_kana") || null,
-            region: get("region"),
             lat,
             lng,
-            rank,
-            category,
+            region: get("region"),
+            series,
+            categories,
             description: get("description") || null,
             // CSVインポートはこのページ(spot_admin/admin専用)からのみ行えるため、
             // 承認待ちを経由せずそのまま公開する
@@ -676,11 +689,12 @@ export default function AdminView({
       const isChanged = (spot: Spot, record: CsvSpotRecord) =>
         spot.name !== record.name ||
         spot.name_kana !== record.name_kana ||
-        spot.region !== record.region ||
         spot.lat !== record.lat ||
         spot.lng !== record.lng ||
-        spot.rank !== record.rank ||
-        spot.category !== record.category ||
+        spot.region !== record.region ||
+        spot.series !== record.series ||
+        (record.categories !== null &&
+          !sameCategories(spot.categories, record.categories)) ||
         spot.description !== record.description ||
         (record.key !== null && spot.key !== record.key);
       for (const record of records) {
@@ -737,11 +751,13 @@ export default function AdminView({
         const { error } = await api.spots.update(spot.id, {
           name: record.name,
           name_kana: record.name_kana,
-          region: record.region,
           lat: record.lat,
           lng: record.lng,
-          rank: record.rank,
-          category: record.category,
+          region: record.region,
+          series: record.series,
+          ...(record.categories !== null
+            ? { categories: record.categories }
+            : {}),
           description: record.description,
           ...(record.key !== null ? { key: record.key } : {}),
         });
@@ -786,7 +802,7 @@ export default function AdminView({
       const idx = Object.fromEntries(
         ROUTE_CSV_COLUMNS.map((c) => [c, header.indexOf(c)])
       ) as Record<(typeof ROUTE_CSV_COLUMNS)[number], number>;
-      for (const required of ROUTE_CSV_COLUMNS) {
+      for (const required of ["route", "seq", "spot_key"] as const) {
         if (idx[required] === -1) {
           setRouteMessage(`CSVヘッダーに ${required} 列がありません。`);
           return;
@@ -799,13 +815,20 @@ export default function AdminView({
       );
       const errors: string[] = [];
       const grouped = new Map<string, { seq: number; spotId: string }[]>();
+      // seriesはルート単位の値だが、CSVは行単位なので同じrouteの各行に同じ値が並ぶ。
+      // 最初に現れた値を採り、同一route内で食い違う行はエラーにする
+      const seriesByRoute = new Map<string, string | null>();
       const seenSeq = new Set<string>();
       for (let i = 1; i < rows.length; i++) {
         const get = (c: (typeof ROUTE_CSV_COLUMNS)[number]) =>
-          (rows[i][idx[c]] ?? "").trim();
+          idx[c] === -1 ? "" : (rows[i][idx[c]] ?? "").trim();
         const route = get("route");
+        const series = get("series") || null;
         const seq = Number(get("seq"));
         const spotKey = get("spot_key");
+        if (route && seriesByRoute.has(route) && seriesByRoute.get(route) !== series) {
+          errors.push(`${i + 1}行目: route「${route}」のseriesが他の行と食い違う`);
+        }
         if (!route) errors.push(`${i + 1}行目: route が空`);
         else if (!Number.isFinite(seq)) errors.push(`${i + 1}行目: seq が数値でない`);
         else if (!spotKey) errors.push(`${i + 1}行目: spot_key が空`);
@@ -817,6 +840,7 @@ export default function AdminView({
           errors.push(`${i + 1}行目: route「${route}」の seq ${seq} が重複`);
         else {
           seenSeq.add(`${route}|${seq}`);
+          if (!seriesByRoute.has(route)) seriesByRoute.set(route, series);
           const list = grouped.get(route) ?? [];
           list.push({ seq, spotId: spotsByKey.get(spotKey)!.id });
           grouped.set(route, list);
@@ -832,20 +856,25 @@ export default function AdminView({
         return;
       }
 
-      // 差分更新: 既存ルートと名前・経由地の並びが完全一致するものはスキップし、
+      // 差分更新: 既存ルートとシリーズ・経由地の並びが完全一致するものはスキップし、
       // 変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと置き換え)
       const existingByName = new Map(
-        routes.map((r) => [r.name, r.points.map((p) => p.spot_id).join("|")])
+        routes.map((r) => [
+          r.name,
+          { series: r.series, spotIds: r.points.map((p) => p.spot_id).join("|") },
+        ])
       );
-      const changed: { name: string; spot_ids: string[] }[] = [];
+      const changed: { name: string; series: string | null; spot_ids: string[] }[] = [];
       let unchangedCount = 0;
       for (const [route, list] of grouped) {
         const spotIds = list.sort((a, b) => a.seq - b.seq).map((p) => p.spotId);
-        if (existingByName.get(route) === spotIds.join("|")) {
+        const series = seriesByRoute.get(route) ?? null;
+        const existing = existingByName.get(route);
+        if (existing?.spotIds === spotIds.join("|") && existing.series === series) {
           unchangedCount++;
           continue;
         }
-        changed.push({ name: route, spot_ids: spotIds });
+        changed.push({ name: route, series, spot_ids: spotIds });
       }
       if (changed.length === 0) {
         setRouteMessage(
@@ -1195,8 +1224,8 @@ export default function AdminView({
                   </p>
                   <p className="mb-2 text-xs text-gray-500">
                     種別追加時と同じ形式(
-                    <code>{"{ key, label, settings?, ranks?, categories? }"}</code>
-                    )のJSONファイルをアップロードすると、label・settings・ranks・
+                    <code>{"{ key, label, settings?, series?, categories? }"}</code>
+                    )のJSONファイルをアップロードすると、label・settings・series・
                     categoriesをまとめてこの種別に反映できる(JSON側で省略した
                     JSONキーの内容は変更しない)。ただしkeyの変更は影響が大きいため、
                     JSONのkeyが現在のkey(
@@ -1283,11 +1312,12 @@ export default function AdminView({
               </div>
 
               <p className="mt-2 text-xs text-gray-400">
-                CSV列: {CSV_COLUMNS.join(", ")}(name, region, lat, lng は必須。
+                CSV列: {CSV_COLUMNS.join(", ")}(name, lat, lng, region は必須。
                 region列にはこの種別の地域(
                 {regionFieldLabel(currentRegionScope)})を入れる。
-                rank/categoryは自由入力で空でも可。keyは省略可の種別内一意な
-                参照キーで、ルートCSVからスポットを指すのに使う)
+                series/categoriesは自由入力で空でも可。categoriesは1スポットに複数
+                付けられ、パイプ区切りで書く(例: 自然|夜景|展望)。keyは省略可の
+                種別内一意な参照キーで、ルートCSVからスポットを指すのに使う)
               </p>
             </section>
 
@@ -1297,14 +1327,15 @@ export default function AdminView({
               </h3>
               <p className="mb-3 text-xs text-gray-500">
                 スポットを巡った順に矢印で繋ぐルートをCSVで取り込み、地図に表示する。
-                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(いずれも必須)。routeはルート名、
+                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(seriesのみ省略可)。routeはルート名、
                 seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、spot_keyは
-                スポットCSVのkey列の値。ルート名を
-                この種別のランク値と一致させると、矢印がそのランクの縁取り色で描かれ、
-                地図のランク絞り込みにも連動する(表示中のルートの経由地は、スポット
-                自体のランクが絞り込みで外れていてもピンが表示される)。
+                スポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
+                矢印がそのシリーズの縁取り色で描かれ、地図のシリーズ絞り込みにも
+                連動する(表示中のルートの経由地は、スポット自体のシリーズが
+                絞り込みで外れていてもピンが表示される)。seriesはルート単位の値なので、
+                同じrouteの行にはすべて同じ値を書く(空欄なら既定色)。
                 差分更新: 既存と同名のルートは
-                経由地を丸ごと置き換え、CSVに無いルートには触らない。
+                シリーズと経由地を丸ごと置き換え、CSVに無いルートには触らない。
                 取り込みの前に、spot_keyが指すスポットをスポットCSVでインポートして
                 おくこと(key未設定のスポットは参照できない)。
               </p>
@@ -1504,8 +1535,8 @@ export default function AdminView({
                   <p className="mb-2 text-xs text-gray-500">
                     設定情報込みのJSONファイルからも追加できる
                     (
-                    <code>{"{ key, label, settings?, ranks?, categories? }"}</code>
-                    形式。<code>ranks</code>はそのスポット種別で使えるランクの一覧と
+                    <code>{"{ key, label, settings?, series?, categories? }"}</code>
+                    形式。<code>series</code>はそのスポット種別で使えるシリーズの一覧と
                     表示スタイル(色・縁取り線の色・地図ピンの大きさ・ラベル)の配列で、
                     省略すると観光地のA〜Eが既定になる。<code>categories</code>は
                     使うカテゴリの一覧(文字列配列)で、省略すると観光地のカテゴリが

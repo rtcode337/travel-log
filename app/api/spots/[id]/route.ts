@@ -72,22 +72,27 @@ export async function PATCH(
   // keyはボディに含まれるときだけ更新する(編集フォーム等、keyを扱わない既存の
   // 呼び出し元が送る部分的なボディで、CSV由来のkeyがnullに消されないように)
   const hasKey = Object.prototype.hasOwnProperty.call(spot, "key");
+  // categoriesもkeyと同じ理由でボディに含まれるときだけ更新する(「カテゴリなし」は
+  // 空配列を明示的に送る。省略との区別がつかないと部分的なボディで全消しになるため)
+  const hasCategories = Object.prototype.hasOwnProperty.call(spot, "categories");
   const { rows } = await query<Spot>(
     `update spots set
-      name = $1, name_kana = $2, region = $3,
-      lat = $4, lng = $5, rank = $6, category = $7, description = $8,
-      key = case when $9 then $10 else key end
-     where id = $11
+      name = $1, name_kana = $2, lat = $3, lng = $4, region = $5,
+      series = $6, description = $7,
+      categories = case when $8 then $9::text[] else categories end,
+      key = case when $10 then $11 else key end
+     where id = $12
      returning *`,
     [
       spot.name,
       spot.name_kana,
-      spot.region,
       spot.lat,
       spot.lng,
-      spot.rank,
-      spot.category,
+      spot.region,
+      spot.series,
       spot.description,
+      hasCategories,
+      hasCategories ? (spot.categories ?? []) : [],
       hasKey,
       hasKey ? spot.key : null,
       id,

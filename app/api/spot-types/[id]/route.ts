@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { getSpotTypeSetting, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { deleteVisitPhotos } from "@/lib/photos";
-import { parseRankStyles, RANK_STYLES_SETTING_KEY } from "@/lib/rankStyle";
+import { parseSeriesStyles, SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import { CATEGORIES_SETTING_KEY, parseCategories } from "@/lib/category";
 import {
   isValidRegionScope,
@@ -50,9 +50,9 @@ export async function PATCH(
   }
 
   // スポット種別ごとの追加設定(口コミ・Wikipediaリンク・管理者以外閲覧不可・
-  // ランク設定・対象地域・Wikipedia言語等)。spot_typesに列を増やさずキーを増やせる
+  // シリーズ設定・対象地域・Wikipedia言語等)。spot_typesに列を増やさずキーを増やせる
   // よう、spot_type_settings(key, value)へupsertする。値はboolean('true'/'false'の
-  // 文字列で保存)か、rank_styles等のような文字列(そのまま保存)のどちらか
+  // 文字列で保存)か、series_styles等のような文字列(そのまま保存)のどちらか
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
@@ -60,10 +60,10 @@ export async function PATCH(
     if (typeof value !== "boolean" && typeof value !== "string") {
       return NextResponse.json({ error: "invalid request" }, { status: 400 });
     }
-    if (key === RANK_STYLES_SETTING_KEY && typeof value === "string") {
-      if (parseRankStyles(value) === null) {
+    if (key === SERIES_STYLES_SETTING_KEY && typeof value === "string") {
+      if (parseSeriesStyles(value) === null) {
         return NextResponse.json(
-          { error: `${RANK_STYLES_SETTING_KEY}のJSON形式が不正です。` },
+          { error: `${SERIES_STYLES_SETTING_KEY}のJSON形式が不正です。` },
           { status: 400 }
         );
       }

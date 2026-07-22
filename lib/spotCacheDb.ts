@@ -15,11 +15,11 @@ export type CachedSpot = Pick<
   | "id"
   | "name"
   | "name_kana"
-  | "region"
   | "lat"
   | "lng"
-  | "rank"
-  | "category"
+  | "region"
+  | "series"
+  | "categories"
   | "status"
 >;
 
@@ -34,11 +34,11 @@ export function trimSpot(spot: Spot): CachedSpot {
     id: spot.id,
     name: spot.name,
     name_kana: spot.name_kana,
-    region: spot.region,
     lat: spot.lat,
     lng: spot.lng,
-    rank: spot.rank,
-    category: spot.category,
+    region: spot.region,
+    series: spot.series,
+    categories: spot.categories,
     status: spot.status,
   };
 }
@@ -68,7 +68,9 @@ const DB_NAME = "travel-log";
 // (IndexedDBはバージョンを後退できず、既存より低いバージョンでopenすると失敗する)。
 // 4はCachedSpotの形が変わった(prefecture/municipality → region)ためのもので、
 // 旧形式のまま残っているエントリを読ませないようupgrade時にストアごと作り直す。
-const DB_VERSION = 4;
+// 5も同じくCachedSpotの形が変わったため(rank → series、category → categories。
+// 特にcategoriesは配列前提で読むため、旧形式が残ると絞り込みで落ちる)。
+const DB_VERSION = 5;
 const STORE = "public-spots"; // 値のキーはtypeKey
 const TEMP_V2_STORE = "public-spots-v2"; // 上記の一時版が作ったストア(残っていれば削除)
 const LEGACY_PREFIX = "travel-log:public-spots:"; // 旧localStorage方式のキー接頭辞

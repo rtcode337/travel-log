@@ -1,16 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
-import { distinctValues, type Category, type Rank, type Spot } from "@/lib/types";
-import { getRankOrder, type RankStyleDefinition } from "@/lib/rankStyle";
+import { distinctValues, type Category, type Series, type Spot } from "@/lib/types";
+import { getSeriesOrder, type SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { getCategoryOrder } from "@/lib/category";
-import RankFilter from "@/components/RankFilter";
+import SeriesFilter from "@/components/SeriesFilter";
 
 export type VisitedValue = "visited" | "unvisited";
 
 export interface SpotFilters {
-  /** 空配列 = ランクによる絞り込みなし(「すべて」選択中、全件表示) */
-  ranks: Rank[];
+  /** 空配列 = シリーズによる絞り込みなし(「すべて」選択中、全件表示) */
+  series: Series[];
   /** 空配列 = カテゴリによる絞り込みなし(「すべて」選択中、全件表示) */
   categories: Category[];
   /** 空配列 = 訪問状況による絞り込みなし(「すべて」選択中、全件表示) */
@@ -18,7 +18,7 @@ export interface SpotFilters {
 }
 
 export const DEFAULT_FILTERS: SpotFilters = {
-  ranks: [],
+  series: [],
   categories: [],
   visited: [],
 };
@@ -28,17 +28,16 @@ export const DEFAULT_FILTERS: SpotFilters = {
  */
 export function passesFilters(
   filters: SpotFilters,
-  rank: Rank | null,
-  category: Category | null,
+  series: Series | null,
+  categories: Category[],
   isVisited: boolean
 ): boolean {
-  if (filters.ranks.length > 0) {
-    if (rank === null || !filters.ranks.includes(rank)) return false;
+  if (filters.series.length > 0) {
+    if (series === null || !filters.series.includes(series)) return false;
   }
+  // スポットは複数のカテゴリを持てるため、選択中のいずれかを持っていれば通す(OR条件)
   if (filters.categories.length > 0) {
-    if (category === null || !filters.categories.includes(category)) {
-      return false;
-    }
+    if (!categories.some((c) => filters.categories.includes(c))) return false;
   }
   if (filters.visited.length > 0) {
     const value: VisitedValue = isVisited ? "visited" : "unvisited";
@@ -95,30 +94,30 @@ export default function FilterBar({
   spots,
   filters,
   onChange,
-  rankStyles,
+  seriesStyles,
   categories,
 }: {
-  /** 現在アクティブなスポット種別の実データから、ランク・カテゴリの選択肢を動的に作る */
+  /** 現在アクティブなスポット種別の実データから、シリーズ・カテゴリの選択肢を動的に作る */
   spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;
-  /** このスポット種別のランク設定(lib/useRankStyles.ts参照) */
-  rankStyles: RankStyleDefinition[];
+  /** このスポット種別のシリーズ設定(lib/useSeriesStyles.ts参照) */
+  seriesStyles: SeriesStyleDefinition[];
   /** このスポット種別のカテゴリ設定(並び順に使う。lib/useCategories.ts参照) */
   categories: Category[];
 }) {
-  const availableRanks = useMemo(
+  const availableSeries = useMemo(
     () =>
-      distinctValues(spots.map((s) => s.rank)).sort(
-        (a, b) => getRankOrder(a, rankStyles) - getRankOrder(b, rankStyles)
+      distinctValues(spots.map((s) => s.series)).sort(
+        (a, b) => getSeriesOrder(a, seriesStyles) - getSeriesOrder(b, seriesStyles)
       ),
-    [spots, rankStyles]
+    [spots, seriesStyles]
   );
   // 選択肢は実データに存在する値から作り、種別のカテゴリ設定の並び順に揃える
   // (設定に無い値はdistinctValuesの五十音順のまま末尾に出す)
   const availableCategories = useMemo(
     () =>
-      distinctValues(spots.map((s) => s.category)).sort(
+      distinctValues(spots.flatMap((s) => s.categories)).sort(
         (a, b) => getCategoryOrder(a, categories) - getCategoryOrder(b, categories)
       ),
     [spots, categories]
@@ -126,16 +125,16 @@ export default function FilterBar({
 
   return (
     <div className="space-y-3 text-sm">
-      {availableRanks.length > 1 && (
+      {availableSeries.length > 1 && (
         <div>
           <span className="mb-1 block text-xs font-medium text-gray-500">
-            ランク
+            シリーズ
           </span>
-          <RankFilter
-            ranks={availableRanks}
-            selected={filters.ranks}
-            onChange={(ranks) => onChange({ ...filters, ranks })}
-            rankStyles={rankStyles}
+          <SeriesFilter
+            series={availableSeries}
+            selected={filters.series}
+            onChange={(series) => onChange({ ...filters, series })}
+            seriesStyles={seriesStyles}
           />
         </div>
       )}

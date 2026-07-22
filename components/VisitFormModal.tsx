@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api-client";
-import { DATE_PRECISIONS, type DatePrecision } from "@/lib/types";
 
 const MAX_PHOTO_SIZE = 1280;
 
@@ -46,9 +45,13 @@ export default function VisitFormModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const [visitedOn, setVisitedOn] = useState(today);
-  const [precision, setPrecision] = useState<DatePrecision>("day");
+  // datetime-localは「ローカル時刻のYYYY-MM-DDTHH:mm」を扱うため、現在時刻を
+  // UTCではなくローカルのまま初期値にする(toISOStringだとUTCにずれる)
+  const now = new Date();
+  const nowLocal = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
+  const [visitedOn, setVisitedOn] = useState(nowLocal);
   const [memo, setMemo] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
   const [processingPhotos, setProcessingPhotos] = useState(false);
@@ -82,8 +85,9 @@ export default function VisitFormModal({
 
     const { error: visitError } = await api.visits.create({
       spot_id: spotId,
-      visited_on: precision === "unknown" ? null : visitedOn || null,
-      date_precision: precision,
+      // ローカル時刻の入力値をISO 8601(UTC)にしてから送る。文字列のまま送ると
+      // DB(timestamptz)がサーバーのタイムゾーンで解釈してずれる
+      visited_on: visitedOn ? new Date(visitedOn).toISOString() : null,
       memo: memo.trim() || null,
       photos,
     });
@@ -122,39 +126,17 @@ export default function VisitFormModal({
         <p className="mb-4 text-sm text-gray-500">{spotName}</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">
-              日付の精度
-            </label>
-            <select
-              value={precision}
-              onChange={(e) => setPrecision(e.target.value as DatePrecision)}
+            <label className="mb-1 block text-sm font-medium">訪問日時</label>
+            <input
+              type="datetime-local"
+              value={visitedOn}
+              onChange={(e) => setVisitedOn(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            >
-              {DATE_PRECISIONS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              空欄のままにすると「時期不明」として記録されます。
+            </p>
           </div>
-          {precision !== "unknown" && (
-            <div>
-              <label className="mb-1 block text-sm font-medium">訪問日</label>
-              <input
-                type="date"
-                value={visitedOn}
-                onChange={(e) => setVisitedOn(e.target.value)}
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-              {precision !== "day" && (
-                <p className="mt-1 text-xs text-gray-400">
-                  ※ 表示時は{precision === "month" ? "年月" : "年"}
-                  のみ使われます。日はおおよそでOK。
-                </p>
-              )}
-            </div>
-          )}
           <div className="border-t border-gray-100 pt-3">
             <label className="mb-1 block text-sm font-medium">
               写真(非公開)

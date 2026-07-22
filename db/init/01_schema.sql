@@ -1,10 +1,35 @@
--- 観光地訪問記録アプリ 初期スキーマ(ローカル Postgres 版)
+-- 観光地訪問記録アプリ スキーマ(ローカル Postgres 版)
 -- スポットは spot_types で「種別」を持つ。地図・一覧・管理画面は必ず /[type]/... の
 -- URLキー経由で対象の種別を指定し(キー無しのURL・APIリクエストは404/400)、
 -- app_settings.active_spot_type_id は「ログイン後に自動で開く種別の既定値」としてのみ使う。
 -- 'tourist'はアプリ初期化時(このファイル)で必ず作成される既定の種別。
+--
+-- 【スキーマ変更のルール】
+-- 1. DB定義はすべてこの1ファイルにまとめる。テーブル・列・索引・トリガーを
+--    追加分の別ファイルに切り出さず、常にこのファイルだけを編集すること
+--    (このファイルが「現在あるべきスキーマの唯一の定義」)。
+-- 2. テーブルに変更を加える場合は、あわせて db/migrations/ にテーブル修正
+--    スクリプトを作り、本番DBを既存データを保持したまま移行可能にすること
+--    (本番には利用者の訪問記録・写真が入るため、作り直しはできない)。
+--    詳細な手順は CLAUDE.md「コマンド」の項を参照。
+--
+-- 全テーブルに created_at / updated_at を持たせ、updated_at は set_updated_at()
+-- トリガーで自動更新する(下部にまとめてトリガーを定義してある)。
 
 create extension if not exists pgcrypto;
+
+-- =============================================================
+-- updated_at 自動更新。全テーブルのトリガーから共有する
+-- =============================================================
+create or replace function set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
 
 -- =============================================================
 -- spot_types: スポット種別マスタ。管理者が新しい種別を追加できる
@@ -13,7 +38,8 @@ create table spot_types (
   id              uuid primary key default gen_random_uuid(),
   key             text not null unique,   -- 機械可読キー(例: 'tourist')
   label           text not null,          -- 表示名(例: '観光地')
-  created_at      timestamptz not null default now()
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
 );
 
 -- =============================================================
@@ -22,9 +48,9 @@ create table spot_types (
 -- spot_types に列を増やさずに済むよう、EAV形式にしてある。値はboolean相当を
 -- 'true'/'false'の文字列で保存するもの(既知のキー・既定値・表示名は
 -- lib/types.ts の SPOT_TYPE_SETTING_DEFAULTS/SPOT_TYPE_SETTING_LABELS 参照)のほか、
--- 文字列値のキーもある: rank_styles(ランク定義のJSON、lib/rankStyle.ts)、
--- region_scope(対象地域 'jp'/国コード/'world')・wikipedia_lang(言語コード。
--- いずれも lib/region.ts 参照)。
+-- 文字列値のキーもある: series_styles(シリーズ定義のJSON、lib/seriesStyle.ts)、
+-- categories(カテゴリ一覧のJSON、lib/category.ts)、region_scope(対象地域
+-- 'jp'/国コード/'world')・wikipedia_lang(言語コード。いずれも lib/region.ts 参照)。
 -- 行が存在しないキーは設定ごとの既定値として扱う(設定により既定値は異なる)。
 -- かつて存在した spot_types.visibility 列(public/admin_only/disabled の3値)は廃止し、
 -- admin_only設定(true/false)に一本化した。disabled相当(誰にも見せない)は、
@@ -34,6 +60,8 @@ create table spot_type_settings (
   spot_type_id uuid not null references spot_types (id) on delete cascade,
   key          text not null,
   value        text not null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
   primary key (spot_type_id, key)
 );
 
@@ -46,6 +74,7 @@ create table spot_type_settings (
 create table app_settings (
   singleton           boolean primary key default true check (singleton),
   active_spot_type_id uuid not null references spot_types (id),
+  created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
 
@@ -65,26 +94,35 @@ create table users (
   role          text not null default 'user' check (role in ('admin', 'spot_admin', 'moderator', 'user')),
   nickname      text, -- 口コミ等に表示する表示名(未設定なら「匿名」と表示。メールアドレスは出さない)
   created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
   constraint users_has_login_method check (password_hash is not null or google_id is not null)
 );
 
 -- =============================================================
 -- spots: スポットマスタ(種別はspot_type_idで区別)
--- rank/categoryは種別ごとに意味が異なりうるため自由入力(観光地では
--- 必訪ランクA〜E・カテゴリ7種を使うが、他の種別では未使用でもよい)
+-- series/categoriesは種別ごとに意味が異なりうるため自由入力(観光地では
+-- A〜Eの5段階・カテゴリ7種を使うが、他の種別では未使用でもよい)。
+-- seriesは1スポットにつき必ず1つ(色分け・ルート名との突き合わせの単位)、
+-- categoriesは0個以上を持てる(text[])
 -- =============================================================
 create table spots (
   id            uuid primary key default gen_random_uuid(),
   spot_type_id  uuid not null references spot_types (id),
+  -- CSV等の外部データからこのスポットを参照するための、種別内で一意な省略可のキー。
+  -- ルートCSV(route,seq,spot_key)がスポットを指すために使う。改名・座標修正で参照が
+  -- 壊れないよう、name等の自然キーではなくこの明示キーで紐付ける。キーが不要なスポット
+  -- (ルートに参加しない・手動追加分など)はnullのままでよい
+  key           text,
   name          text not null,
   name_kana     text,
-  -- 地域。種別のregion_scope設定により意味が変わる(既定'jp'=都道府県、
-  -- 国コード指定=その国の州・県、'world'=国名)
-  region        text not null,
   lat           double precision not null,
   lng           double precision not null,
-  rank          text,
-  category      text,
+  -- 地域。種別のregion_scope設定により意味が変わる(既定'jp'=都道府県、
+  -- 国コード指定=その国の州・県、'world'=国名)。座標から決まる従属値のため
+  -- lat/lngの後ろに置いている
+  region        text not null,
+  series        text,
+  categories    text[] not null default '{}',
   description   text,
   -- private: 誰でも作成できる非公開スポット。作成者本人にしか見えず、口コミも使えない
   status        text not null default 'published' check (
@@ -96,40 +134,65 @@ create table spots (
 );
 
 create index spots_region_idx on spots (region);
-create index spots_rank_idx on spots (rank);
+create index spots_series_idx on spots (series);
 create index spots_spot_type_id_idx on spots (spot_type_id);
-
--- updated_at 自動更新
-create or replace function set_updated_at()
-returns trigger
-language plpgsql
-as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
-
-create trigger spots_set_updated_at
-  before update on spots
-  for each row execute function set_updated_at();
+-- 複数カテゴリの絞り込み(categories && $1)を配列の包含演算子で引くためのGIN索引
+create index spots_categories_idx on spots using gin (categories);
+create unique index spots_spot_type_key_idx
+  on spots (spot_type_id, key) where key is not null;
 
 -- =============================================================
--- visits: 訪問記録(同一スポットへの複数回訪問を許容)
+-- spot_routes: スポットを巡った順に繋ぐルート(1本の矢印列)。
+-- 「巡った順番」に意味があるスポット種別で、地図上に順路の矢印を描くために使う。
+-- nameはルートの表示名。seriesはこのルートが属するシリーズ(spots.seriesと
+-- 同じ値空間)で、指定するとその色で矢印が描かれ、シリーズ絞り込みにも連動する。
+-- 表示名とシリーズは別物のため列を分けてある(同じシリーズに複数のルートを
+-- 持たせられる)。未指定(null)のルートは既定色で描かれる
+-- =============================================================
+create table spot_routes (
+  id           uuid primary key default gen_random_uuid(),
+  spot_type_id uuid not null references spot_types (id) on delete cascade,
+  name         text not null,
+  series       text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  unique (spot_type_id, name)
+);
+
+create index spot_routes_series_idx on spot_routes (series);
+
+-- =============================================================
+-- spot_route_points: ルートの経由地(順序付き)。seqの昇順が巡った順で、
+-- 隣り合う2点の間に矢印が引かれる。スポット削除時はcascadeで点だけ抜け、
+-- ルート自体は残る(矢印は残った点同士を繋ぐ)
+-- =============================================================
+create table spot_route_points (
+  route_id   uuid not null references spot_routes (id) on delete cascade,
+  seq        integer not null,
+  spot_id    uuid not null references spots (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (route_id, seq)
+);
+
+create index spot_route_points_spot_id_idx on spot_route_points (spot_id);
+
+-- =============================================================
+-- visits: 訪問記録(同一スポットへの複数回訪問を許容)。
+-- visited_onは訪問した日時(timestamptz)。覚えていない場合はnullでよく、
+-- 表示は「時期不明」になる
 -- =============================================================
 create table visits (
   id             uuid primary key default gen_random_uuid(),
   user_id        uuid not null references users (id) on delete cascade,
   spot_id        uuid not null references spots (id) on delete cascade,
-  visited_on     date,
-  date_precision text not null default 'day' check (
-    date_precision in ('day', 'month', 'year', 'unknown')
-  ),
+  visited_on     timestamptz,
   memo           text,
   -- photosフォルダ(docker-composeでbindマウント)内の相対パス
   -- 「<ユーザーID>/<年>/<月>/<uuid>.<拡張子>」を保存する(lib/photos.ts参照)
   photos         text[] not null default '{}',
-  created_at     timestamptz not null default now()
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
 );
 
 create index visits_user_id_idx on visits (user_id);
@@ -145,6 +208,7 @@ create table visit_plans (
   user_id    uuid not null references users (id) on delete cascade,
   spot_id    uuid not null references spots (id) on delete cascade,
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   unique (user_id, spot_id)
 );
 
@@ -154,7 +218,7 @@ create index visit_plans_spot_id_idx on visit_plans (spot_id);
 -- =============================================================
 -- reviews: 口コミ。投稿するたびに増える掲示板方式(1ユーザーが同じスポットに何件でも書ける)。
 -- スポット種別ごとにspot_type_settingsの'reviews_enabled'で機能そのもののON/OFFを切り替えられる。
--- ランク表示ロジックには reviews を一切参照させないこと
+-- シリーズ表示ロジックには reviews を一切参照させないこと
 -- =============================================================
 create table reviews (
   id         uuid primary key default gen_random_uuid(),
@@ -162,14 +226,58 @@ create table reviews (
   spot_id    uuid not null references spots (id) on delete cascade,
   body       text not null,
   visibility text not null default 'private' check (visibility in ('public', 'private')),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create index reviews_spot_id_idx on reviews (spot_id);
 
 -- =============================================================
+-- updated_at 自動更新トリガー(全テーブル分)
+-- =============================================================
+create trigger spot_types_set_updated_at
+  before update on spot_types
+  for each row execute function set_updated_at();
+
+create trigger spot_type_settings_set_updated_at
+  before update on spot_type_settings
+  for each row execute function set_updated_at();
+
+create trigger app_settings_set_updated_at
+  before update on app_settings
+  for each row execute function set_updated_at();
+
+create trigger users_set_updated_at
+  before update on users
+  for each row execute function set_updated_at();
+
+create trigger spots_set_updated_at
+  before update on spots
+  for each row execute function set_updated_at();
+
+create trigger spot_routes_set_updated_at
+  before update on spot_routes
+  for each row execute function set_updated_at();
+
+create trigger spot_route_points_set_updated_at
+  before update on spot_route_points
+  for each row execute function set_updated_at();
+
+create trigger visits_set_updated_at
+  before update on visits
+  for each row execute function set_updated_at();
+
+create trigger visit_plans_set_updated_at
+  before update on visit_plans
+  for each row execute function set_updated_at();
+
+create trigger reviews_set_updated_at
+  before update on reviews
+  for each row execute function set_updated_at();
+
+-- =============================================================
 -- 参考データ: 既定のスポット種別(観光地)のみ作成する。他の種別は管理画面から
--- 手入力フォーム、または設定情報(公開範囲・ランクの一覧と見た目等)込みのJSONファイル
+-- 手入力フォーム、または設定情報(公開範囲・シリーズの一覧と見た目等)込みのJSONファイル
 -- アップロードで追加する(components/AdminView.tsxの「スポット種別の管理」参照)
 -- =============================================================
 insert into spot_types (key, label) values ('tourist', '観光地');

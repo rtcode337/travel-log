@@ -66,17 +66,10 @@ export async function POST(request: Request) {
   let rows: Visit[];
   try {
     ({ rows } = await query<Visit>(
-      `insert into visits (user_id, spot_id, visited_on, date_precision, memo, photos)
-       values ($1, $2, $3, $4, $5, $6)
+      `insert into visits (user_id, spot_id, visited_on, memo, photos)
+       values ($1, $2, $3, $4, $5)
        returning *`,
-      [
-        userId,
-        body.spot_id,
-        body.visited_on,
-        body.date_precision,
-        body.memo,
-        photoPaths,
-      ]
+      [userId, body.spot_id, body.visited_on, body.memo, photoPaths]
     ));
   } catch (e) {
     // DBに記録できなかった写真ファイルを残さない

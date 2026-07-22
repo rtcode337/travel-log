@@ -16,10 +16,11 @@ import {
   type SpotType,
   type Visit,
 } from "@/lib/types";
-import RankBadge from "@/components/RankBadge";
+import SeriesBadge from "@/components/SeriesBadge";
 import MiniMap from "@/components/MiniMap";
-import { resolveRankStyles } from "@/lib/rankStyle";
+import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import { resolveWikipediaLang } from "@/lib/region";
+import { formatCategoriesForDisplay, resolveCategories } from "@/lib/category";
 import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
@@ -72,7 +73,7 @@ export default function SpotDetailModal({
   onReviewChange,
 }: {
   spotId: string;
-  /** 編集モーダルのランク・カテゴリ入力サジェスト用(省略時はサジェストなし) */
+  /** 編集モーダルのシリーズ・カテゴリ入力サジェスト用(省略時はサジェストなし) */
   spots?: Spot[];
   onClose: () => void;
   /** 訪問記録の追加・削除があったときに呼ばれる(呼び出し元の一覧・バッジ更新用) */
@@ -175,8 +176,13 @@ export default function SpotDetailModal({
     () => spotTypes.find((t) => t.id === spot?.spot_type_id) ?? null,
     [spotTypes, spot]
   );
-  const rankStyles = useMemo(
-    () => resolveRankStyles(currentSpotType),
+  const seriesStyles = useMemo(
+    () => resolveSeriesStyles(currentSpotType),
+    [currentSpotType]
+  );
+  // 複数カテゴリを種別の設定順に並べて表示するために使う
+  const categories = useMemo(
+    () => resolveCategories(currentSpotType),
     [currentSpotType]
   );
 
@@ -270,9 +276,9 @@ export default function SpotDetailModal({
           <>
             <div className="mb-3 flex items-start justify-between gap-2">
               <div className="flex items-center gap-2">
-                <RankBadge
-                  rank={spot.rank}
-                  rankStyles={rankStyles}
+                <SeriesBadge
+                  series={spot.series}
+                  seriesStyles={seriesStyles}
                   isPrivate={spot.status === "private"}
                 />
                 <div>
@@ -318,7 +324,8 @@ export default function SpotDetailModal({
                     <p className="mt-1 text-xs text-red-600">{actionError}</p>
                   )}
                   <p className="text-xs text-gray-500">
-                    {spot.region} ・ {spot.category}
+                    {spot.region} ・{" "}
+                    {formatCategoriesForDisplay(spot.categories, categories)}
                     {reviewsEnabled && reviewsTotal > 0 && (
                       <span className="ml-2 text-gray-400">
                         口コミ{reviewsTotal}件
@@ -344,8 +351,8 @@ export default function SpotDetailModal({
               <MiniMap
                 lat={spot.lat}
                 lng={spot.lng}
-                rank={spot.rank}
-                rankStyles={rankStyles}
+                series={spot.series}
+                seriesStyles={seriesStyles}
               />
               {canManage && (
                 <div className="absolute right-2 top-2 z-10 flex gap-2 rounded-lg bg-white/90 px-2 py-1 shadow">
@@ -456,10 +463,7 @@ export default function SpotDetailModal({
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium">
-                            {formatVisitedOn(
-                              visit.visited_on,
-                              visit.date_precision
-                            )}
+                            {formatVisitedOn(visit.visited_on)}
                           </p>
                           {visit.memo && (
                             <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
