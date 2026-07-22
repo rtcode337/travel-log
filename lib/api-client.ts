@@ -140,6 +140,20 @@ export const api = {
         `/api/spots/purge?type=${encodeURIComponent(type)}`,
         { method: "POST" }
       ),
+    deleteByKeysPreview: (type: string, keys: string[]) =>
+      request<{
+        matchedCount: number;
+        notFoundKeys: string[];
+        sampleNames: string[];
+      }>(`/api/spots/delete-by-keys?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+        body: JSON.stringify({ keys, dryRun: true }),
+      }),
+    deleteByKeysApply: (type: string, keys: string[]) =>
+      request<{ deletedCount: number; notFoundKeys: string[] }>(
+        `/api/spots/delete-by-keys?type=${encodeURIComponent(type)}`,
+        { method: "POST", body: JSON.stringify({ keys }) }
+      ),
   },
   routes: {
     list: (type: string) =>
