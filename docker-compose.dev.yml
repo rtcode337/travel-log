@@ -20,13 +20,28 @@ services:
       timeout: 5s
       retries: 10
 
+  # 未適用のマイグレーションを連番順に自動適用するワンショット(本番と同じ仕組み)。
+  # 開発では公開イメージをpullせず、db/Dockerfileをその場でビルドして使う
+  db-migrate:
+    build:
+      context: ./db
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: travel_log
+      PGPASSWORD: travel_log
+      PGDATABASE: travel_log
+    restart: "no"
+
   app:
     build:
       context: .
       target: dev
     depends_on:
-      db:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
       SESSION_SECRET: ${SESSION_SECRET:-local-dev-secret-change-me}

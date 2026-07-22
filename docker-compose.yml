@@ -1,18 +1,15 @@
 name: travel-log-prod
 
 services:
-  # db/dataは.gitignore対象でgit管理下になく、cloneした直後は存在しない。dbサービスが
-  # 直接./db/dataをbindマウントすると、環境によってはホスト側にディレクトリがない状態で
-  # コンテナ起動そのものが失敗しうるため、db/init/*.sqlがgit管理下にあり必ず存在する親
-  # ディレクトリ./db経由でmkdirし、postgres(uid/gid 70)に所有者を揃えてからdbを起動する。
-  # あわせてdb/init配下(:roマウントされる初期化SQL)もホスト側のパーミッション次第では
-  # postgresユーザーから読めないことがあるため、全員読み取り可にしておく
+  # dbの起動前に、bindマウント先(./db/data)の作成と所有者/パーミッション調整を行う
+  # ワンショット(詳細はdb/entrypoint.shのprepare関数のコメント参照)。
+  # イメージはappと同じくGitHub Actionsがビルド・公開したものをpullして使う
   db-init:
-    image: postgres:16-alpine
+    image: ghcr.io/rtcode337/travel-log-db-init:latest
     user: root
     volumes:
       - ./db:/db
-    command: sh -c "mkdir -p /db/data && chown -R 70:70 /db/data && chmod -R a+rX /db/init"
+    command: ["prepare"]
     restart: "no"
 
   db:
@@ -34,14 +31,30 @@ services:
       retries: 10
     restart: unless-stopped
 
-  app:
-    # mainへのpushでGitHub Actions(.github/workflows/docker-publish.yml)がビルド・公開
-    # するイメージ。本番ではビルドせず、更新は docker compose pull app && docker compose up -d
-    # だけでよい(README「本番運用」参照)
-    image: ghcr.io/rtcode337/travel-log:latest
+  # 未適用のマイグレーション(イメージに焼き込まれた/migrations/*.sql)を連番順に自動適用する
+  # ワンショット。db-initと同じイメージのmigrateサブコマンド。適用済みリビジョンは
+  # schema_migrationsテーブルに記録され、2回目以降は何もせず終了する。
+  # appはこれが正常終了するまで起動しない(古いスキーマのままアプリが動くのを防ぐ)
+  db-migrate:
+    image: ghcr.io/rtcode337/travel-log-db-init:latest
     depends_on:
       db:
         condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: travel_log
+      PGPASSWORD: travel_log
+      PGDATABASE: travel_log
+    restart: "no"
+
+  app:
+    # mainへのpushでGitHub Actions(.github/workflows/docker-publish.yml)がビルド・公開
+    # するイメージ。本番ではビルドせず、更新は docker compose pull && docker compose up -d
+    # だけでよい(README「本番運用」参照)
+    image: ghcr.io/rtcode337/travel-log:latest
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required (openssl rand -base64 32)}
