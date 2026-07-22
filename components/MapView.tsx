@@ -24,6 +24,7 @@ import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
   type SpotFilters,
+  type VisitedValue,
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotDetailModal from "@/components/SpotDetailModal";
@@ -188,11 +189,50 @@ function showClusterLayers(map: maplibregl.Map) {
 const lastViews = new Map<string, { center: [number, number]; zoom: number }>();
 
 /**
- * 地図でかけた絞り込み条件も同様にスポット種別ごとにモジュールスコープで記憶し、
- * 他画面へ遷移して再度地図を開いたときに復元する(lastViewsと同じ寿命 —
- * ページの再読み込みでリセットされる)。
+ * 地図でかけた絞り込み条件はスポット種別ごとにlocalStorageへ保存し、
+ * 他画面から戻ったときだけでなく、アプリ(PWA)やブラウザを完全に落として
+ * 開き直したときも復元する(表示位置のlastViewsと違い、再読み込みでは消えない)。
  */
-const lastFilters = new Map<string, SpotFilters>();
+const FILTERS_STORAGE_PREFIX = "travel-log:map-filters:";
+
+/** 保存済みの絞り込み条件を読む。未保存・不正値はDEFAULT_FILTERS(参照も同じ)を返す */
+function loadSavedFilters(typeKey: string): SpotFilters {
+  if (typeof localStorage === "undefined") return DEFAULT_FILTERS;
+  try {
+    const raw = localStorage.getItem(FILTERS_STORAGE_PREFIX + typeKey);
+    if (!raw) return DEFAULT_FILTERS;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return DEFAULT_FILTERS;
+    const obj = parsed as Record<string, unknown>;
+    const strings = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+    const filters: SpotFilters = {
+      ranks: strings(obj.ranks),
+      categories: strings(obj.categories),
+      visited: strings(obj.visited).filter(
+        (v): v is VisitedValue => v === "visited" || v === "unvisited"
+      ),
+    };
+    if (
+      filters.ranks.length === 0 &&
+      filters.categories.length === 0 &&
+      filters.visited.length === 0
+    ) {
+      return DEFAULT_FILTERS;
+    }
+    return filters;
+  } catch {
+    return DEFAULT_FILTERS;
+  }
+}
+
+function saveFilters(typeKey: string, filters: SpotFilters) {
+  try {
+    localStorage.setItem(FILTERS_STORAGE_PREFIX + typeKey, JSON.stringify(filters));
+  } catch {
+    // プライベートブラウズ等で保存できなくても絞り込み自体は動かす
+  }
+}
 
 /**
  * 現在地追跡モード(GeolocateControlのカメラ追従=ACTIVE_LOCK状態)だったかどうかも
@@ -251,21 +291,20 @@ export default function MapView({
     [spotCache.publicSpots, privateSpots]
   );
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
-  const [filters, setFiltersState] = useState<SpotFilters>(
-    () => lastFilters.get(spotTypeKey) ?? DEFAULT_FILTERS
-  );
-  // 変更のたびに記憶へも書き込む(次に地図を開いたときの復元用)
+  // SSR・hydration時は常に既定(サーバーはlocalStorageを読めないため、初期値で
+  // 読むとhydration不一致になる)。保存済み条件の復元はマウント後のuseEffectで行う
+  const [filters, setFiltersState] = useState<SpotFilters>(DEFAULT_FILTERS);
+  // 変更のたびにlocalStorageへも書き込む(次に地図を開いたときの復元用)
   const setFilters = useCallback(
     (next: SpotFilters) => {
-      lastFilters.set(spotTypeKey, next);
+      saveFilters(spotTypeKey, next);
       setFiltersState(next);
     },
     [spotTypeKey]
   );
-  // マウント中に種別が切り替わった場合は、その種別で記憶している条件に載せ替える
-  // (初回マウント時はuseStateの初期値と同じ値になるだけで再レンダーは起きない)
+  // マウント時と、マウント中に種別が切り替わった場合に、その種別の保存済み条件を読む
   useEffect(() => {
-    setFiltersState(lastFilters.get(spotTypeKey) ?? DEFAULT_FILTERS);
+    setFiltersState(loadSavedFilters(spotTypeKey));
   }, [spotTypeKey]);
   // ランク・カテゴリ・訪問状況のいずれかで絞り込み中か(絞り込みボタンの見た目に使う)
   const filtersActive =
