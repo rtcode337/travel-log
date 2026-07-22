@@ -125,6 +125,26 @@ function ensureRouteLayers(map: maplibregl.Map) {
   );
 }
 
+/**
+ * ランク絞り込みを適用した表示対象のルート(経由地2点以上)を返す。
+ * ルート名がこの種別のランク値と一致するルートだけ絞り込みに連動して出し分け、
+ * 一致しない名前のルートは絞り込みの対象外として常に表示する
+ */
+function filterVisibleRoutes(
+  routes: SpotRoute[],
+  filters: SpotFilters,
+  rankStyles: RankStyleDefinition[]
+): SpotRoute[] {
+  const knownRanks = new Set(rankStyles.map((s) => s.rank));
+  return routes.filter(
+    (route) =>
+      route.points.length >= 2 &&
+      (filters.ranks.length === 0 ||
+        !knownRanks.has(route.name) ||
+        filters.ranks.includes(route.name))
+  );
+}
+
 /** ルートをGeoJSONのLineString群にする。矢印画像の登録もここで済ませる */
 function buildRouteGeoJSON(
   map: maplibregl.Map,
@@ -776,8 +796,25 @@ export default function MapView({
     if (!map) return;
     let cancelled = false;
 
-    const filteredSpots = spots.filter((spot) =>
-      passesFilters(filters, spot.rank, spot.category, visitedIds.has(spot.id))
+    // 表示対象のルートの経由地は、スポット自体のランクが絞り込みで外れていても
+    // ピンを表示する(別の回・企画のランクに属する再訪スポットが、ルートの線だけ
+    // 通ってピンが無い状態になるのを防ぐ)。免除するのはランク条件のみで、
+    // カテゴリ・訪問状況の絞り込みは通常どおり適用する
+    const routeMemberIds = new Set(
+      filterVisibleRoutes(routes, filters, rankStyles).flatMap((route) =>
+        route.points.map((p) => p.spot_id)
+      )
+    );
+    const filteredSpots = spots.filter(
+      (spot) =>
+        passesFilters(filters, spot.rank, spot.category, visitedIds.has(spot.id)) ||
+        (routeMemberIds.has(spot.id) &&
+          passesFilters(
+            { ...filters, ranks: [] },
+            spot.rank,
+            spot.category,
+            visitedIds.has(spot.id)
+          ))
     );
 
     const renderSpots = async () => {
@@ -808,24 +845,15 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [spots, visitedIds, filters, runWhenMapReady, rankStyles]);
+  }, [spots, visitedIds, filters, runWhenMapReady, rankStyles, routes]);
 
   // ルートの矢印描画。経由地2点以上のルートを、巡った順(seq昇順)に繋いだ
-  // ラインと進行方向の矢印で描く。ランク絞り込み中は、ルート名がこの種別の
-  // ランク値と一致するルートだけ絞り込みに連動して出し分ける(ランク値と
-  // 一致しない名前のルートは絞り込みの対象外として常に表示する)
+  // ラインと進行方向の矢印で描く。ランク絞り込みとの連動はfilterVisibleRoutes参照
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const knownRanks = new Set(rankStyles.map((s) => s.rank));
-    const visibleRoutes = routes.filter(
-      (route) =>
-        route.points.length >= 2 &&
-        (filters.ranks.length === 0 ||
-          !knownRanks.has(route.name) ||
-          filters.ranks.includes(route.name))
-    );
+    const visibleRoutes = filterVisibleRoutes(routes, filters, rankStyles);
 
     runWhenMapReady(() => {
       ensureRouteLayers(map);
