@@ -43,9 +43,10 @@
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-Node や Postgres をローカルにインストールする必要はない。初回起動時、Postgres コンテナが
-`db/init/01_schema.sql` を自動実行してテーブルと既定のスポット種別(`tourist`=観光地、
-データは空)を作成する。
+Node や Postgres をローカルにインストールする必要はない。初回起動時、
+`db-migrate` コンテナが `01_schema.sql` を自動実行してテーブルと既定のスポット種別
+(`tourist`=観光地、データは空)を作成する。以降スキーマに変更が入った場合も、
+起動するたびに未適用のマイグレーションが自動で当たる。
 
 http://localhost:3000 を開くと `/login` にリダイレクトされる。初回はアカウントが
 存在しないため「アカウントを作成」フォームが表示されるので、メールアドレスと
@@ -62,7 +63,7 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 ローカルに Postgres を別途用意し、`.env.example` を `.env.local` としてコピーして
 `DATABASE_URL` / `SESSION_SECRET` を設定した上で `npm install && npm run dev` でも
-起動できる。その場合は `db/init/01_schema.sql` を手動で実行する。
+起動できる。その場合は `db/init/01_schema.sql` と `db/migrations/*.sql` を手動で実行する。
 
 </details>
 
@@ -91,7 +92,7 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 `main`へのpushでGitHub Actions(`.github/workflows/docker-publish.yml`)が本番用イメージを
 ビルドして`ghcr.io/rtcode337/travel-log:latest`(+コミットSHAタグ)へ公開する。
-本番ホストでは本リポジトリのクローン(`docker-compose.yml`と`db/init/`を使う)を置き、
+本番ホストでは本リポジトリのクローン(`docker-compose.yml`を使う)を置き、
 イメージはビルドせずpullして使う。
 
 ```bash

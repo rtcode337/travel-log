@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## コマンド
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。db/init/配下は db/data/ が空の場合のみ自動実行される
+docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。スキーマ作成・未適用マイグレーションはdb-migrateサービスが自動で行う
 docker compose pull && docker compose up -d            # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。未適用のマイグレーションはdb-migrateサービスが自動で当てる。SESSION_SECRET環境変数が必須(.env可)
 npm run dev                                             # Next.js開発サーバー(ローカルPostgresを直接使う場合のみ)
 npm run build                                            # 本番ビルド
@@ -37,11 +37,15 @@ composeは`db-init` → `db` → `db-migrate` → `app`の順に起動する。`
 | サービス | 役割 | タイミング |
 |---|---|---|
 | `db-init` (`prepare`) | `db/data`の作成と所有者/パーミッション調整 | dbの起動**前** |
-| `db` | Postgres本体。空のDBなら`db/init/01_schema.sql`をinitdbが自動実行 | — |
-| `db-migrate` (`migrate`) | `/migrations`の未適用SQLを連番順に適用し`schema_migrations`に記録 | dbのhealthcheck通過**後** |
+| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない) | — |
+| `db-migrate` (`migrate`) | スキーマ本体(`/init/01_schema.sql`)と`/migrations`の未適用SQLを適用し`schema_migrations`に記録 | dbのhealthcheck通過**後** |
 | `app` | Next.js。`db-migrate`が正常終了するまで起動しない | 最後 |
 
-マイグレーションSQLは`db-init`イメージに焼き込まれるため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される(`db/init/01_schema.sql`だけはホストのファイルをdbサービスが直接マウントする。新規DBの作成時にしか使われない)。マイグレーションが失敗すると`db-migrate`が非ゼロ終了し、`app`も起動しないため、古いスキーマのままアプリが動くことはない。
+スキーマ本体もマイグレーションSQLも`db-init`イメージに焼き込まれるため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される。マイグレーションが失敗すると`db-migrate`が非ゼロ終了し、`app`も起動しないため、古いスキーマのままアプリが動くことはない。
+
+`01_schema.sql`は`schema_migrations`上では`000_init_schema`という名前の「一番先頭のマイグレーション」として扱う。空のDBには実行し、既にテーブルがあるDB(旧方式でinitdbが作ったもの)には実行せず適用済みとして記録するだけにするので、既存の本番DBをそのまま引き継げる。
+
+**`db/init`をdbコンテナにマウントしないのは意図的**。かつては`docker-entrypoint-initdb.d`に`:ro`マウントし、`db-init`が`chmod -R a+rX`をかけていたが、git管理下のファイルのパーミッションをrootで書き換えるため、`01_schema.sql`を更新するとホスト側の`git pull`が失敗するようになっていた。スキーマ本体もイメージ側から流す方式にして解消した(`prepare`が触るのはgit管理外の`db/data`だけ)。
 
 開発環境では、スキーマを変えたら`db/data/`を捨てて作り直すのが手軽(移行スクリプトの検証は下記の使い捨てDBで行う)。
 
@@ -51,7 +55,7 @@ rm -rf db/data/pgdata   # 既存データを捨てる(訪問記録・アカウ�
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-`db/init/`配下は既存の`db/data/`(Postgresの実データ。リポジトリ直下にbindマウントされるが`.gitignore`対象)がある状態では自動実行されない(空のときの初回だけ走る)。既存データを消さずにスキーマ・移行スクリプトを試したい場合は、同じPostgresコンテナ内に使い捨てDBを作って流すとよい。
+既存データ(`db/data/`。Postgresの実データで、リポジトリ直下にbindマウントされるが`.gitignore`対象)を消さずにスキーマ・移行スクリプトを試したい場合は、同じPostgresコンテナ内に使い捨てDBを作って流すとよい。
 
 ```bash
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres -c "create database schema_check"
@@ -65,7 +69,7 @@ docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgr
 
 [travel-log-data](../travel-log-data)側の`tourist/spots.csv`(観光地データ全件。列は`name,name_kana,lat,lng,region,series,categories,description`)を編集する際は、本番の`spots`/`spot_types`テーブルではなく使い捨てのスキーマで検証すること(このリポジトリの過去のやり方: `create schema lint_check`→`create table lint_check.spots (like public.spots including all)`→`search_path`をそこに向けてCOPYする→`drop schema lint_check cascade`)。シードファイルの検証のために本物の`public.spots`を`truncate`・再投入しないこと。
 
-`docker-entrypoint-initdb.d`(=`db/init/`)は`*.sql`ファイルしか自動実行しない(postgres公式イメージの`docker-entrypoint.sh`が拡張子で判定するため、CSVを置くだけでは読み込まれず、サブディレクトリも1階層しかglobせず`ignoring`されて無視される)ため、CSVをそのまま自動実行対象に置くことはしていない。`tourist`を含む全種別のスポットデータは`/[type]/admin`のCSVインポートから手動で取り込む(下記「外部データソース」の段落参照)。
+スポットのシードデータは`db/init/`に置かず、`tourist`を含む全種別のスポットデータを`/[type]/admin`のCSVインポートから手動で取り込む(下記「外部データソース」の段落参照)。
 
 ## アーキテクチャ
 
