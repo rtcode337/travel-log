@@ -24,6 +24,7 @@ import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
   type SpotFilters,
+  type VisitedValue,
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotDetailModal from "@/components/SpotDetailModal";
@@ -188,23 +189,61 @@ function showClusterLayers(map: maplibregl.Map) {
 const lastViews = new Map<string, { center: [number, number]; zoom: number }>();
 
 /**
- * 現在地の青い丸を表示していたかどうかも同様にモジュールスコープで記憶する。
- * 表示していた場合は最後に分かっている座標も覚えておき、再訪時に地図を動かさず
- * その場に仮の丸を復元する(新たな位置情報取得はしない)。
+ * 地図でかけた絞り込み条件はスポット種別ごとにlocalStorageへ保存し、
+ * 他画面から戻ったときだけでなく、アプリ(PWA)やブラウザを完全に落として
+ * 開き直したときも復元する(表示位置のlastViewsと違い、再読み込みでは消えない)。
  */
-let lastLocation: { lat: number; lng: number } | null = null;
-let lastLocationVisible = false;
+const FILTERS_STORAGE_PREFIX = "travel-log:map-filters:";
 
-function createLocationDotElement(): HTMLDivElement {
-  const el = document.createElement("div");
-  el.style.cssText = `
-    width: 16px; height: 16px; border-radius: 50%;
-    background: #2563eb; border: 3px solid white;
-    box-shadow: 0 0 0 1px rgba(0,0,0,0.25), 0 1px 4px rgba(0,0,0,0.4);
-    pointer-events: none;
-  `;
-  return el;
+/** 保存済みの絞り込み条件を読む。未保存・不正値はDEFAULT_FILTERS(参照も同じ)を返す */
+function loadSavedFilters(typeKey: string): SpotFilters {
+  if (typeof localStorage === "undefined") return DEFAULT_FILTERS;
+  try {
+    const raw = localStorage.getItem(FILTERS_STORAGE_PREFIX + typeKey);
+    if (!raw) return DEFAULT_FILTERS;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return DEFAULT_FILTERS;
+    const obj = parsed as Record<string, unknown>;
+    const strings = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+    const filters: SpotFilters = {
+      ranks: strings(obj.ranks),
+      categories: strings(obj.categories),
+      visited: strings(obj.visited).filter(
+        (v): v is VisitedValue => v === "visited" || v === "unvisited"
+      ),
+    };
+    if (
+      filters.ranks.length === 0 &&
+      filters.categories.length === 0 &&
+      filters.visited.length === 0
+    ) {
+      return DEFAULT_FILTERS;
+    }
+    return filters;
+  } catch {
+    return DEFAULT_FILTERS;
+  }
 }
+
+function saveFilters(typeKey: string, filters: SpotFilters) {
+  try {
+    localStorage.setItem(FILTERS_STORAGE_PREFIX + typeKey, JSON.stringify(filters));
+  } catch {
+    // プライベートブラウズ等で保存できなくても絞り込み自体は動かす
+  }
+}
+
+/**
+ * 現在地追跡モード(GeolocateControlのカメラ追従=ACTIVE_LOCK状態)だったかどうかも
+ * 同様にモジュールスコープで記憶する。追跡中に他画面へ遷移するとMapViewのアンマウントで
+ * GeolocateControlごとwatchPositionが破棄されるため、再訪時にこのフラグを見て
+ * trigger()し直すことで追跡モードを復元する(古い座標に仮の丸を置くのではなく、
+ * 位置情報の取得とカメラ追従そのものを再開する)。
+ * 地図上をドラッグして追従が切れた状態(BACKGROUND)は「追跡モード」とはみなさない
+ * (trackuserlocationendで即座にfalseへ落とす)。
+ */
+let lastTrackingActive = false;
 
 export default function MapView({
   spotTypeKey,
@@ -238,7 +277,6 @@ export default function MapView({
       pendingMapReadyRef.current.push(fn);
     }
   }, []);
-  const locationDotRef = useRef<maplibregl.Marker | null>(null);
 
   const spotCache = useSpotCache(spotTypeKey);
   const rankStyles = useRankStyles(spotTypeKey);
@@ -253,7 +291,26 @@ export default function MapView({
     [spotCache.publicSpots, privateSpots]
   );
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
-  const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
+  // SSR・hydration時は常に既定(サーバーはlocalStorageを読めないため、初期値で
+  // 読むとhydration不一致になる)。保存済み条件の復元はマウント後のuseEffectで行う
+  const [filters, setFiltersState] = useState<SpotFilters>(DEFAULT_FILTERS);
+  // 変更のたびにlocalStorageへも書き込む(次に地図を開いたときの復元用)
+  const setFilters = useCallback(
+    (next: SpotFilters) => {
+      saveFilters(spotTypeKey, next);
+      setFiltersState(next);
+    },
+    [spotTypeKey]
+  );
+  // マウント時と、マウント中に種別が切り替わった場合に、その種別の保存済み条件を読む
+  useEffect(() => {
+    setFiltersState(loadSavedFilters(spotTypeKey));
+  }, [spotTypeKey]);
+  // ランク・カテゴリ・訪問状況のいずれかで絞り込み中か(絞り込みボタンの見た目に使う)
+  const filtersActive =
+    filters.ranks.length > 0 ||
+    filters.categories.length > 0 ||
+    filters.visited.length > 0;
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -332,35 +389,26 @@ export default function MapView({
     // このセッションで初めてこの種別の/mapを開いたときの初期表示調整
     // (日本の種別=現在地の自動取得、それ以外=スポット全体へのフィット)は、
     // スコープの取得完了を待つ必要があるため下の別のuseEffectで行う。
-    // 他画面から戻ってきたときは直前に表示していた位置・ズームをそのまま復元する
-    if (savedView && lastLocationVisible && lastLocation) {
-      // 前回青い丸を表示していた場合、地図は動かさずその場に仮の丸だけ復元する
-      // (新たな位置情報取得はしない。実際に取得できたら下のgeolocateイベントで
-      // 本物の丸に置き換わる)
-      locationDotRef.current = new maplibregl.Marker({
-        element: createLocationDotElement(),
-      })
-        .setLngLat([lastLocation.lng, lastLocation.lat])
-        .addTo(map);
+    // 他画面から戻ってきたときは直前に表示していた位置・ズームをそのまま復元し、
+    // さらに離れた時点で現在地追跡モードだった場合は追跡自体を再開する
+    // (trigger()はコントロールのセットアップ完了前だと無視されるため、loadを待つ)
+    if (savedView && lastTrackingActive) {
+      map.on("load", () => geolocateRef.current?.trigger());
     }
 
-    // 現在地取得の成否・表示状態を覚えておき、次にこの画面を開いたときに復元する
-    const handleGeolocate = (position: GeolocationPosition) => {
-      lastLocation = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-      };
-      lastLocationVisible = true;
-      // 実際の現在地マーカーが表示されるので、復元用の仮マーカーは片付ける
-      locationDotRef.current?.remove();
-      locationDotRef.current = null;
+    // 追跡モード(カメラ追従)のON/OFFを覚えておき、次にこの画面を開いたときに復元する。
+    // trackuserlocationendはOFFへの遷移だけでなくドラッグによるBACKGROUND
+    // (青丸は出たままカメラ追従だけ解除)への遷移でも発火するが、どちらも
+    // 「追跡モードではない」として扱う(復元したいのはカメラ追従の状態のみ)
+    const handleTrackingStart = () => {
+      lastTrackingActive = true;
     };
-    const handleGeolocateEnd = () => {
-      lastLocationVisible = false;
+    const handleTrackingEnd = () => {
+      lastTrackingActive = false;
     };
-    geolocate.on("geolocate", handleGeolocate);
-    geolocate.on("trackuserlocationend", handleGeolocateEnd);
-    geolocate.on("error", handleGeolocateEnd);
+    geolocate.on("trackuserlocationstart", handleTrackingStart);
+    geolocate.on("trackuserlocationend", handleTrackingEnd);
+    geolocate.on("error", handleTrackingEnd);
 
     const saveView = () => {
       lastViews.set(spotTypeKey, {
@@ -446,16 +494,14 @@ export default function MapView({
       container.removeEventListener("wheel", handleWheel);
       map.off("contextmenu", handleContextMenu);
       map.off("moveend", saveView);
-      geolocate.off("geolocate", handleGeolocate);
-      geolocate.off("trackuserlocationend", handleGeolocateEnd);
-      geolocate.off("error", handleGeolocateEnd);
+      geolocate.off("trackuserlocationstart", handleTrackingStart);
+      geolocate.off("trackuserlocationend", handleTrackingEnd);
+      geolocate.off("error", handleTrackingEnd);
       container.removeEventListener("touchstart", handleTouchStart);
       container.removeEventListener("touchmove", handleTouchMove);
       container.removeEventListener("touchend", clearLongPress);
       container.removeEventListener("touchcancel", clearLongPress);
       clearLongPress();
-      locationDotRef.current?.remove();
-      locationDotRef.current = null;
       searchMarkerRef.current?.remove();
       searchMarkerRef.current = null;
       map.remove();
@@ -692,8 +738,12 @@ export default function MapView({
             <button
               type="button"
               onClick={() => setShowFilterModal(true)}
-              aria-label="絞り込み"
-              className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-lg leading-none"
+              aria-label={filtersActive ? "絞り込み(絞り込み中)" : "絞り込み"}
+              className={`shrink-0 rounded-lg border px-3 py-1.5 text-lg leading-none ${
+                filtersActive
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-gray-300 bg-white"
+              }`}
             >
               ☰
             </button>
