@@ -188,22 +188,23 @@ function showClusterLayers(map: maplibregl.Map) {
 const lastViews = new Map<string, { center: [number, number]; zoom: number }>();
 
 /**
- * 現在地の青い丸を表示していたかどうかも同様にモジュールスコープで記憶する。
- * 表示していた場合は最後に分かっている座標も覚えておき、再訪時に地図を動かさず
- * その場に仮の丸を復元する(新たな位置情報取得はしない)。
+ * 現在地追跡モード(GeolocateControlのカメラ追従=ACTIVE_LOCK状態)だったかどうかも
+ * 同様にモジュールスコープで記憶する。追跡中に他画面へ遷移するとMapViewのアンマウントで
+ * GeolocateControlごとwatchPositionが破棄されるため、再訪時にこのフラグを見て
+ * trigger()し直すことで追跡モードを復元する(古い座標に仮の丸を置くのではなく、
+ * 位置情報の取得とカメラ追従そのものを再開する)。
+ * 地図上をドラッグして追従が切れた状態(BACKGROUND)は「追跡モード」とはみなさない
+ * (trackuserlocationendで即座にfalseへ落とす)。
  */
-let lastLocation: { lat: number; lng: number } | null = null;
-let lastLocationVisible = false;
+let lastTrackingActive = false;
 
-function createLocationDotElement(): HTMLDivElement {
-  const el = document.createElement("div");
-  el.style.cssText = `
-    width: 16px; height: 16px; border-radius: 50%;
-    background: #2563eb; border: 3px solid white;
-    box-shadow: 0 0 0 1px rgba(0,0,0,0.25), 0 1px 4px rgba(0,0,0,0.4);
-    pointer-events: none;
-  `;
-  return el;
+/** PWA(ホーム画面から)として起動されているか */
+function isStandaloneDisplayMode(): boolean {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    // 旧iOS Safariのホーム画面追加はdisplay-modeを報告しないことがある
+    (window.navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
 }
 
 export default function MapView({
@@ -238,7 +239,6 @@ export default function MapView({
       pendingMapReadyRef.current.push(fn);
     }
   }, []);
-  const locationDotRef = useRef<maplibregl.Marker | null>(null);
 
   const spotCache = useSpotCache(spotTypeKey);
   const rankStyles = useRankStyles(spotTypeKey);
@@ -294,6 +294,12 @@ export default function MapView({
     roleRef.current = role;
   }, [role]);
 
+  // 地図初期化effect内のイベントリスナーから最新のスコープを参照するためのref
+  const regionScopeRef = useRef<string | null>(null);
+  useEffect(() => {
+    regionScopeRef.current = regionScope;
+  }, [regionScope]);
+
   useEffect(() => {
     api.auth.me().then(({ data }) => setRole(data?.role ?? null));
   }, []);
@@ -332,35 +338,41 @@ export default function MapView({
     // このセッションで初めてこの種別の/mapを開いたときの初期表示調整
     // (日本の種別=現在地の自動取得、それ以外=スポット全体へのフィット)は、
     // スコープの取得完了を待つ必要があるため下の別のuseEffectで行う。
-    // 他画面から戻ってきたときは直前に表示していた位置・ズームをそのまま復元する
-    if (savedView && lastLocationVisible && lastLocation) {
-      // 前回青い丸を表示していた場合、地図は動かさずその場に仮の丸だけ復元する
-      // (新たな位置情報取得はしない。実際に取得できたら下のgeolocateイベントで
-      // 本物の丸に置き換わる)
-      locationDotRef.current = new maplibregl.Marker({
-        element: createLocationDotElement(),
-      })
-        .setLngLat([lastLocation.lng, lastLocation.lat])
-        .addTo(map);
+    // 他画面から戻ってきたときは直前に表示していた位置・ズームをそのまま復元し、
+    // さらに離れた時点で現在地追跡モードだった場合は追跡自体を再開する
+    // (trigger()はコントロールのセットアップ完了前だと無視されるため、loadを待つ)
+    if (savedView && lastTrackingActive) {
+      map.on("load", () => geolocateRef.current?.trigger());
     }
 
-    // 現在地取得の成否・表示状態を覚えておき、次にこの画面を開いたときに復元する
-    const handleGeolocate = (position: GeolocationPosition) => {
-      lastLocation = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-      };
-      lastLocationVisible = true;
-      // 実際の現在地マーカーが表示されるので、復元用の仮マーカーは片付ける
-      locationDotRef.current?.remove();
-      locationDotRef.current = null;
+    // 追跡モード(カメラ追従)のON/OFFを覚えておき、次にこの画面を開いたときに復元する。
+    // trackuserlocationendはOFFへの遷移だけでなくドラッグによるBACKGROUND
+    // (青丸は出たままカメラ追従だけ解除)への遷移でも発火するが、どちらも
+    // 「追跡モードではない」として扱う(復元したいのはカメラ追従の状態のみ)
+    const handleTrackingStart = () => {
+      lastTrackingActive = true;
     };
-    const handleGeolocateEnd = () => {
-      lastLocationVisible = false;
+    const handleTrackingEnd = () => {
+      lastTrackingActive = false;
     };
-    geolocate.on("geolocate", handleGeolocate);
-    geolocate.on("trackuserlocationend", handleGeolocateEnd);
-    geolocate.on("error", handleGeolocateEnd);
+    geolocate.on("trackuserlocationstart", handleTrackingStart);
+    geolocate.on("trackuserlocationend", handleTrackingEnd);
+    geolocate.on("error", handleTrackingEnd);
+
+    // PWA(ホーム画面から起動)ではアプリを切り替えて戻ってきてもページが再読み込み
+    // されず、このモジュールの状態も生きたままのため、下の初期表示用useEffectの
+    // 現在地取得は走らない。バックグラウンドからの復帰を「アプリを開いた」とみなし、
+    // ブラウザでの新規読み込み時と同様に現在地へフォーカスする(日本スコープのみ。
+    // すでに追跡モード中はtrigger()がトグルとしてOFFに働いてしまううえ、
+    // カメラは追従済みなので何もしない)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!isStandaloneDisplayMode()) return;
+      if (regionScopeRef.current !== "jp") return;
+      if (lastTrackingActive) return;
+      geolocateRef.current?.trigger();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     const saveView = () => {
       lastViews.set(spotTypeKey, {
@@ -446,16 +458,15 @@ export default function MapView({
       container.removeEventListener("wheel", handleWheel);
       map.off("contextmenu", handleContextMenu);
       map.off("moveend", saveView);
-      geolocate.off("geolocate", handleGeolocate);
-      geolocate.off("trackuserlocationend", handleGeolocateEnd);
-      geolocate.off("error", handleGeolocateEnd);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      geolocate.off("trackuserlocationstart", handleTrackingStart);
+      geolocate.off("trackuserlocationend", handleTrackingEnd);
+      geolocate.off("error", handleTrackingEnd);
       container.removeEventListener("touchstart", handleTouchStart);
       container.removeEventListener("touchmove", handleTouchMove);
       container.removeEventListener("touchend", clearLongPress);
       container.removeEventListener("touchcancel", clearLongPress);
       clearLongPress();
-      locationDotRef.current?.remove();
-      locationDotRef.current = null;
       searchMarkerRef.current?.remove();
       searchMarkerRef.current = null;
       map.remove();
