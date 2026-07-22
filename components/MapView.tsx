@@ -15,7 +15,7 @@ import {
 } from "@/lib/mapStyle";
 import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
-import type { Role, Spot, SpotRoute } from "@/lib/types";
+import type { Role, Spot, SpotRoute, Visit } from "@/lib/types";
 import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
@@ -24,6 +24,7 @@ import { useCategories } from "@/lib/useCategories";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
+  toVisitDateKey,
   type SpotFilters,
   type VisitedValue,
 } from "@/components/FilterBar";
@@ -42,6 +43,9 @@ const ROUTE_ARROW_LAYER_ID = "spot-routes-arrow";
 
 /** ルートにシリーズが設定されていない(または種別の一覧に無い)ときの矢印色 */
 const DEFAULT_ROUTE_COLOR = "#2563eb";
+
+/** 訪問日で絞り込み中に描く「訪問順」の線・矢印の色(ルートCSVの線と区別できる色) */
+const VISIT_PATH_COLOR = "#9333ea";
 
 /**
  * ルートの進行方向を示す右向き矢印(白フチ付き)の画像を色ごとに生成して登録する。
@@ -148,29 +152,83 @@ function filterVisibleRoutes(
   );
 }
 
-/** ルートをGeoJSONのLineString群にする。矢印画像の登録もここで済ませる */
+/**
+ * 訪問日で絞り込んでいるとき、その日の訪問を訪問時刻の昇順に並べた経路を返す。
+ * この種別に無いスポット(他の種別の訪問記録)は除く。
+ * 同じスポットへの再訪はそのまま複数回現れる(行って戻る線になる)が、
+ * 連続する同じスポットへの訪問(同じ場所で複数回記録した場合)はまとめる
+ * (長さ0の線分になり、矢印の向きが定まらないため)。
+ */
+function buildVisitPath(
+  visits: Visit[],
+  filters: SpotFilters,
+  spotById: Map<string, Spot>
+): Spot[] {
+  const date = filters.visitedDate;
+  if (!date) return [];
+  return visits
+    .flatMap((visit) => {
+      if (toVisitDateKey(visit.visited_on) !== date) return [];
+      const spot = spotById.get(visit.spot_id);
+      return spot ? [{ time: Date.parse(visit.visited_on!), spot }] : [];
+    })
+    .sort((a, b) => a.time - b.time)
+    .map((v) => v.spot)
+    .filter((spot, i, list) => i === 0 || spot.id !== list[i - 1].id);
+}
+
+/**
+ * ルート(と、訪問日で絞り込み中なら訪問順の経路)をGeoJSONのLineString群にする。
+ * 矢印画像の登録もここで済ませる
+ */
 function buildRouteGeoJSON(
   map: maplibregl.Map,
   routes: SpotRoute[],
-  seriesStyles: SeriesStyleDefinition[]
+  seriesStyles: SeriesStyleDefinition[],
+  visitPath: Spot[]
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, { color: string; icon: string }> {
+  const visitFeatures: GeoJSON.Feature<
+    GeoJSON.LineString,
+    { color: string; icon: string }
+  >[] =
+    visitPath.length >= 2
+      ? [
+          {
+            type: "Feature",
+            geometry: {
+              type: "LineString",
+              coordinates: visitPath.map((s) => [s.lng, s.lat]),
+            },
+            properties: {
+              color: VISIT_PATH_COLOR,
+              icon: ensureRouteArrowImage(map, VISIT_PATH_COLOR),
+            },
+          },
+        ]
+      : [];
+
   return {
     type: "FeatureCollection",
-    features: routes.map((route) => {
-      // ルートのシリーズが種別の一覧にあれば、そのシリーズの縁取り色
-      // (地の色より濃く、地図上で見やすい)で描く
-      const color =
-        seriesStyles.find((s) => s.series === route.series)?.borderColor ??
-        DEFAULT_ROUTE_COLOR;
-      return {
-        type: "Feature",
-        geometry: {
-          type: "LineString",
-          coordinates: route.points.map((p) => [p.lng, p.lat]),
-        },
-        properties: { color, icon: ensureRouteArrowImage(map, color) },
-      };
-    }),
+    features: [
+      ...visitFeatures,
+      ...routes.map<
+        GeoJSON.Feature<GeoJSON.LineString, { color: string; icon: string }>
+      >((route) => {
+        // ルートのシリーズが種別の一覧にあれば、そのシリーズの縁取り色
+        // (地の色より濃く、地図上で見やすい)で描く
+        const color =
+          seriesStyles.find((s) => s.series === route.series)?.borderColor ??
+          DEFAULT_ROUTE_COLOR;
+        return {
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: route.points.map((p) => [p.lng, p.lat]),
+          },
+          properties: { color, icon: ensureRouteArrowImage(map, color) },
+        };
+      }),
+    ],
   };
 }
 
@@ -347,17 +405,22 @@ function loadSavedFilters(typeKey: string): SpotFilters {
     const obj = parsed as Record<string, unknown>;
     const strings = (v: unknown): string[] =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+    // 訪問日は`YYYY-MM-DD`のみ受け付ける(input[type=date]が扱える形)
+    const date = (v: unknown): string | null =>
+      typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
     const filters: SpotFilters = {
       series: strings(obj.series),
       categories: strings(obj.categories),
       visited: strings(obj.visited).filter(
         (v): v is VisitedValue => v === "visited" || v === "unvisited"
       ),
+      visitedDate: date(obj.visitedDate),
     };
     if (
       filters.series.length === 0 &&
       filters.categories.length === 0 &&
-      filters.visited.length === 0
+      filters.visited.length === 0 &&
+      !filters.visitedDate
     ) {
       return DEFAULT_FILTERS;
     }
@@ -433,7 +496,43 @@ export default function MapView({
     () => [...(spotCache.publicSpots ?? []), ...privateSpots],
     [spotCache.publicSpots, privateSpots]
   );
-  const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
+  // 自分の訪問記録(全種別分)。ピンの訪問済み表示のほか、訪問日での絞り込みと
+  // 訪問順の矢印(buildVisitPath)に訪問日時が要るため、IDの集合ではなく全件を持つ
+  const [visits, setVisits] = useState<Visit[]>([]);
+  const visitedIds = useMemo(
+    () => new Set(visits.map((v) => v.spot_id)),
+    [visits]
+  );
+  /** spot_id → そのスポットを訪問した日(ローカル日付。日時不明の訪問は含めない) */
+  const visitedDatesBySpot = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const v of visits) {
+      const date = toVisitDateKey(v.visited_on);
+      if (!date) continue;
+      const list = m.get(v.spot_id);
+      if (list) list.push(date);
+      else m.set(v.spot_id, [date]);
+    }
+    return m;
+  }, [visits]);
+  const spotById = useMemo(() => {
+    const m = new Map<string, Spot>();
+    for (const s of spots) m.set(s.id, s);
+    return m;
+  }, [spots]);
+  /**
+   * 訪問日ドロップダウンの選択肢(新しい順)。この種別のスポットへの訪問だけを
+   * 対象にする(他の種別の訪問記録しかない日を選んでも0件になるため)
+   */
+  const visitDates = useMemo(() => {
+    const set = new Set<string>();
+    for (const v of visits) {
+      if (!spotById.has(v.spot_id)) continue;
+      const date = toVisitDateKey(v.visited_on);
+      if (date) set.add(date);
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [visits, spotById]);
   // SSR・hydration時は常に既定(サーバーはlocalStorageを読めないため、初期値で
   // 読むとhydration不一致になる)。保存済み条件の復元はマウント後のuseEffectで行う
   const [filters, setFiltersState] = useState<SpotFilters>(DEFAULT_FILTERS);
@@ -449,11 +548,12 @@ export default function MapView({
   useEffect(() => {
     setFiltersState(loadSavedFilters(spotTypeKey));
   }, [spotTypeKey]);
-  // シリーズ・カテゴリ・訪問状況のいずれかで絞り込み中か(絞り込みボタンの見た目に使う)
+  // シリーズ・カテゴリ・訪問状況・訪問日のいずれかで絞り込み中か(絞り込みボタンの見た目に使う)
   const filtersActive =
     filters.series.length > 0 ||
     filters.categories.length > 0 ||
-    filters.visited.length > 0;
+    filters.visited.length > 0 ||
+    !!filters.visitedDate;
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -705,7 +805,7 @@ export default function MapView({
 
   const loadVisits = async () => {
     const { data } = await api.visits.list();
-    setVisitedIds(new Set((data ?? []).map((v) => v.spot_id)));
+    setVisits(data ?? []);
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -801,24 +901,32 @@ export default function MapView({
     if (!map) return;
     let cancelled = false;
 
-    // 表示対象のルートの経由地は、スポット自体のシリーズが絞り込みで外れていても
-    // ピンを表示する(別のシリーズに属する再訪スポットが、ルートの線だけ
-    // 通ってピンが無い状態になるのを防ぐ)。免除するのはシリーズ条件のみで、
-    // カテゴリ・訪問状況の絞り込みは通常どおり適用する
-    const routeMemberIds = new Set(
-      filterVisibleRoutes(routes, filters, seriesStyles).flatMap((route) =>
+    // 表示対象のルート(と訪問順の経路)の経由地は、スポット自体のシリーズが
+    // 絞り込みで外れていてもピンを表示する(別のシリーズに属する再訪スポットが、
+    // 線だけ通ってピンが無い状態になるのを防ぐ)。免除するのはシリーズ条件のみで、
+    // カテゴリ・訪問状況・訪問日の絞り込みは通常どおり適用する
+    const routeMemberIds = new Set([
+      ...filterVisibleRoutes(routes, filters, seriesStyles).flatMap((route) =>
         route.points.map((p) => p.spot_id)
-      )
-    );
+      ),
+      ...buildVisitPath(visits, filters, spotById).map((s) => s.id),
+    ]);
     const filteredSpots = spots.filter(
       (spot) =>
-        passesFilters(filters, spot.series, spot.categories, visitedIds.has(spot.id)) ||
+        passesFilters(
+          filters,
+          spot.series,
+          spot.categories,
+          visitedIds.has(spot.id),
+          visitedDatesBySpot.get(spot.id)
+        ) ||
         (routeMemberIds.has(spot.id) &&
           passesFilters(
             { ...filters, series: [] },
             spot.series,
             spot.categories,
-            visitedIds.has(spot.id)
+            visitedIds.has(spot.id),
+            visitedDatesBySpot.get(spot.id)
           ))
     );
 
@@ -850,24 +958,38 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [spots, visitedIds, filters, runWhenMapReady, seriesStyles, routes]);
+  }, [
+    spots,
+    spotById,
+    visits,
+    visitedIds,
+    visitedDatesBySpot,
+    filters,
+    runWhenMapReady,
+    seriesStyles,
+    routes,
+  ]);
 
   // ルートの矢印描画。経由地2点以上のルートを、巡った順(seq昇順)に繋いだ
-  // ラインと進行方向の矢印で描く。シリーズ絞り込みとの連動はfilterVisibleRoutes参照
+  // ラインと進行方向の矢印で描く。シリーズ絞り込みとの連動はfilterVisibleRoutes参照。
+  // 訪問日で絞り込んでいるときは、同じ見た目で自分の訪問順の経路も重ねて描く
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     const visibleRoutes = filterVisibleRoutes(routes, filters, seriesStyles);
+    const visitPath = buildVisitPath(visits, filters, spotById);
 
     runWhenMapReady(() => {
       ensureRouteLayers(map);
       const source = map.getSource(ROUTES_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
-      source?.setData(buildRouteGeoJSON(map, visibleRoutes, seriesStyles));
+      source?.setData(
+        buildRouteGeoJSON(map, visibleRoutes, seriesStyles, visitPath)
+      );
     });
-  }, [routes, filters, seriesStyles, runWhenMapReady]);
+  }, [routes, filters, seriesStyles, runWhenMapReady, visits, spotById]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
   // (通常の取得はpublishedのみなので、それ以外は一覧に反映されるまでこれで見せる)
@@ -979,6 +1101,7 @@ export default function MapView({
               onChange={setFilters}
               seriesStyles={seriesStyles}
               categories={categories}
+              visitDates={visitDates}
             />
 
             <div className="border-t border-gray-100 pt-3">
