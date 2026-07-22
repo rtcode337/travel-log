@@ -48,7 +48,13 @@ const CSV_COLUMNS = [
   "description",
 ] as const;
 
-export default function AdminView({ typeKey }: { typeKey: string }) {
+export default function AdminView({
+  typeKey,
+  buildNumber,
+}: {
+  typeKey: string;
+  buildNumber?: string | null;
+}) {
   const router = useRouter();
   const [checkingRole, setCheckingRole] = useState(true);
   const [hasPageAccess, setHasPageAccess] = useState(false);
@@ -662,7 +668,13 @@ export default function AdminView({ typeKey }: { typeKey: string }) {
 
   return (
     <main className="mx-auto max-w-6xl p-4">
-      <h1 className="mb-4 text-lg font-bold">管理画面</h1>
+      <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="text-lg font-bold">管理画面</h1>
+        {/* 本番で動いているイメージの識別用。GitHub Actionsのビルド時に埋め込まれる */}
+        <span className="font-mono text-xs text-gray-500">
+          ビルド: {buildNumber ?? "開発ビルド"}
+        </span>
+      </div>
 
       {/* スポット種別(ログイン後の既定・種別マスタ) */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
