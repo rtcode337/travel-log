@@ -12,6 +12,7 @@
 - **訪問予定**(行きたい場所のブックマーク)。訪問を記録すると自動的に外れる
 - **口コミ**(公開・本文のみのシンプルな投稿)
 - スポットには「種別」があり(観光地・郵便局・御朱印など)、種別ごとに独立したURL・独自のランク/カテゴリ/対象地域を持てる。管理者が自由に追加・削除できる
+- **ルート(巡った順の矢印)**。スポットを巡った順に繋いだラインと進行方向の矢印を地図に表示できる(訪問順のある種別向け。CSVで取り込み、ランク絞り込みにも連動)
 - 種別ごとに**対象地域**を選べる(既定は日本=都道府県、特定の国=州・県、世界全体=国ごと)
 - **PWA対応**(インストール可能)。スマホの「ホーム画面に追加」やPCブラウザのインストール機能で、アドレスバーなしの独立アプリとして起動できる(オフライン対応は未実装)
 
@@ -43,7 +44,7 @@ docker compose -f docker-compose.dev.yml up --build
 ```
 
 Node や Postgres をローカルにインストールする必要はない。初回起動時、Postgres コンテナが
-`db/init/01_schema.sql` を自動実行してテーブルと既定のスポット種別(`tourist`=観光地、
+`db/init/` 配下のSQLを自動実行してテーブルと既定のスポット種別(`tourist`=観光地、
 データは空)を作成する。
 
 http://localhost:3000 を開くと `/login` にリダイレクトされる。初回はアカウントが
@@ -61,7 +62,7 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 ローカルに Postgres を別途用意し、`.env.example` を `.env.local` としてコピーして
 `DATABASE_URL` / `SESSION_SECRET` を設定した上で `npm install && npm run dev` でも
-起動できる。その場合は `db/init/01_schema.sql` を手動で実行する。
+起動できる。その場合は `db/init/` 配下のSQLを番号順に手動で実行する。
 
 </details>
 
@@ -123,7 +124,7 @@ docker compose pull app && docker compose up -d
 |---|---|
 | `/[type]/map` | 地図(ホーム)。ランク・訪問状態・カテゴリでフィルタ。ピンタップ→スポット詳細モーダルへ |
 | `/[type]/spots` | 「都道府県から探す」(地域別ドリルダウン)と「ランクから探す」(検索+絞り込み+ページング)の2タブ |
-| `/[type]/admin` | (管理者・スポット管理者専用)スポットの承認待ちキュー・追加・編集・削除・CSVインポート。adminのみスポット種別の管理・ユーザー管理も可能 |
+| `/[type]/admin` | (管理者・スポット管理者専用)スポットの承認待ちキュー・追加・編集・削除・CSVインポート・ルート(巡った順の矢印)のインポート。adminのみスポット種別の管理・ユーザー管理も可能 |
 | `/[type]/account` | 自分のロール表示、ログアウト、他のスポット種別への切り替え |
 | `/login` | メールログイン、または Google でログイン(任意、要設定) |
 
@@ -163,13 +164,18 @@ docker compose pull app && docker compose up -d
 CSVとして置き、`/[type]/admin`のCSVインポート機能で取り込む(`tourist`=観光地も含め全種別共通)。
 
 ```csv
-name,name_kana,region,lat,lng,rank,category,description
-厳島神社,いつくしまじんじゃ,広島県,34.2959,132.3197,A,神社仏閣,海に浮かぶ大鳥居
+name,name_kana,region,lat,lng,rank,category,description,key
+厳島神社,いつくしまじんじゃ,広島県,34.2959,132.3197,A,神社仏閣,海に浮かぶ大鳥居,厳島神社
 ```
 
-- 必須列: `name`, `region`, `lat`, `lng`。`rank`/`category`は自由入力
-- 差分更新(`name`+`region`+`lat`+`lng`の完全一致で重複判定)のため、同じCSVを
-  何度アップロードしても重複登録されない
+- 必須列: `name`, `region`, `lat`, `lng`。`rank`/`category`は自由入力。`key`は省略可の
+  種別内一意な参照キー(ルートCSVがスポットを指すのに使う)
+- 差分更新(`key`一致を最優先、無ければ`name`+`lat`+`lng`の完全一致で同一判定)。
+  一致した既存スポットは内容が違えばCSVの内容で上書きされるため、CSV側の修正も
+  再アップロードだけで反映され、同じCSVを何度アップロードしても重複登録されない
+- スポットを巡った順に矢印で繋ぐルートは、別ファイル`routes.csv`(列:
+  `route,seq,spot_key`)を同じ管理画面からスポットCSVの後に取り込む
+  (スキーマの詳細はtravel-log-data/README.md参照)
 
 観光地(`tourist`)データの`description`はWikipedia記事冒頭文の引用(CC BY-SA 4.0)、
 `name`/`lat`/`lng`の一部はOpenStreetMap由来(ODbL)のため、それぞれの出典表示は

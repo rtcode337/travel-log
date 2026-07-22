@@ -15,7 +15,8 @@ import {
 } from "@/lib/mapStyle";
 import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
-import type { Role, Spot } from "@/lib/types";
+import type { Role, Spot, SpotRoute } from "@/lib/types";
+import type { RankStyleDefinition } from "@/lib/rankStyle";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
 import { useRankStyles } from "@/lib/useRankStyles";
@@ -34,6 +35,121 @@ const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
 const CLUSTER_COUNT_LAYER_ID = "spots-cluster-count";
 const UNCLUSTERED_LAYER_ID = "spots-unclustered-point";
+
+const ROUTES_SOURCE_ID = "spot-routes";
+const ROUTE_LINE_LAYER_ID = "spot-routes-line";
+const ROUTE_ARROW_LAYER_ID = "spot-routes-arrow";
+
+/** ルート名が種別のランク値と一致しないときの矢印色 */
+const DEFAULT_ROUTE_COLOR = "#2563eb";
+
+/**
+ * ルートの進行方向を示す右向き矢印(白フチ付き)の画像を色ごとに生成して登録する。
+ * symbol-placement: "line" のシンボルはライン方向に回転して置かれるため、
+ * 「右向き」がそのまま巡った順の向きになる。冪等・同期
+ */
+function ensureRouteArrowImage(map: maplibregl.Map, color: string): string {
+  const id = `route-arrow-${color}`;
+  if (map.hasImage(id)) return id;
+
+  const ratio = 2;
+  const w = 14;
+  const h = 14;
+  const canvas = document.createElement("canvas");
+  canvas.width = w * ratio;
+  canvas.height = h * ratio;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return id;
+  ctx.scale(ratio, ratio);
+
+  ctx.beginPath();
+  ctx.moveTo(3, 2.5);
+  ctx.lineTo(12, 7);
+  ctx.lineTo(3, 11.5);
+  ctx.closePath();
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  map.addImage(id, ctx.getImageData(0, 0, canvas.width, canvas.height), {
+    pixelRatio: ratio,
+  });
+  return id;
+}
+
+/**
+ * ルート用のsource/layerを(まだなければ)追加する。冪等。
+ * ピンのクラスタレイヤーが既にあればその下に挿し込み、無ければそのまま追加する
+ * (クラスタレイヤーは後から追加されるとルートの上に載るため、どちらの順でもピンが上になる)
+ */
+function ensureRouteLayers(map: maplibregl.Map) {
+  if (map.getSource(ROUTES_SOURCE_ID)) return;
+
+  map.addSource(ROUTES_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  const beforeId = map.getLayer(CLUSTER_LAYER_ID) ? CLUSTER_LAYER_ID : undefined;
+  map.addLayer(
+    {
+      id: ROUTE_LINE_LAYER_ID,
+      type: "line",
+      source: ROUTES_SOURCE_ID,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ["get", "color"],
+        "line-width": 2.5,
+        "line-opacity": 0.8,
+      },
+    },
+    beforeId
+  );
+  map.addLayer(
+    {
+      id: ROUTE_ARROW_LAYER_ID,
+      type: "symbol",
+      source: ROUTES_SOURCE_ID,
+      layout: {
+        "symbol-placement": "line",
+        "symbol-spacing": 70,
+        "icon-image": ["get", "icon"],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+    },
+    beforeId
+  );
+}
+
+/** ルートをGeoJSONのLineString群にする。矢印画像の登録もここで済ませる */
+function buildRouteGeoJSON(
+  map: maplibregl.Map,
+  routes: SpotRoute[],
+  rankStyles: RankStyleDefinition[]
+): GeoJSON.FeatureCollection<GeoJSON.LineString, { color: string; icon: string }> {
+  return {
+    type: "FeatureCollection",
+    features: routes.map((route) => {
+      // ルート名がランク値と一致すればそのランクの縁取り色(地の色より濃く、
+      // 地図上で見やすい)で描く
+      const color =
+        rankStyles.find((s) => s.rank === route.name)?.borderColor ??
+        DEFAULT_ROUTE_COLOR;
+      return {
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: route.points.map((p) => [p.lng, p.lat]),
+        },
+        properties: { color, icon: ensureRouteArrowImage(map, color) },
+      };
+    }),
+  };
+}
 
 type ClusterFeatureProps = {
   id: string;
@@ -286,6 +402,8 @@ export default function MapView({
   // (日本=現在地へズーム、それ以外=スポット全体にフィット)に使う
   const regionScope = useRegionScope(spotTypeKey);
   const [privateSpots, setPrivateSpots] = useState<Spot[]>([]);
+  // この種別のルート(スポットを巡った順の矢印)。管理画面のルートCSVインポートで作られる
+  const [routes, setRoutes] = useState<SpotRoute[]>([]);
   const spots = useMemo(
     () => [...(spotCache.publicSpots ?? []), ...privateSpots],
     [spotCache.publicSpots, privateSpots]
@@ -613,10 +731,16 @@ export default function MapView({
     setPrivateSpots(data ?? []);
   }, [spotTypeKey]);
 
+  const loadRoutes = useCallback(async () => {
+    const { data } = await api.routes.list(spotTypeKey);
+    setRoutes(data ?? []);
+  }, [spotTypeKey]);
+
   // データ取得
   useEffect(() => {
+    setRoutes([]); // 種別切り替え時に前の種別のルートを描かないよう先に空へ戻す
     (async () => {
-      await Promise.all([loadPrivateSpots(), loadVisits()]);
+      await Promise.all([loadPrivateSpots(), loadVisits(), loadRoutes()]);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -685,6 +809,32 @@ export default function MapView({
       cancelled = true;
     };
   }, [spots, visitedIds, filters, runWhenMapReady, rankStyles]);
+
+  // ルートの矢印描画。経由地2点以上のルートを、巡った順(seq昇順)に繋いだ
+  // ラインと進行方向の矢印で描く。ランク絞り込み中は、ルート名がこの種別の
+  // ランク値と一致するルートだけ絞り込みに連動して出し分ける(ランク値と
+  // 一致しない名前のルートは絞り込みの対象外として常に表示する)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const knownRanks = new Set(rankStyles.map((s) => s.rank));
+    const visibleRoutes = routes.filter(
+      (route) =>
+        route.points.length >= 2 &&
+        (filters.ranks.length === 0 ||
+          !knownRanks.has(route.name) ||
+          filters.ranks.includes(route.name))
+    );
+
+    runWhenMapReady(() => {
+      ensureRouteLayers(map);
+      const source = map.getSource(ROUTES_SOURCE_ID) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      source?.setData(buildRouteGeoJSON(map, visibleRoutes, rankStyles));
+    });
+  }, [routes, filters, rankStyles, runWhenMapReady]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
   // (通常の取得はpublishedのみなので、それ以外は一覧に反映されるまでこれで見せる)
