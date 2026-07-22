@@ -98,7 +98,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 地図(`MapView`)はGET `/api/routes?type=`の結果を`spot-routes`ソースのLineString+進行方向の矢印アイコン(canvas生成・色ごとに登録)で描画する(ピンのクラスタレイヤーより下)。ルート名が種別のランク値と一致する場合はそのランクの`borderColor`で塗り、ランク絞り込みにも連動する(一致しないルート名は既定色で常時表示)。経由地のうち他人の非公開スポット等の見えないスポットはAPI側で除外され、矢印は残りの点を繋ぐ。
 
-これに合わせてCSVインポートの差分更新の突き合わせキーを`name`+`region`+`lat`+`lng`から`name`+`lat`+`lng`に変更した(lat/lngが同じでregionだけ違う使い方は想定しないため。region表記の修正で別スポット扱いになる事故も防ぐ)。また、既存スポットに一致した行はスキップする際、CSVの`key`が既存行に未反映ならkeyだけをPATCHで反映する(過去にkey列なしで取り込んだデータへの後付けが再インポートだけで済む)。
+これに合わせてCSVインポートの差分更新の突き合わせキーを`name`+`region`+`lat`+`lng`から`name`+`lat`+`lng`に変更し(lat/lngが同じでregionだけ違う使い方は想定しないため。region表記の修正で別スポット扱いになる事故も防ぐ)、さらに`key`一致を最優先の同一判定として、一致した既存行は内容が異なればCSVの内容で上書き更新するようにした(スキップではなく上書きにすることで、CSV側での改名・座標修正・説明文の更新が再インポートだけで反映される。詳細は上記「スポットの新規登録フロー」参照)。
 
 ### スポット全削除・スポット種別の削除
 
@@ -108,7 +108,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 地図上での右クリック追加、`/[type]/admin`の追加フォーム、CSVインポート(`lib/csv.ts`+`/[type]/admin`)いずれも`app/api/spots/route.ts`の同じ挿入ロジックを通る。status未指定時の既定はroleにより`user`は`private`、それ以外(moderator/spot_admin/admin)は`pending`(`ALLOWED_STATUS_BY_ROLE`が許す範囲でstatusを明示すれば`published`等も選べる)。CSVインポートは`/[type]/admin`(spot_admin/admin専用)からのみ行える経路のため、`AdminView`側で常に`status: 'published'`を明示し、承認待ちを経由せず即座に公開する。それ以外の経路(右クリック追加・追加フォームでの既定)は引き続き承認待ちを通り、承認・却下は`/[type]/admin`側の別ステップで行う。
 
-CSVインポートは差分更新で、`AdminView`側が事前読み込み済みの全件(status問わず)と`name`+`lat`+`lng`の完全一致で突き合わせ、既存分をスキップしてから`app/api/spots/route.ts`に送る(既存分もCSVの`key`が未反映の場合のみkeyを反映する。上記「ルート」の段落参照)。かつてあった「SQLシードとの同期」「重複スポットの削除」機能はこの差分インポートに一本化して廃止した。新規分は`AdminView`側で1,000件ずつのチャンクに分けて順番に送信し、進捗(◯件/◯件)を画面に表示する(1リクエストにまとめると大量データでタイムアウトする恐れがあるため)。
+CSVインポートは差分更新で、`AdminView`側が事前読み込み済みの全件(status問わず)と突き合わせる。同一判定は`key`一致を最優先し、keyで見つからなければ`name`+`lat`+`lng`の完全一致で行う。一致した既存行は内容がCSVと異なればCSVの内容でPATCH上書きし(keyが同じなら改名・座標修正もCSVから反映される)、同一ならスキップ、どちらにも一致しない行だけを新規として`app/api/spots/route.ts`に送る(上書きは公開スポットのみ。公開以外=他ユーザーの承認待ち等は編集権限が投稿者本人に限られるため触らない。CSVにkey列が無い場合は既存行のkeyを消さず維持する)。かつてあった「SQLシードとの同期」「重複スポットの削除」機能はこの差分インポートに一本化して廃止した。新規分は`AdminView`側で1,000件ずつのチャンクに分けて順番に送信し、進捗(◯件/◯件)を画面に表示する(1リクエストにまとめると大量データでタイムアウトする恐れがあるため)。
 
 ロールは`admin`/`spot_admin`/`moderator`/`user`の4種類(`lib/types.ts`の`Role`参照)。ユーザー管理(`app/api/admin/users/**`)はadmin専用でspot_adminには許可されない。
 
