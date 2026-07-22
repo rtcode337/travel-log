@@ -188,6 +188,13 @@ function showClusterLayers(map: maplibregl.Map) {
 const lastViews = new Map<string, { center: [number, number]; zoom: number }>();
 
 /**
+ * 地図でかけた絞り込み条件も同様にスポット種別ごとにモジュールスコープで記憶し、
+ * 他画面へ遷移して再度地図を開いたときに復元する(lastViewsと同じ寿命 —
+ * ページの再読み込みでリセットされる)。
+ */
+const lastFilters = new Map<string, SpotFilters>();
+
+/**
  * 現在地追跡モード(GeolocateControlのカメラ追従=ACTIVE_LOCK状態)だったかどうかも
  * 同様にモジュールスコープで記憶する。追跡中に他画面へ遷移するとMapViewのアンマウントで
  * GeolocateControlごとwatchPositionが破棄されるため、再訪時にこのフラグを見て
@@ -244,7 +251,27 @@ export default function MapView({
     [spotCache.publicSpots, privateSpots]
   );
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
-  const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
+  const [filters, setFiltersState] = useState<SpotFilters>(
+    () => lastFilters.get(spotTypeKey) ?? DEFAULT_FILTERS
+  );
+  // 変更のたびに記憶へも書き込む(次に地図を開いたときの復元用)
+  const setFilters = useCallback(
+    (next: SpotFilters) => {
+      lastFilters.set(spotTypeKey, next);
+      setFiltersState(next);
+    },
+    [spotTypeKey]
+  );
+  // マウント中に種別が切り替わった場合は、その種別で記憶している条件に載せ替える
+  // (初回マウント時はuseStateの初期値と同じ値になるだけで再レンダーは起きない)
+  useEffect(() => {
+    setFiltersState(lastFilters.get(spotTypeKey) ?? DEFAULT_FILTERS);
+  }, [spotTypeKey]);
+  // ランク・カテゴリ・訪問状況のいずれかで絞り込み中か(絞り込みボタンの見た目に使う)
+  const filtersActive =
+    filters.ranks.length > 0 ||
+    filters.categories.length > 0 ||
+    filters.visited.length > 0;
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -672,8 +699,12 @@ export default function MapView({
             <button
               type="button"
               onClick={() => setShowFilterModal(true)}
-              aria-label="絞り込み"
-              className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-lg leading-none"
+              aria-label={filtersActive ? "絞り込み(絞り込み中)" : "絞り込み"}
+              className={`shrink-0 rounded-lg border px-3 py-1.5 text-lg leading-none ${
+                filtersActive
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-gray-300 bg-white"
+              }`}
             >
               ☰
             </button>
