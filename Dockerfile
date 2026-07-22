@@ -14,7 +14,8 @@ FROM deps AS builder
 COPY . .
 RUN npm run build
 
-# 本番実行用(docker-compose.ymlのデフォルト): next buildの成果物のみを含む最小イメージ
+# 本番実行用: next buildの成果物のみを含む最小イメージ。mainへのpushでGitHub Actionsが
+# このステージをビルドしてGHCRへ公開し、docker-compose.ymlのappサービスがそれを参照する
 FROM node:22-alpine AS prod
 WORKDIR /app
 ENV NODE_ENV=production

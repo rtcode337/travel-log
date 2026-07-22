@@ -35,9 +35,10 @@ services:
     restart: unless-stopped
 
   app:
-    build:
-      context: .
-      target: prod
+    # mainへのpushでGitHub Actions(.github/workflows/docker-publish.yml)がビルド・公開
+    # するイメージ。本番ではビルドせず、更新は docker compose pull app && docker compose up -d
+    # だけでよい(README「本番運用」参照)
+    image: ghcr.io/rtcode337/travel-log:latest
     depends_on:
       db:
         condition: service_healthy
