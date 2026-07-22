@@ -15,6 +15,11 @@
 --
 -- 全テーブルに created_at / updated_at を持たせ、updated_at は set_updated_at()
 -- トリガーで自動更新する(下部にまとめてトリガーを定義してある)。
+--
+-- このファイルは postgres の docker-entrypoint-initdb.d には置かず(dbコンテナに
+-- マウントもしない)、db-migrate サービスが '000_init_schema' という名前の
+-- 「先頭のマイグレーション」として流す。空のDBには実行され、既にテーブルがある
+-- DBには実行されず適用済みとして記録されるだけになる(db/entrypoint.sh 参照)。
 
 create extension if not exists pgcrypto;
 

@@ -1,7 +1,7 @@
 name: travel-log-prod
 
 services:
-  # dbの起動前に、bindマウント先(./db/data)の作成と所有者/パーミッション調整を行う
+  # dbの起動前に、bindマウント先(./db/data)の作成と所有者調整を行う
   # ワンショット(詳細はdb/entrypoint.shのprepare関数のコメント参照)。
   # イメージはappと同じくGitHub Actionsがビルド・公開したものをpullして使う
   db-init:
@@ -22,8 +22,10 @@ services:
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
     volumes:
+      # db/initはマウントしない。スキーマ本体(01_schema.sql)はdb-migrateが流す
+      # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
+      #  スキーマを更新したときにgit pullが失敗するようになるため)
       - ./db/data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s
@@ -31,9 +33,9 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # 未適用のマイグレーション(イメージに焼き込まれた/migrations/*.sql)を連番順に自動適用する
-  # ワンショット。db-initと同じイメージのmigrateサブコマンド。適用済みリビジョンは
-  # schema_migrationsテーブルに記録され、2回目以降は何もせず終了する。
+  # スキーマ本体(/init/01_schema.sql)と未適用のマイグレーション(/migrations/*.sql)を
+  # 順に自動適用するワンショット。db-initと同じイメージのmigrateサブコマンド。
+  # 適用済みリビジョンはschema_migrationsテーブルに記録され、2回目以降は何もせず終了する。
   # appはこれが正常終了するまで起動しない(古いスキーマのままアプリが動くのを防ぐ)
   db-migrate:
     image: ghcr.io/rtcode337/travel-log-db-init:latest
