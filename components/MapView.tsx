@@ -138,8 +138,15 @@ function ensureRouteLayers(map: maplibregl.Map) {
  * シリーズで絞り込んでいるときは、ルートのseriesがこの種別のシリーズ一覧に
  * あるものだけ絞り込みに連動して出し分け、シリーズ未指定・一覧に無いシリーズの
  * ルートは対象外として表示する。カテゴリで絞り込んでいるときは、ルート自体は
- * カテゴリを持たない(`spot_routes`にcategories相当の列は無い)ため、
- * 経由地に選択中のカテゴリを持つスポットが1つでもあるルートを表示する。
+ * カテゴリを持たない(`spot_routes`にcategories相当の列は無い)ため、経由地の
+ * カテゴリで代用して「選択中のカテゴリを持つ経由地が1つでもあるルート」を表示する。
+ * ただしこの判定に使う経由地は、**そのルートのシリーズに属するスポットがあれば
+ * それだけ**に絞る(`routeOwnPoints`) — 乗り換え駅・空港のように複数のルートで
+ * 共有している経由地に引きずられて、無関係なルートまで表示されるのを防ぐため
+ * (例: 「サイコロ1」のスポットである新大阪駅を「サイコロ4」「サイコロ5」
+ * 「サイコロ6」のルートも通っているせいで、カテゴリ=サイコロ1で絞ると
+ * サイコロ4〜6のルート線まで出ていた)。シリーズが未指定のルートや、自分の
+ * シリーズの経由地が1つも無いルートは従来どおり全経由地で判定する。
  * 両方で絞り込んでいるときは両方の条件を満たすルートのみ。
  */
 function filterVisibleRoutes(
@@ -162,16 +169,28 @@ function filterVisibleRoutes(
     }
     if (
       filters.categories.length > 0 &&
-      !route.points.some((p) =>
-        spotById
-          .get(p.spot_id)
-          ?.categories.some((c) => filters.categories.includes(c))
+      !routeOwnPoints(route, spotById).some((s) =>
+        s.categories.some((c) => filters.categories.includes(c))
       )
     ) {
       return false;
     }
     return true;
   });
+}
+
+/**
+ * カテゴリ絞り込みでルートを判定するときに見る経由地スポットを返す。
+ * ルートのシリーズと同じシリーズのスポットがあればそれだけ、無ければ全経由地。
+ * (取得できないスポット=他人の非公開等は除く)
+ */
+function routeOwnPoints(route: SpotRoute, spotById: Map<string, Spot>): Spot[] {
+  const spots = route.points
+    .map((p) => spotById.get(p.spot_id))
+    .filter((s): s is Spot => s !== undefined);
+  if (route.series === null) return spots;
+  const own = spots.filter((s) => s.series === route.series);
+  return own.length > 0 ? own : spots;
 }
 
 /**
