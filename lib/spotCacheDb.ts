@@ -52,6 +52,9 @@ export function expandSpot(spot: CachedSpot): Spot {
   return {
     ...spot,
     spot_type_id: "",
+    // key(CSV等からの参照キー)は管理画面のインポートだけが読み、そちらは
+    // キャッシュではなくAPIから全件取り直すため、キャッシュには持たせない
+    key: null,
     description: null,
     created_by: null,
     created_at: "",

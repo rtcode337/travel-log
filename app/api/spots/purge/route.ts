@@ -78,6 +78,11 @@ export async function POST(request: Request) {
       [spotType.id]
     );
     photoRows = photoResult.rows;
+    // ルートはスポットのカスケードでは経由地しか消えないため、空のルートが
+    // 残らないようここで明示的に消す(CSVで作り直す前提の操作のため丸ごとでよい)
+    await client.query("delete from spot_routes where spot_type_id = $1", [
+      spotType.id,
+    ]);
     const { rowCount } = await client.query(
       "delete from spots where spot_type_id = $1",
       [spotType.id]
