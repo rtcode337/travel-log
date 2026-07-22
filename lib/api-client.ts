@@ -5,6 +5,7 @@ import type {
   Review,
   Role,
   Spot,
+  SpotRoute,
   SpotType,
   SpotTypeSettingKey,
   Visit,
@@ -139,6 +140,18 @@ export const api = {
         `/api/spots/purge?type=${encodeURIComponent(type)}`,
         { method: "POST" }
       ),
+  },
+  routes: {
+    list: (type: string) =>
+      request<SpotRoute[]>(`/api/routes?type=${encodeURIComponent(type)}`),
+    // ルート名ごとに経由地を丸ごと置き換えるupsert(ルートCSVインポート用)
+    replace: (type: string, routes: { name: string; spot_ids: string[] }[]) =>
+      request<{ updatedCount: number }>(
+        `/api/routes?type=${encodeURIComponent(type)}`,
+        { method: "POST", body: JSON.stringify({ routes }) }
+      ),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/api/routes/${id}`, { method: "DELETE" }),
   },
   geocode: {
     // scopeはスポット種別のregion_scope('jp' | 国コード | 'world')。検索対象の国と

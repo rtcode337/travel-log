@@ -52,6 +52,9 @@ export const STATUS_LABELS: Record<SpotStatus, string> = {
 export interface Spot {
   id: string;
   spot_type_id: string;
+  /** CSV等の外部データからこのスポットを参照するための、種別内で一意な省略可のキー
+   * (ルートCSVのspot_key列が指す先。db/init/02_spot_key_routes.sql参照) */
+  key: string | null;
   name: string;
   name_kana: string | null;
   /** 地域。種別のregion_scope設定により意味が変わる(日本=都道府県、
@@ -66,6 +69,28 @@ export interface Spot {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** ルートの経由地1点。seqの昇順が巡った順(lat/lng/spot_nameは表示用にJOINで付与) */
+export interface SpotRoutePoint {
+  spot_id: string;
+  seq: number;
+  lat: number;
+  lng: number;
+  spot_name: string;
+}
+
+/**
+ * スポットを巡った順に繋ぐルート(地図に描く1本の矢印列)。
+ * nameを種別のランク値(水曜どうでしょうなら企画名)と一致させると、
+ * 地図の矢印がそのランクの縁取り色で描かれ、ランク絞り込みにも連動する
+ */
+export interface SpotRoute {
+  id: string;
+  spot_type_id: string;
+  name: string;
+  created_at: string;
+  points: SpotRoutePoint[];
 }
 
 /** スポット種別(観光地など)。管理者が新規追加できる */

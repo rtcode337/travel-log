@@ -90,6 +90,16 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 カテゴリの一覧も同じパターンでスポット種別ごとに持つ(`lib/category.ts`)。`spot_type_settings`の`categories`キー(`CATEGORIES_SETTING_KEY`)にJSON文字列(`string[]`。見た目は持たない)を保存し、行が無い・parse失敗時は`DEFAULT_CATEGORIES`(観光地の現行カテゴリ、旧`lib/types.ts`の`CATEGORIES`ハードコードの後継)にフォールバックする(`resolveCategories`)。明示的に空配列`"[]"`を保存した種別は「定義済みカテゴリなし」の扱い。配列の並び順がカテゴリの並び順(`getCategoryOrder`)で、地図・スポット一覧の絞り込みチップ(`components/FilterBar.tsx`の`SpotFilters.categories`。ランク・訪問状況と同じ複数選択+「すべて」チップ、選択肢は実データに存在する値から作る)と、スポット追加・編集フォーム(`AddSpotModal`)のサジェスト(設定の一覧を先頭に、設定外の既存値を後ろに合成)がこの並びを使う。取得は`useCategories(typeKey)`フック(`useRankStyles`のカテゴリ版)。管理画面`/[type]/admin`「スポット種別の設定」のカテゴリ欄(カンマ・読点区切りで入力、admin専用)と、スポット種別JSON作成の`categories`フィールド(文字列配列)から設定でき、PATCH `/api/spot-types/[id]`が`parseCategories`で妥当性を検証する。`category`列自体は従来どおり自由入力で、一覧に無い値も動く(並びは末尾)。
 
+### ルート(`spot_routes`/`spot_route_points`)とスポット参照キー(`spots.key`)
+
+スポットを「巡った順」に矢印で繋ぐルート機能(水曜どうでしょうの企画のような、訪問順のある種別向け)。スキーマは`db/init/02_spot_key_routes.sql`(初期スキーマ後の追加分。新規DBでは自動実行されるが、既存の`db/data/`には上記「コマンド」の手順で手動適用が必要。全文idempotentのため再適用しても害はない)。`spot_routes`(種別ごとのルート名、`(spot_type_id, name)`一意)+`spot_route_points`(route_id, seq, spot_id)の2テーブルで、経由地はスポット削除時にFKカスケードで点だけ抜け、ルートは残る。スポット全削除(purge)はルートも丸ごと消し、種別削除は`spot_types`へのFKカスケードで消える。
+
+ルートのデータはtravel-log-data側の`<スポットキー>/routes.csv`(列: `route,seq,spot_key`)に置き、`/[type]/admin`の「ルート(巡った順の矢印)のインポート」から取り込む(spot_admin/admin可)。`spot_key`がスポットを指すために`spots.key`列(種別内一意・nullable。`spots (spot_type_id, key)`の部分uniqueインデックス)を追加してあり、スポットCSVの省略可の`key`列で設定する。名前・座標のような自然キーではなく明示キーにしたのは、改名・座標修正でルートの参照が壊れないようにするため。`AdminView`のルートCSVインポートは全行を検証(未知のspot_key・seq重複・経由地1件以下はエラー)してから、既存と経由地の並びが同一のルートをスキップしてPOST `/api/routes`(ルート名ごとに経由地を丸ごと置き換えるupsert)に送る。個別ルートの削除はDELETE `/api/routes/[id]`。
+
+地図(`MapView`)はGET `/api/routes?type=`の結果を`spot-routes`ソースのLineString+進行方向の矢印アイコン(canvas生成・色ごとに登録)で描画する(ピンのクラスタレイヤーより下)。ルート名が種別のランク値と一致する場合はそのランクの`borderColor`で塗り、ランク絞り込みにも連動する(一致しないルート名は既定色で常時表示)。経由地のうち他人の非公開スポット等の見えないスポットはAPI側で除外され、矢印は残りの点を繋ぐ。
+
+これに合わせてCSVインポートの差分更新の突き合わせキーを`name`+`region`+`lat`+`lng`から`name`+`lat`+`lng`に変更した(lat/lngが同じでregionだけ違う使い方は想定しないため。region表記の修正で別スポット扱いになる事故も防ぐ)。また、既存スポットに一致した行はスキップする際、CSVの`key`が既存行に未反映ならkeyだけをPATCHで反映する(過去にkey列なしで取り込んだデータへの後付けが再インポートだけで済む)。
+
 ### スポット全削除・スポット種別の削除
 
 管理画面の`/[type]/admin`にはadmin専用の「スポット全削除」(`app/api/spots/purge/route.ts`)と「スポット種別の削除」(`DELETE /api/spot-types/[id]`、同ファイルのPATCHと同居)がある。前者は`spot_types`の行自体は消さずstatus問わず対象種別の全スポットと紐づく`visits`/`visit_plans`/`reviews`(FKの`on delete cascade`)・写真ファイルを一括で消す。後者は同じ削除ロジック(スポットが残っていれば先に全件削除)を実行した上で`spot_types`の行自体も削除する(「別のスポット種別の管理」一覧には現在表示中の種別も含めて全種別を出すが、現在表示中の種別だけはリンク化・削除ボタンをUI側で出さないことで自分が今開いている種別を誤って消せないようにしている)。後者は`public_visible`がtrue(一般公開中)の種別、または対象種別が`app_settings.active_spot_type_id`(ルート`/`リダイレクトのフォールバック既定)の場合はAPIレベルで拒否する(既定の種別は常にpublic_visible=trueであるため後者は実質前者に含まれるが、防御的に両方チェックしている)。どちらもCSVでデータを作り直す前提の機能で、spot_adminには許可していない(ユーザー管理と同様、他ユーザーのデータを巻き込むため)。ルート`/`アクセス時に開く既定の種別(最後に開いていた種別のCookieが無い・開けないときのフォールバック)の変更は、この一括削除等の管理系操作とは別の独立したセレクトボックス(`app_settings.active_spot_type_id`を更新)として`/[type]/admin`に置いている。
@@ -98,7 +108,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 地図上での右クリック追加、`/[type]/admin`の追加フォーム、CSVインポート(`lib/csv.ts`+`/[type]/admin`)いずれも`app/api/spots/route.ts`の同じ挿入ロジックを通る。status未指定時の既定はroleにより`user`は`private`、それ以外(moderator/spot_admin/admin)は`pending`(`ALLOWED_STATUS_BY_ROLE`が許す範囲でstatusを明示すれば`published`等も選べる)。CSVインポートは`/[type]/admin`(spot_admin/admin専用)からのみ行える経路のため、`AdminView`側で常に`status: 'published'`を明示し、承認待ちを経由せず即座に公開する。それ以外の経路(右クリック追加・追加フォームでの既定)は引き続き承認待ちを通り、承認・却下は`/[type]/admin`側の別ステップで行う。
 
-CSVインポートは差分更新で、`AdminView`側が事前読み込み済みの全件(status問わず)と`name`+`region`+`lat`+`lng`の完全一致で突き合わせ、既存分をスキップしてから`app/api/spots/route.ts`に送る。かつてあった「SQLシードとの同期」「重複スポットの削除」機能はこの差分インポートに一本化して廃止した。新規分は`AdminView`側で1,000件ずつのチャンクに分けて順番に送信し、進捗(◯件/◯件)を画面に表示する(1リクエストにまとめると大量データでタイムアウトする恐れがあるため)。
+CSVインポートは差分更新で、`AdminView`側が事前読み込み済みの全件(status問わず)と`name`+`lat`+`lng`の完全一致で突き合わせ、既存分をスキップしてから`app/api/spots/route.ts`に送る(既存分もCSVの`key`が未反映の場合のみkeyを反映する。上記「ルート」の段落参照)。かつてあった「SQLシードとの同期」「重複スポットの削除」機能はこの差分インポートに一本化して廃止した。新規分は`AdminView`側で1,000件ずつのチャンクに分けて順番に送信し、進捗(◯件/◯件)を画面に表示する(1リクエストにまとめると大量データでタイムアウトする恐れがあるため)。
 
 ロールは`admin`/`spot_admin`/`moderator`/`user`の4種類(`lib/types.ts`の`Role`参照)。ユーザー管理(`app/api/admin/users/**`)はadmin専用でspot_adminには許可されない。
 
