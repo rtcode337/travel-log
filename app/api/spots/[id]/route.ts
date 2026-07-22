@@ -69,11 +69,15 @@ export async function PATCH(
 
   const spot = await request.json();
 
+  // keyはボディに含まれるときだけ更新する(編集フォーム等、keyを扱わない既存の
+  // 呼び出し元が送る部分的なボディで、CSV由来のkeyがnullに消されないように)
+  const hasKey = Object.prototype.hasOwnProperty.call(spot, "key");
   const { rows } = await query<Spot>(
     `update spots set
       name = $1, name_kana = $2, region = $3,
-      lat = $4, lng = $5, rank = $6, category = $7, description = $8
-     where id = $9
+      lat = $4, lng = $5, rank = $6, category = $7, description = $8,
+      key = case when $9 then $10 else key end
+     where id = $11
      returning *`,
     [
       spot.name,
@@ -84,6 +88,8 @@ export async function PATCH(
       spot.rank,
       spot.category,
       spot.description,
+      hasKey,
+      hasKey ? spot.key : null,
       id,
     ]
   );

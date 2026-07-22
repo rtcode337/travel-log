@@ -27,6 +27,7 @@ import {
   type AppUser,
   type Role,
   type Spot,
+  type SpotRoute,
   type SpotType,
   type SpotTypeSettingKey,
 } from "@/lib/types";
@@ -38,6 +39,7 @@ const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
 const CSV_IMPORT_CHUNK_SIZE = 1000;
 
 const CSV_COLUMNS = [
+  "key",
   "name",
   "name_kana",
   "region",
@@ -47,6 +49,9 @@ const CSV_COLUMNS = [
   "category",
   "description",
 ] as const;
+
+// ルートCSV(スポットを巡った順に矢印で繋ぐ)の列。spot_keyはスポットCSVのkey列を指す
+const ROUTE_CSV_COLUMNS = ["route", "seq", "spot_key"] as const;
 
 export default function AdminView({
   typeKey,
@@ -71,6 +76,11 @@ export default function AdminView({
     done: number;
     total: number;
   } | null>(null);
+
+  // ルート(スポットを巡った順に矢印で繋ぐ)の一覧とCSVインポート用
+  const [routes, setRoutes] = useState<SpotRoute[]>([]);
+  const [routeMessage, setRouteMessage] = useState<string | null>(null);
+  const [importingRoutes, setImportingRoutes] = useState(false);
 
   const [purgeCount, setPurgeCount] = useState<number | null>(null);
   const [purgeChecking, setPurgeChecking] = useState(false);
@@ -153,6 +163,11 @@ export default function AdminView({
     setSpots(data ?? []);
   }, [typeKey]);
 
+  const loadRoutes = useCallback(async () => {
+    const { data } = await api.routes.list(typeKey);
+    setRoutes(data ?? []);
+  }, [typeKey]);
+
   const loadUsers = useCallback(async () => {
     const { data } = await api.admin.users.list();
     setUsers(data ?? []);
@@ -170,8 +185,9 @@ export default function AdminView({
   useEffect(() => {
     if (!hasPageAccess) return;
     load();
+    loadRoutes();
     loadSpotTypes();
-  }, [hasPageAccess, load, loadSpotTypes]);
+  }, [hasPageAccess, load, loadRoutes, loadSpotTypes]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -211,9 +227,9 @@ export default function AdminView({
     if (purgeConfirmText !== typeKey) return;
     if (
       !confirm(
-        `「${currentTypeLabel}」(${typeKey})の全スポット${purgeCount}件を削除しますか?` +
-          `公開・承認待ち・却下・非公開を問わず全て対象で、紐づく訪問記録・訪問予定・` +
-          `口コミ・写真も全ユーザー分削除されます。この操作は取り消せません。`
+        `「${currentTypeLabel}」(${typeKey})の公開スポット${purgeCount}件を削除しますか?` +
+          `紐づく訪問記録・訪問予定・口コミ・写真も全ユーザー分削除されます` +
+          `(承認待ち・却下・非公開のスポットは残ります)。この操作は取り消せません。`
       )
     )
       return;
@@ -547,13 +563,24 @@ export default function AdminView({
     }
   };
 
-  // name+region+lat+lng の完全一致を「同じスポット」とみなす差分更新用のキー
-  const spotDiffKey = (
-    name: string,
-    region: string,
-    lat: number,
-    lng: number
-  ) => `${name}|${region}|${lat}|${lng}`;
+  // name+lat+lng の完全一致を「同じスポット」とみなす差分更新用のキー
+  // (regionはlat/lngから決まる従属値のため含めない — lat/lngが同じでregionだけ
+  // 違うデータは想定しない。region表記の修正で別スポット扱いになるのも避けられる)
+  const spotDiffKey = (name: string, lat: number, lng: number) =>
+    `${name}|${lat}|${lng}`;
+
+  interface CsvSpotRecord {
+    key: string | null;
+    name: string;
+    name_kana: string | null;
+    region: string;
+    lat: number;
+    lng: number;
+    rank: string | null;
+    category: string | null;
+    description: string | null;
+    status: string;
+  }
 
   const handleCsvFile = async (file: File) => {
     setImporting(true);
@@ -576,7 +603,7 @@ export default function AdminView({
         }
       }
 
-      const records = [];
+      const records: CsvSpotRecord[] = [];
       const errors: string[] = [];
       for (let i = 1; i < rows.length; i++) {
         const get = (c: (typeof CSV_COLUMNS)[number]) =>
@@ -590,6 +617,7 @@ export default function AdminView({
           errors.push(`${i + 1}行目: lat/lng が数値でない`);
         else
           records.push({
+            key: get("key") || null,
             name: get("name"),
             name_kana: get("name_kana") || null,
             region: get("region"),
@@ -610,30 +638,79 @@ export default function AdminView({
         return;
       }
 
-      // 差分更新: 既に(status問わず)このスポット種別に存在する行、およびCSV内で
-      // 重複している行はスキップし、新規分だけ追加する
-      const existingKeys = new Set(
-        spots.map((s) => spotDiffKey(s.name, s.region, s.lat, s.lng))
+      // key列はDB側で種別内一意のため、CSV内の重複だけは事前に検出して中止する
+      // (どちらの行を正とすべきか決められないため)
+      const existingByDiffKey = new Map(
+        spots.map((s) => [spotDiffKey(s.name, s.lat, s.lng), s])
       );
+      const existingByKey = new Map(
+        spots.filter((s) => s.key).map((s) => [s.key as string, s])
+      );
+      const seenCsvKeys = new Set<string>();
+      const keyErrors: string[] = [];
+      for (const record of records) {
+        if (!record.key) continue;
+        if (seenCsvKeys.has(record.key)) {
+          keyErrors.push(`key「${record.key}」がCSV内で重複`);
+        }
+        seenCsvKeys.add(record.key);
+      }
+      if (keyErrors.length > 0) {
+        setMessage(
+          `エラーがあるためインポートを中止しました:\n` + keyErrors.join("\n")
+        );
+        return;
+      }
+
+      // 差分更新: 既存行との同一判定はkey一致を最優先し(改名・座標修正もCSVから
+      // 反映できるように)、keyで見つからなければname+lat+lngの完全一致で突き合わせる。
+      // 一致した既存行は、内容がCSVと異なればCSVの内容で上書きし、同一ならスキップする
+      // (同じCSVを何度アップロードしても2回目以降は何も起きない)。ただし公開以外の
+      // 既存行(他ユーザーの承認待ち等。編集権限が投稿者本人に限られる)は上書きしない。
+      // CSVにkey列が無い場合は既存行のkeyを消さず維持する
       const seenKeys = new Set<string>();
       const newRecords = [];
+      const updates: { spot: Spot; record: CsvSpotRecord }[] = [];
+      let unchangedCount = 0;
+      let untouchableCount = 0;
+      const isChanged = (spot: Spot, record: CsvSpotRecord) =>
+        spot.name !== record.name ||
+        spot.name_kana !== record.name_kana ||
+        spot.region !== record.region ||
+        spot.lat !== record.lat ||
+        spot.lng !== record.lng ||
+        spot.rank !== record.rank ||
+        spot.category !== record.category ||
+        spot.description !== record.description ||
+        (record.key !== null && spot.key !== record.key);
       for (const record of records) {
-        const key = spotDiffKey(record.name, record.region, record.lat, record.lng);
-        if (existingKeys.has(key) || seenKeys.has(key)) continue;
-        seenKeys.add(key);
+        const diffKey = spotDiffKey(record.name, record.lat, record.lng);
+        const existing =
+          (record.key ? existingByKey.get(record.key) : undefined) ??
+          existingByDiffKey.get(diffKey);
+        if (existing) {
+          if (existing.status !== "published") untouchableCount++;
+          else if (isChanged(existing, record)) updates.push({ spot: existing, record });
+          else unchangedCount++;
+          continue;
+        }
+        if (seenKeys.has(diffKey)) continue; // CSV内でname+lat+lngが重複している行
+        seenKeys.add(diffKey);
         newRecords.push(record);
       }
-      const skippedCount = records.length - newRecords.length;
 
-      if (newRecords.length === 0) {
-        setMessage(`新規行はありませんでした(${skippedCount}件は既存のためスキップ)。`);
+      if (newRecords.length === 0 && updates.length === 0) {
+        setMessage(
+          `追加・変更はありませんでした(${unchangedCount}件は既存と同一のためスキップ)。`
+        );
         return;
       }
 
       // 1000件ずつ順番に送信し、進捗を表示する(大量データで1リクエストが
       // タイムアウトするのも避けられる)
+      const totalCount = newRecords.length + updates.length;
       let insertedCount = 0;
-      setImportProgress({ done: 0, total: newRecords.length });
+      setImportProgress({ done: 0, total: totalCount });
       for (
         let offset = 0;
         offset < newRecords.length;
@@ -650,18 +727,165 @@ export default function AdminView({
           return;
         }
         insertedCount += chunk.length;
-        setImportProgress({ done: insertedCount, total: newRecords.length });
+        setImportProgress({ done: insertedCount, total: totalCount });
+      }
+
+      // 既存スポットの上書き更新(1件ずつPATCH)。CSVにkeyが無い行は既存のkeyを
+      // 消さないよう、keyフィールド自体を送らない(PATCH側が未指定時は維持する)
+      let updatedCount = 0;
+      for (const { spot, record } of updates) {
+        const { error } = await api.spots.update(spot.id, {
+          name: record.name,
+          name_kana: record.name_kana,
+          region: record.region,
+          lat: record.lat,
+          lng: record.lng,
+          rank: record.rank,
+          category: record.category,
+          description: record.description,
+          ...(record.key !== null ? { key: record.key } : {}),
+        });
+        if (error) {
+          setMessage(
+            `${insertedCount}件追加・${updatedCount}件更新した時点で失敗しました: ` +
+              error.message
+          );
+          load();
+          return;
+        }
+        updatedCount++;
+        setImportProgress({ done: insertedCount + updatedCount, total: totalCount });
       }
 
       setMessage(
-        `${insertedCount}件追加しました` +
-          (skippedCount > 0 ? `(${skippedCount}件は既存のためスキップ)。` : "。")
+        `${insertedCount}件追加・${updatedCount}件更新しました` +
+          (unchangedCount > 0 ? `(${unchangedCount}件は既存と同一のためスキップ)` : "") +
+          (untouchableCount > 0
+            ? `(${untouchableCount}件は公開以外のスポットのため未変更)`
+            : "") +
+          "。"
       );
       load();
     } finally {
       setImporting(false);
       setImportProgress(null);
     }
+  };
+
+  const handleRouteCsvFile = async (file: File) => {
+    setImportingRoutes(true);
+    setRouteMessage(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length < 2) {
+        setRouteMessage("CSVにデータ行がありません。");
+        return;
+      }
+      const header = rows[0].map((h) => h.trim());
+      const idx = Object.fromEntries(
+        ROUTE_CSV_COLUMNS.map((c) => [c, header.indexOf(c)])
+      ) as Record<(typeof ROUTE_CSV_COLUMNS)[number], number>;
+      for (const required of ROUTE_CSV_COLUMNS) {
+        if (idx[required] === -1) {
+          setRouteMessage(`CSVヘッダーに ${required} 列がありません。`);
+          return;
+        }
+      }
+
+      // spot_keyはスポットのkey列(種別内一意)を指す。先に全行を検証してから送る
+      const spotsByKey = new Map(
+        spots.filter((s) => s.key).map((s) => [s.key as string, s])
+      );
+      const errors: string[] = [];
+      const grouped = new Map<string, { seq: number; spotId: string }[]>();
+      const seenSeq = new Set<string>();
+      for (let i = 1; i < rows.length; i++) {
+        const get = (c: (typeof ROUTE_CSV_COLUMNS)[number]) =>
+          (rows[i][idx[c]] ?? "").trim();
+        const route = get("route");
+        const seq = Number(get("seq"));
+        const spotKey = get("spot_key");
+        if (!route) errors.push(`${i + 1}行目: route が空`);
+        else if (!Number.isFinite(seq)) errors.push(`${i + 1}行目: seq が数値でない`);
+        else if (!spotKey) errors.push(`${i + 1}行目: spot_key が空`);
+        else if (!spotsByKey.has(spotKey))
+          errors.push(
+            `${i + 1}行目: spot_key「${spotKey}」のスポットが存在しない(スポットCSVを先にインポートする)`
+          );
+        else if (seenSeq.has(`${route}|${seq}`))
+          errors.push(`${i + 1}行目: route「${route}」の seq ${seq} が重複`);
+        else {
+          seenSeq.add(`${route}|${seq}`);
+          const list = grouped.get(route) ?? [];
+          list.push({ seq, spotId: spotsByKey.get(spotKey)!.id });
+          grouped.set(route, list);
+        }
+      }
+      for (const [route, list] of grouped) {
+        if (list.length < 2) errors.push(`route「${route}」の経由地が1件しかない`);
+      }
+      if (errors.length > 0) {
+        setRouteMessage(
+          `エラーがあるためインポートを中止しました:\n` + errors.join("\n")
+        );
+        return;
+      }
+
+      // 差分更新: 既存ルートと名前・経由地の並びが完全一致するものはスキップし、
+      // 変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと置き換え)
+      const existingByName = new Map(
+        routes.map((r) => [r.name, r.points.map((p) => p.spot_id).join("|")])
+      );
+      const changed: { name: string; spot_ids: string[] }[] = [];
+      let unchangedCount = 0;
+      for (const [route, list] of grouped) {
+        const spotIds = list.sort((a, b) => a.seq - b.seq).map((p) => p.spotId);
+        if (existingByName.get(route) === spotIds.join("|")) {
+          unchangedCount++;
+          continue;
+        }
+        changed.push({ name: route, spot_ids: spotIds });
+      }
+      if (changed.length === 0) {
+        setRouteMessage(
+          `変更はありませんでした(${unchangedCount}本は既存と同一のためスキップ)。`
+        );
+        return;
+      }
+
+      const { error } = await api.routes.replace(typeKey, changed);
+      if (error) {
+        setRouteMessage("インポートに失敗しました: " + error.message);
+        return;
+      }
+      setRouteMessage(
+        `${changed.length}本のルートを追加・更新しました` +
+          (unchangedCount > 0
+            ? `(${unchangedCount}本は既存と同一のためスキップ)。`
+            : "。")
+      );
+      loadRoutes();
+    } finally {
+      setImportingRoutes(false);
+    }
+  };
+
+  const handleDeleteRoute = async (route: SpotRoute) => {
+    if (
+      !confirm(
+        `ルート「${route.name}」(経由地${route.points.length}件)を削除しますか?` +
+          `スポット自体は削除されません。`
+      )
+    )
+      return;
+    const { error } = await api.routes.delete(route.id);
+    setRouteMessage(
+      error
+        ? `「${route.name}」の削除に失敗しました: ` + error.message
+        : `「${route.name}」を削除しました。`
+    );
+    loadRoutes();
   };
 
   if (checkingRole || !hasPageAccess) return null;
@@ -1002,9 +1226,11 @@ export default function AdminView({
               <p className="mb-3 text-xs text-gray-500">
                 個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
                 ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは最初から公開される)。
-                差分更新: name+region+lat+lngが完全一致するスポットが既に
-                (status問わず)存在する行はスキップし、新規分だけ追加するため、同じCSVを
-                何度アップロードしても重複登録されない。
+                差分更新: 既存スポットとの同一判定はkey一致を最優先し、keyで見つからなければ
+                name+lat+lngの完全一致で行う。一致した既存行は内容が異なればCSVの内容で
+                上書きし(keyが同じなら改名・座標修正も反映される)、同一ならスキップ、
+                どちらにも一致しなければ新規追加するため、同じCSVを何度アップロードしても
+                重複登録されない(公開以外のスポットに一致した行だけは上書きしない)。
               </p>
 
               {message && (
@@ -1060,20 +1286,80 @@ export default function AdminView({
                 CSV列: {CSV_COLUMNS.join(", ")}(name, region, lat, lng は必須。
                 region列にはこの種別の地域(
                 {regionFieldLabel(currentRegionScope)})を入れる。
-                rank/categoryは自由入力で空でも可)
+                rank/categoryは自由入力で空でも可。keyは省略可の種別内一意な
+                参照キーで、ルートCSVからスポットを指すのに使う)
               </p>
+            </section>
+
+            <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <h3 className="mb-2 text-base font-bold">
+                ルート(巡った順の矢印)のインポート
+              </h3>
+              <p className="mb-3 text-xs text-gray-500">
+                スポットを巡った順に矢印で繋ぐルートをCSVで取り込み、地図に表示する。
+                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(いずれも必須)。routeはルート名、
+                seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、spot_keyは
+                スポットCSVのkey列の値。ルート名を
+                この種別のランク値と一致させると、矢印がそのランクの縁取り色で描かれ、
+                地図のランク絞り込みにも連動する。差分更新: 既存と同名のルートは
+                経由地を丸ごと置き換え、CSVに無いルートには触らない。
+                取り込みの前に、spot_keyが指すスポットをスポットCSVでインポートして
+                おくこと(key未設定のスポットは参照できない)。
+              </p>
+
+              {routeMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                  {routeMessage}
+                </p>
+              )}
+
+              {routes.length > 0 && (
+                <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                  {routes.map((r) => (
+                    <li key={r.id} className="flex items-center gap-3 px-3 py-2">
+                      <span className="flex-1 truncate text-sm">{r.name}</span>
+                      <span className="shrink-0 text-xs text-gray-500">
+                        経由地{r.points.length}件
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRoute(r)}
+                        className="shrink-0 text-xs font-medium text-red-500 underline"
+                      >
+                        削除
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                {importingRoutes ? "インポート中…" : "ルートCSVインポート"}
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  disabled={importingRoutes}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleRouteCsvFile(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
             </section>
 
           {isAdmin && (
             <section className="rounded-xl border border-red-200 bg-white p-3">
               <h3 className="mb-2 text-base font-bold text-red-700">
-                スポット全削除
+                公開スポットの全削除
               </h3>
               <p className="mb-3 text-xs text-gray-500">
-                「{currentTypeLabel}」({typeKey})のスポットを公開・承認待ち・却下・非公開
-                問わず全件削除する。紐づく訪問記録・訪問予定・口コミ・写真も全ユーザー分
-                まとめて削除され、元に戻せない。CSVインポート用データを外部で作り直した
-                際などに、一度空にしてから入れ直す用途を想定。
+                「{currentTypeLabel}」({typeKey})の公開スポットを全件削除する
+                (承認待ち・却下・非公開のスポットは残る)。削除される公開スポットに
+                紐づく訪問記録・訪問予定・口コミ・写真は全ユーザー分まとめて削除され、
+                元に戻せない(ルートも全て削除される)。CSVインポート用データを外部で
+                作り直した際などに、一度空にしてから入れ直す用途を想定。
               </p>
 
               {purgeMessage && (
@@ -1118,7 +1404,7 @@ export default function AdminView({
 
               {purgeCount === 0 && (
                 <p className="mt-3 text-sm text-gray-500">
-                  対象スポットはありません。
+                  対象の公開スポットはありません。
                 </p>
               )}
             </section>

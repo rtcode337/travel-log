@@ -122,6 +122,8 @@ export async function GET(request: Request) {
 }
 
 interface SpotInput {
+  /** 種別内で一意な省略可の参照キー(ルートCSVがスポットを指すのに使う) */
+  key?: string | null;
   name: string;
   name_kana: string | null;
   region: string;
@@ -143,15 +145,16 @@ async function insertSpots(
 ) {
   const { rows } = await query<Spot>(
     `insert into spots
-      (spot_type_id, name, name_kana, region, lat, lng, rank, category, description, status, created_by)
-     select $1, u.name, u.name_kana, u.region, u.lat, u.lng, u.rank, u.category, u.description, u.status, $2
-     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::text[], $11::text[])
-       with ordinality as u(name, name_kana, region, lat, lng, rank, category, description, status, ord)
+      (spot_type_id, key, name, name_kana, region, lat, lng, rank, category, description, status, created_by)
+     select $1, u.key, u.name, u.name_kana, u.region, u.lat, u.lng, u.rank, u.category, u.description, u.status, $2
+     from unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::float8[], $8::float8[], $9::text[], $10::text[], $11::text[], $12::text[])
+       with ordinality as u(key, name, name_kana, region, lat, lng, rank, category, description, status, ord)
      order by u.ord
      returning *`,
     [
       spotTypeId,
       createdBy,
+      records.map((r) => r.key ?? null),
       records.map((r) => r.name),
       records.map((r) => r.name_kana),
       records.map((r) => r.region),
