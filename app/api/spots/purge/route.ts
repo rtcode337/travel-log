@@ -12,9 +12,10 @@ async function resolveSpotType(typeKey: string) {
 }
 
 /**
- * スポット種別ごと一括削除。CSVで作り直す前提の強い操作で、published以外
- * (private/pending/rejected)の他ユーザー分も巻き込んで消すため、ユーザー管理と
- * 同様にadmin専用とする(spot_adminは不可)。
+ * スポット種別ごとの公開スポット一括削除。CSVで作り直す前提の強い操作で、
+ * 対象は公開(published)スポットのみ(承認待ち・却下・非公開は残す)だが、
+ * 公開スポットに紐づく全ユーザーの訪問記録・写真等を巻き込んで消すため、
+ * ユーザー管理と同様にadmin専用とする(spot_adminは不可)。
  */
 async function authorize() {
   const user = await getCurrentUser();
@@ -42,16 +43,17 @@ export async function GET(request: Request) {
   }
 
   const { rows } = await query<{ count: string }>(
-    "select count(*) from spots where spot_type_id = $1",
+    "select count(*) from spots where spot_type_id = $1 and status = 'published'",
     [spotType.id]
   );
   return NextResponse.json({ data: { count: Number(rows[0].count) } });
 }
 
 /**
- * 対象スポット種別のスポットをstatus問わず全件削除する。visits/visit_plans/reviewsは
- * spotsへのFKがon delete cascadeのため自動で消える(db/init/01_schema.sql参照)。
- * 写真ファイルはカスケードで行が消える前に集めておき、削除成功後にまとめて消す。
+ * 対象スポット種別の公開(published)スポットを全件削除する(承認待ち・却下・
+ * 非公開は残す)。visits/visit_plans/reviewsはspotsへのFKがon delete cascadeの
+ * ため自動で消える(db/init/01_schema.sql参照)。写真ファイルはカスケードで
+ * 行が消える前に集めておき、削除成功後にまとめて消す。
  */
 export async function POST(request: Request) {
   const auth = await authorize();
@@ -74,17 +76,18 @@ export async function POST(request: Request) {
     const photoResult = await client.query<{ photos: string[] }>(
       `select v.photos from visits v
        join spots s on v.spot_id = s.id
-       where s.spot_type_id = $1`,
+       where s.spot_type_id = $1 and s.status = 'published'`,
       [spotType.id]
     );
     photoRows = photoResult.rows;
     // ルートはスポットのカスケードでは経由地しか消えないため、空のルートが
-    // 残らないようここで明示的に消す(CSVで作り直す前提の操作のため丸ごとでよい)
+    // 残らないようここで明示的に消す(ルートはCSV由来のシードデータで、経由地は
+    // 公開スポットの前提。CSVで作り直す前提の操作のため丸ごとでよい)
     await client.query("delete from spot_routes where spot_type_id = $1", [
       spotType.id,
     ]);
     const { rowCount } = await client.query(
-      "delete from spots where spot_type_id = $1",
+      "delete from spots where spot_type_id = $1 and status = 'published'",
       [spotType.id]
     );
     deletedCount = rowCount ?? 0;

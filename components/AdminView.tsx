@@ -227,9 +227,9 @@ export default function AdminView({
     if (purgeConfirmText !== typeKey) return;
     if (
       !confirm(
-        `「${currentTypeLabel}」(${typeKey})の全スポット${purgeCount}件を削除しますか?` +
-          `公開・承認待ち・却下・非公開を問わず全て対象で、紐づく訪問記録・訪問予定・` +
-          `口コミ・写真も全ユーザー分削除されます。この操作は取り消せません。`
+        `「${currentTypeLabel}」(${typeKey})の公開スポット${purgeCount}件を削除しますか?` +
+          `紐づく訪問記録・訪問予定・口コミ・写真も全ユーザー分削除されます` +
+          `(承認待ち・却下・非公開のスポットは残ります)。この操作は取り消せません。`
       )
     )
       return;
@@ -1352,13 +1352,14 @@ export default function AdminView({
           {isAdmin && (
             <section className="rounded-xl border border-red-200 bg-white p-3">
               <h3 className="mb-2 text-base font-bold text-red-700">
-                スポット全削除
+                公開スポットの全削除
               </h3>
               <p className="mb-3 text-xs text-gray-500">
-                「{currentTypeLabel}」({typeKey})のスポットを公開・承認待ち・却下・非公開
-                問わず全件削除する。紐づく訪問記録・訪問予定・口コミ・写真も全ユーザー分
-                まとめて削除され、元に戻せない。CSVインポート用データを外部で作り直した
-                際などに、一度空にしてから入れ直す用途を想定。
+                「{currentTypeLabel}」({typeKey})の公開スポットを全件削除する
+                (承認待ち・却下・非公開のスポットは残る)。削除される公開スポットに
+                紐づく訪問記録・訪問予定・口コミ・写真は全ユーザー分まとめて削除され、
+                元に戻せない(ルートも全て削除される)。CSVインポート用データを外部で
+                作り直した際などに、一度空にしてから入れ直す用途を想定。
               </p>
 
               {purgeMessage && (
@@ -1403,7 +1404,7 @@ export default function AdminView({
 
               {purgeCount === 0 && (
                 <p className="mt-3 text-sm text-gray-500">
-                  対象スポットはありません。
+                  対象の公開スポットはありません。
                 </p>
               )}
             </section>

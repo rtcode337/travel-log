@@ -92,7 +92,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 ### ルート(`spot_routes`/`spot_route_points`)とスポット参照キー(`spots.key`)
 
-スポットを「巡った順」に矢印で繋ぐルート機能(水曜どうでしょうの企画のような、訪問順のある種別向け)。スキーマは`db/init/02_spot_key_routes.sql`(初期スキーマ後の追加分。新規DBでは自動実行されるが、既存の`db/data/`には上記「コマンド」の手順で手動適用が必要。全文idempotentのため再適用しても害はない)。`spot_routes`(種別ごとのルート名、`(spot_type_id, name)`一意)+`spot_route_points`(route_id, seq, spot_id)の2テーブルで、経由地はスポット削除時にFKカスケードで点だけ抜け、ルートは残る。スポット全削除(purge)はルートも丸ごと消し、種別削除は`spot_types`へのFKカスケードで消える。
+スポットを「巡った順」に矢印で繋ぐルート機能(水曜どうでしょうの企画のような、訪問順のある種別向け)。スキーマは`db/init/02_spot_key_routes.sql`(初期スキーマ後の追加分。新規DBでは自動実行されるが、既存の`db/data/`には上記「コマンド」の手順で手動適用が必要。全文idempotentのため再適用しても害はない)。`spot_routes`(種別ごとのルート名、`(spot_type_id, name)`一意)+`spot_route_points`(route_id, seq, spot_id)の2テーブルで、経由地はスポット削除時にFKカスケードで点だけ抜け、ルートは残る。公開スポットの全削除(purge)はルートも丸ごと消し、種別削除は`spot_types`へのFKカスケードで消える。
 
 ルートのデータはtravel-log-data側の`<スポットキー>/routes.csv`(列: `route,seq,spot_key`)に置き、`/[type]/admin`の「ルート(巡った順の矢印)のインポート」から取り込む(spot_admin/admin可)。`spot_key`がスポットを指すために`spots.key`列(種別内一意・nullable。`spots (spot_type_id, key)`の部分uniqueインデックス)を追加してあり、スポットCSVの省略可の`key`列で設定する。名前・座標のような自然キーではなく明示キーにしたのは、改名・座標修正でルートの参照が壊れないようにするため。`AdminView`のルートCSVインポートは全行を検証(未知のspot_key・seq重複・経由地1件以下はエラー)してから、既存と経由地の並びが同一のルートをスキップしてPOST `/api/routes`(ルート名ごとに経由地を丸ごと置き換えるupsert)に送る。個別ルートの削除はDELETE `/api/routes/[id]`。
 
@@ -100,9 +100,9 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 これに合わせてCSVインポートの差分更新の突き合わせキーを`name`+`region`+`lat`+`lng`から`name`+`lat`+`lng`に変更し(lat/lngが同じでregionだけ違う使い方は想定しないため。region表記の修正で別スポット扱いになる事故も防ぐ)、さらに`key`一致を最優先の同一判定として、一致した既存行は内容が異なればCSVの内容で上書き更新するようにした(スキップではなく上書きにすることで、CSV側での改名・座標修正・説明文の更新が再インポートだけで反映される。詳細は上記「スポットの新規登録フロー」参照)。
 
-### スポット全削除・スポット種別の削除
+### 公開スポットの全削除・スポット種別の削除
 
-管理画面の`/[type]/admin`にはadmin専用の「スポット全削除」(`app/api/spots/purge/route.ts`)と「スポット種別の削除」(`DELETE /api/spot-types/[id]`、同ファイルのPATCHと同居)がある。前者は`spot_types`の行自体は消さずstatus問わず対象種別の全スポットと紐づく`visits`/`visit_plans`/`reviews`(FKの`on delete cascade`)・写真ファイルを一括で消す。後者は同じ削除ロジック(スポットが残っていれば先に全件削除)を実行した上で`spot_types`の行自体も削除する(「別のスポット種別の管理」一覧には現在表示中の種別も含めて全種別を出すが、現在表示中の種別だけはリンク化・削除ボタンをUI側で出さないことで自分が今開いている種別を誤って消せないようにしている)。後者は`public_visible`がtrue(一般公開中)の種別、または対象種別が`app_settings.active_spot_type_id`(ルート`/`リダイレクトのフォールバック既定)の場合はAPIレベルで拒否する(既定の種別は常にpublic_visible=trueであるため後者は実質前者に含まれるが、防御的に両方チェックしている)。どちらもCSVでデータを作り直す前提の機能で、spot_adminには許可していない(ユーザー管理と同様、他ユーザーのデータを巻き込むため)。ルート`/`アクセス時に開く既定の種別(最後に開いていた種別のCookieが無い・開けないときのフォールバック)の変更は、この一括削除等の管理系操作とは別の独立したセレクトボックス(`app_settings.active_spot_type_id`を更新)として`/[type]/admin`に置いている。
+管理画面の`/[type]/admin`にはadmin専用の「公開スポットの全削除」(`app/api/spots/purge/route.ts`)と「スポット種別の削除」(`DELETE /api/spot-types/[id]`、同ファイルのPATCHと同居)がある。前者は`spot_types`の行自体は消さず、対象種別の公開(published)スポットのみを全件削除する(承認待ち・却下・非公開のスポットは残す。CSVで作り直す対象=CSVインポートが取り込む公開スポットに限定するため)。削除される公開スポットに紐づく`visits`/`visit_plans`/`reviews`(FKの`on delete cascade`)・写真ファイルと、対象種別のルート(`spot_routes`。status問わず丸ごと)も一括で消す。後者はstatus問わず対象種別の全スポットを削除(紐づくデータ・写真ファイルの扱いは前者と同じ)した上で`spot_types`の行自体も削除する(「別のスポット種別の管理」一覧には現在表示中の種別も含めて全種別を出すが、現在表示中の種別だけはリンク化・削除ボタンをUI側で出さないことで自分が今開いている種別を誤って消せないようにしている)。後者は`public_visible`がtrue(一般公開中)の種別、または対象種別が`app_settings.active_spot_type_id`(ルート`/`リダイレクトのフォールバック既定)の場合はAPIレベルで拒否する(既定の種別は常にpublic_visible=trueであるため後者は実質前者に含まれるが、防御的に両方チェックしている)。どちらもCSVでデータを作り直す前提の機能で、spot_adminには許可していない(ユーザー管理と同様、他ユーザーのデータを巻き込むため)。ルート`/`アクセス時に開く既定の種別(最後に開いていた種別のCookieが無い・開けないときのフォールバック)の変更は、この一括削除等の管理系操作とは別の独立したセレクトボックス(`app_settings.active_spot_type_id`を更新)として`/[type]/admin`に置いている。
 
 ### スポットの新規登録フロー
 

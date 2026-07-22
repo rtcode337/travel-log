@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: [
-          // 管理画面の破壊的操作(スポット全削除等)がconfirm()のみで守られているため、
+          // 管理画面の破壊的操作(公開スポットの全削除等)がconfirm()のみで守られているため、
           // iframe埋め込み経由のクリックジャッキングを防ぐ
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
