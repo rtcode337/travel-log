@@ -198,15 +198,6 @@ const lastViews = new Map<string, { center: [number, number]; zoom: number }>();
  */
 let lastTrackingActive = false;
 
-/** PWA(ホーム画面から)として起動されているか */
-function isStandaloneDisplayMode(): boolean {
-  return (
-    window.matchMedia("(display-mode: standalone)").matches ||
-    // 旧iOS Safariのホーム画面追加はdisplay-modeを報告しないことがある
-    (window.navigator as Navigator & { standalone?: boolean }).standalone === true
-  );
-}
-
 export default function MapView({
   spotTypeKey,
 }: {
@@ -294,12 +285,6 @@ export default function MapView({
     roleRef.current = role;
   }, [role]);
 
-  // 地図初期化effect内のイベントリスナーから最新のスコープを参照するためのref
-  const regionScopeRef = useRef<string | null>(null);
-  useEffect(() => {
-    regionScopeRef.current = regionScope;
-  }, [regionScope]);
-
   useEffect(() => {
     api.auth.me().then(({ data }) => setRole(data?.role ?? null));
   }, []);
@@ -358,21 +343,6 @@ export default function MapView({
     geolocate.on("trackuserlocationstart", handleTrackingStart);
     geolocate.on("trackuserlocationend", handleTrackingEnd);
     geolocate.on("error", handleTrackingEnd);
-
-    // PWA(ホーム画面から起動)ではアプリを切り替えて戻ってきてもページが再読み込み
-    // されず、このモジュールの状態も生きたままのため、下の初期表示用useEffectの
-    // 現在地取得は走らない。バックグラウンドからの復帰を「アプリを開いた」とみなし、
-    // ブラウザでの新規読み込み時と同様に現在地へフォーカスする(日本スコープのみ。
-    // すでに追跡モード中はtrigger()がトグルとしてOFFに働いてしまううえ、
-    // カメラは追従済みなので何もしない)
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") return;
-      if (!isStandaloneDisplayMode()) return;
-      if (regionScopeRef.current !== "jp") return;
-      if (lastTrackingActive) return;
-      geolocateRef.current?.trigger();
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     const saveView = () => {
       lastViews.set(spotTypeKey, {
@@ -458,7 +428,6 @@ export default function MapView({
       container.removeEventListener("wheel", handleWheel);
       map.off("contextmenu", handleContextMenu);
       map.off("moveend", saveView);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
       geolocate.off("trackuserlocationstart", handleTrackingStart);
       geolocate.off("trackuserlocationend", handleTrackingEnd);
       geolocate.off("error", handleTrackingEnd);

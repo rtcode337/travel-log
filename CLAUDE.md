@@ -68,7 +68,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 2. `/[type]/spots`の地域タブの名称(`regionFieldLabel`: 都道府県/州・県/国)と並び順(`compareRegions`: `'jp'`はJIS順・リスト外の値も末尾に表示、他は五十音順)
 3. 地名検索`/api/geocode`の`countrycodes`(`scope`クエリパラメータで渡す。`'world'`は絞り込みなし)
 4. 逆ジオ`/api/geocode/reverse`の地域解決(`'jp'`=ISO3166-2コード→都道府県、国指定=state/province/county、`'world'`=国名。レスポンスのキーは`region`)
-5. `/[type]/map`初回表示(`'jp'`=従来どおり現在地取得、他=登録スポット全体へfitBounds・スポット0件時は世界全体表示)。地図の表示位置の記憶(`MapView`の`lastViews`)も種別ごとに分けている。現在地追跡モード(GeolocateControlのカメラ追従)中に他画面へ遷移して戻った場合は、位置の復元に加えて追跡モード自体を再開する(`MapView`の`lastTrackingActive`)。また、PWA(スタンドアロン起動)ではアプリ切り替えで戻ってもページが再読み込みされないため、バックグラウンドからの復帰(visibilitychange)時に現在地へフォーカスし直す(`'jp'`スコープのみ・追跡モード中を除く)
+5. `/[type]/map`初回表示(`'jp'`=従来どおり現在地取得、他=登録スポット全体へfitBounds・スポット0件時は世界全体表示)。地図の表示位置の記憶(`MapView`の`lastViews`)も種別ごとに分けている。現在地追跡モード(GeolocateControlのカメラ追従)中に他画面へ遷移して戻った場合は、位置の復元に加えて追跡モード自体を再開する(`MapView`の`lastTrackingActive`)。なお、PWA(スタンドアロン起動)でアプリを切り替えて戻った場合はページが再読み込みされないため初回表示の現在地取得は走らず、意図的に「開いていた位置をそのまま表示」の挙動にしている(バックグラウンド中に調べ物などで見ていた位置を失わないため)
 
 あわせて`wikipedia_lang`キー(既定`'ja'`、`resolveWikipediaLang`)でスポット詳細のWikipedia検索(`SpotInfoModal`)の言語版サブドメインを種別ごとに切り替えられる。どちらも`/[type]/admin`「スポット種別の設定」の「対象地域とWikipedia言語」フォーム(admin専用)から変更し、PATCH `/api/spot-types/[id]`が値の妥当性を検証する。`PREFECTURES`(47都道府県ハードコード)を「地域の全集合」として使ってよいのは`'jp'`スコープの文脈だけ、という点に注意。
 
