@@ -103,8 +103,8 @@ docker compose pull app && docker compose up -d
 
 - GHCRのパッケージは初回公開時点では非公開のため、GitHubのPackages設定でPublicに
   切り替えるか、本番ホストで`docker login ghcr.io`(`read:packages`権限のPAT)しておく
-- イメージは`linux/amd64`のみ。arm64ホストで動かす場合はワークフローの`platforms`に
-  `linux/arm64`を追記する
+- イメージは`linux/amd64`と`linux/arm64`のマルチアーキで公開しており、pull時に
+  ホストに合う方が自動選択される
 - 特定時点に戻したいときは`docker-compose.yml`のイメージタグを`latest`から
   `sha-xxxxxxx`(Actionsが付けるコミットSHAタグ)に一時的に変えてpullし直す
 
