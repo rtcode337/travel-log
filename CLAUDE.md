@@ -106,6 +106,8 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 `reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、必訪ランクの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される。`photos`(text[])にはBase64ではなく、`photos/`フォルダ(docker-composeでbindマウント、`lib/photos.ts`)へ保存したファイルの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
 
+自分の訪問記録は`/[type]/spots`の「最近の訪問場所」見出し右のボタンからZIPで一括エクスポートできる(`GET /api/visits/export?type=<種別キー>`。typeは必須で、その種別の分のみ。種別横断のエクスポートは意図的に持たない)。ZIPの中身は`visits.csv`(BOM付きUTF-8。訪問のメモ+スポット情報、`lib/csv.ts`の`buildCsv`)と`photos/<uuid>.<ext>`(添付写真。CSVの「写真」列がこのZIP内パスを指す)。ZIP生成は依存を増やさず`lib/zip.ts`の自前実装(無圧縮STORE。中身が圧縮済み画像と小さなCSVのみのため)で、写真ファイルは配信APIと同じく`parseVisitPhotoPath`の所有者チェックを通ったものだけを読む。
+
 ### touristのランクについて
 
 tourist spotsの`rank`はこのリポジトリの外で一度だけ計算されたパイプラインの成果物であり、アプリ側が動的に計算するものではない。Wikipedia(ja)月次ページビュー数に基づく相対順位(パーセンタイル)の機械分類(詳細はtravel-log-data/README.md「各データの出典」参照。ランクの決め方自体はデータの成り立ちの話のためtravel-log本体のREADMEには置いていない)。手動でスポットを追加する場合も、この基準に沿ったランクを付けること。

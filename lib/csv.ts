@@ -1,3 +1,15 @@
+/** rows(ヘッダー行含む)をCSV文字列にする。区切り文字を含む値はダブルクォートで囲む */
+export function buildCsv(
+  rows: (string | number | null | undefined)[][]
+): string {
+  const escape = (value: string | number | null | undefined): string => {
+    const s = value == null ? "" : String(value);
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  // 改行はExcel等での互換性が高いCRLF
+  return rows.map((row) => row.map(escape).join(",")).join("\r\n") + "\r\n";
+}
+
 /** ダブルクォート対応の簡易CSVパーサ */
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
