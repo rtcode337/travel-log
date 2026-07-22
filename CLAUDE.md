@@ -44,6 +44,10 @@ NextAuthではなく自前実装。`lib/auth/session.ts`がHMAC-SHA256で署名�
 
 manifest(`app/manifest.ts`、Next.jsのMetadata Files規約で`/manifest.webmanifest`として配信)+アイコン(`public/icons/`のmanifest用3枚と、`app/icon.png`・`app/apple-icon.png`のファビコン/apple-touch-icon)による最小構成のPWA対応で、Service Worker・オフライン対応は意図的に持たない(「デプロイしたのに古い画面が出る」系の問題を避けるため、必要になるまで導入しない方針)。インストール後も中身は同じWebアプリで、認証Cookieもそのまま使われる。iOSはmanifestの`display`/`icons`を見ないため、`app/layout.tsx`の`metadata.appleWebApp`と`app/apple-icon.png`で別途同等の設定をしている。`/manifest.webmanifest`は`middleware.ts`のガード対象から除外が必要(上記「認証」参照)。アイコンPNGは`scripts/generate-icons.mjs`(sharp使用、依存には含めない)で生成したものをコミットしてあり、デザイン変更時のみ再生成する。
 
+### ビルド番号
+
+GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日時>-<短縮コミットハッシュ>`形式のビルド番号を生成し、`--build-arg BUILD_NUMBER`でDockerfileのprodステージに渡して`ENV BUILD_NUMBER`として焼き込む。`app/[type]/admin/page.tsx`(サーバーコンポーネント)が`process.env.BUILD_NUMBER`を読んで`AdminView`の`buildNumber` propに渡し、管理画面の見出し横に表示する(未設定時は「開発ビルド」)。`NEXT_PUBLIC_`で`next build`時に埋め込むのではなくリクエスト時に環境変数を読む方式にしてあるため、ビルド番号が毎回変わってもNext.jsのビルドキャッシュには影響しない(prodステージは`next build`の後段のため、Dockerレイヤキャッシュも実質壊さない)。
+
 ### スポット種別(`spot_types`)の設計
 
 単一の`spots`テーブルを`spot_types`により複数の「種別」で使い回す設計。`tourist`(観光地)がアプリ初期化時(`db/init/01_schema.sql`)に必ず作成される唯一の既定種別で、それ以外の種別は管理者が`/[type]/admin`から追加する(空の種別ではデータが入らないだけで、削除しない限り存在し続ける)。既定種別といっても自動で作られるのは`spot_types`の行だけで、スポットデータ自体は他の種別と同様シードデータを`db/init/`に直接コミットせず外部リポジトリ[travel-log-data](../travel-log-data)にCSVとして置き、`/[type]/admin`のCSVインポートから取り込む(下記「外部データソース」の段落参照)。観光地データの`description`はWikipedia記事冒頭文の引用でCC BY-SA 4.0、`name`/`lat`/`lng`の一部はOpenStreetMap(ODbL)由来のため、travel-logリポジトリ本体には同梱せずtravel-log-data側でのみ管理・出典表示する。

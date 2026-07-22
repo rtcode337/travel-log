@@ -18,6 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 管理画面に表示するビルド番号(JSTの日時 + 短縮コミットハッシュ)。
+      # 本番で動いているイメージがいつのどのコミットのものかを画面から確認できるようにする
+      - id: build_number
+        run: |
+          echo "value=$(TZ=Asia/Tokyo date +'%Y%m%d-%H%M')-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       # arm64イメージをamd64ランナー上でビルドするためのQEMUエミュレーション
       - uses: docker/setup-qemu-action@v3
 
@@ -47,6 +53,8 @@ jobs:
           # 本番ホスト(arm64)とローカル検証用(amd64)のマルチアーキビルド。
           # arm64側はQEMUエミュレーションのためビルド時間が長い
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            BUILD_NUMBER=${{ steps.build_number.outputs.value }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
