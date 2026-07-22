@@ -131,8 +131,9 @@ export async function PATCH(
 
 /**
  * スポット種別そのものを削除する。この種別にスポットが残っていた場合は、
- * まず全件削除(スポット全削除と同じロジック: status問わずvisits/visit_plans/reviewsを
- * FKのon delete cascadeで消し、写真ファイルも削除)した上でspot_typesの行自体を消す。
+ * まず全件削除(公開スポットの全削除=purgeと違いstatus問わず。紐づく
+ * visits/visit_plans/reviewsをFKのon delete cascadeで消し、写真ファイルも削除。
+ * ルートはspot_typesへのFKカスケードで消える)した上でspot_typesの行自体を消す。
  */
 export async function DELETE(
   _request: Request,
