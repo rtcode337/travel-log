@@ -1,26 +1,26 @@
-import type { Rank } from "@/lib/types";
+import type { Series } from "@/lib/types";
 import {
   autoTextColor,
-  findRankStyle,
+  findSeriesStyle,
   isImageLabel,
-  type RankStyleDefinition,
-} from "@/lib/rankStyle";
+  type SeriesStyleDefinition,
+} from "@/lib/seriesStyle";
 
-export default function RankBadge({
-  rank,
-  rankStyles,
+export default function SeriesBadge({
+  series,
+  seriesStyles,
   size = "md",
   isPrivate = false,
 }: {
-  rank: Rank | null;
-  /** このスポットが属するスポット種別のランク設定(lib/useRankStyles.ts参照) */
-  rankStyles: RankStyleDefinition[];
+  series: Series | null;
+  /** このスポットが属するスポット種別のシリーズ設定(lib/useSeriesStyles.ts参照) */
+  seriesStyles: SeriesStyleDefinition[];
   size?: "sm" | "md";
-  /** 非公開スポットは縁取り線が破線になる(色・大きさ・ラベルはランクと同じ) */
+  /** 非公開スポットは縁取り線が破線になる(色・大きさ・ラベルはシリーズと同じ) */
   isPrivate?: boolean;
 }) {
-  if (rank === null) return null;
-  const style = findRankStyle(rank, rankStyles);
+  if (series === null) return null;
+  const style = findSeriesStyle(series, seriesStyles);
   const textColor = style.textColor ?? autoTextColor(style.color);
 
   return (
@@ -33,13 +33,13 @@ export default function RankBadge({
         color: textColor,
         border: `1.5px ${isPrivate ? "dashed" : "solid"} ${style.borderColor}`,
       }}
-      title={rank}
+      title={series}
     >
       {isImageLabel(style.label) ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={style.label.image}
-          alt={rank}
+          alt={series}
           className="h-full w-full object-contain"
         />
       ) : (

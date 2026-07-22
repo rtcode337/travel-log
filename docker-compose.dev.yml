@@ -12,21 +12,38 @@ services:
       # 初期化を拒否するため、1段掘ったサブディレクトリをPGDATAにする
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
+      # db/initはマウントしない。スキーマ本体(01_schema.sql)はdb-migrateが流す
+      # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
+      #  スキーマを更新したときにgit pullが失敗するようになるため)
       - ./db/data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  # スキーマ本体と未適用のマイグレーションを順に自動適用するワンショット(本番と同じ仕組み)。
+  # 開発では公開イメージをpullせず、db/Dockerfileをその場でビルドして使う
+  db-migrate:
+    build:
+      context: ./db
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: travel_log
+      PGPASSWORD: travel_log
+      PGDATABASE: travel_log
+    restart: "no"
+
   app:
     build:
       context: .
       target: dev
     depends_on:
-      db:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
       SESSION_SECRET: ${SESSION_SECRET:-local-dev-secret-change-me}

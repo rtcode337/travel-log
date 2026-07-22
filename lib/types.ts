@@ -1,40 +1,23 @@
-import { isValidRankStyle, type RankStyleDefinition } from "./rankStyle";
+import { isValidSeriesStyle, type SeriesStyleDefinition } from "./seriesStyle";
 import { isValidCategoryList } from "./category";
 
 /**
- * rank/categoryはスポットの「種別(SpotType)」ごとに意味が異なりうるため、
- * DB上は自由入力(nullable text)。種別ごとに「使う値の一覧」を持たせる仕組みは
- * ランクがlib/rankStyle.ts(rank_styles設定)、カテゴリがlib/category.ts
+ * series/categoriesはスポットの「種別(SpotType)」ごとに意味が異なりうるため、
+ * DB上は自由入力(seriesはnullable text、categoriesはtext[])。1スポットが持てる
+ * 数が違い、seriesは0または1つ(色分け・ルート名との突き合わせの単位)、
+ * categoriesは0個以上。種別ごとに「使う値の一覧」を持たせる仕組みは
+ * シリーズがlib/seriesStyle.ts(series_styles設定)、カテゴリがlib/category.ts
  * (categories設定)にあり、どちらも未設定時は観光地(spot_type='tourist')の
- * 現行の値にフォールバックする。他の種別は独自のrank/categoryを使うか、
+ * 現行の値にフォールバックする。他の種別は独自のseries/categoriesを使うか、
  * 全く使わなくてよい。
  */
-export type Rank = string;
+export type Series = string;
 export type Category = string;
 
-/**
- * 観光地(tourist)のランクはWikipedia(ja)月次ページビュー数を知名度の指標とし、
- * 全スポット中の相対順位(パーセンタイル)で機械的に区分している
- * (世界遺産・国宝等の指定がある場所は目視で格上げする例外あり)。
- * 最上位をSにすると運用上何かと面倒なため、A〜Eの5段階にしている。
- * A: 上位5%(全国的に絶対外せない) / B: 次15%(全国区で有名) /
- * C: 次30%(地方の定番) / D: 次30%(地元で知られている) / E: 残り20%(穴場)
- */
-export const RANKS: Rank[] = ["A", "B", "C", "D", "E"];
-
-/** values配列から null/空文字を除いた重複なしリストを返す(rank/categoryのサジェスト用) */
+/** values配列から null/空文字を除いた重複なしリストを返す(series/categoryのサジェスト用) */
 export function distinctValues(values: (string | null | undefined)[]): string[] {
   return Array.from(new Set(values.filter((v): v is string => !!v))).sort();
 }
-
-export type DatePrecision = "day" | "month" | "year" | "unknown";
-
-export const DATE_PRECISIONS: { value: DatePrecision; label: string }[] = [
-  { value: "day", label: "日まで分かる" },
-  { value: "month", label: "年月まで" },
-  { value: "year", label: "年だけ" },
-  { value: "unknown", label: "覚えていない" },
-];
 
 /**
  * published: 公開 / pending: 承認待ち / rejected: 却下(承認操作専用、作成時には選べない) /
@@ -57,13 +40,15 @@ export interface Spot {
   key: string | null;
   name: string;
   name_kana: string | null;
-  /** 地域。種別のregion_scope設定により意味が変わる(日本=都道府県、
-   * 国指定=州・県、世界=国。lib/region.ts参照) */
-  region: string;
   lat: number;
   lng: number;
-  rank: Rank | null;
-  category: Category | null;
+  /** 地域。種別のregion_scope設定により意味が変わる(日本=都道府県、
+   * 国指定=州・県、世界=国。lib/region.ts参照)。座標から決まる従属値 */
+  region: string;
+  series: Series | null;
+  /** このスポットが属するカテゴリ(0個以上)。順序に意味は無く、表示・並び順は
+   * 種別のカテゴリ設定(lib/category.tsのgetCategoryOrder)に従う */
+  categories: Category[];
   description: string | null;
   status: SpotStatus;
   created_by: string | null;
@@ -82,13 +67,16 @@ export interface SpotRoutePoint {
 
 /**
  * スポットを巡った順に繋ぐルート(地図に描く1本の矢印列)。
- * nameを種別のランク値(水曜どうでしょうなら企画名)と一致させると、
- * 地図の矢印がそのランクの縁取り色で描かれ、ランク絞り込みにも連動する
+ * seriesに種別のシリーズ値を入れると、地図の矢印がそのシリーズの縁取り色で
+ * 描かれ、シリーズ絞り込みにも連動する(nullなら既定色で扱う)
  */
 export interface SpotRoute {
   id: string;
   spot_type_id: string;
+  /** ルートの表示名。シリーズとは独立で、同じシリーズに複数のルートを持たせられる */
   name: string;
+  /** このルートが属するシリーズ(spots.seriesと同じ値空間。未指定ならnull) */
+  series: string | null;
   created_at: string;
   points: SpotRoutePoint[];
 }
@@ -155,8 +143,8 @@ export function getSpotTypeSetting(
  * (SPOT_TYPE_SETTING_DEFAULTS)になる点はDBのEAV設計と同じ。boolean設定のほか、
  * region_scope('jp'/国コード/'world')・wikipedia_lang('en'等)のような文字列値の
  * 設定もそのまま指定できる(妥当性はPATCH /api/spot-types/[id]側で検証される)。
- * ranksを省略した場合(または画面から手入力で種別を追加した場合)は観光地の
- * A〜E(DEFAULT_RANK_STYLES、lib/rankStyle.ts参照)がそのまま既定のランク設定になり、
+ * seriesを省略した場合(または画面から手入力で種別を追加した場合)は観光地の
+ * A〜E(DEFAULT_SERIES_STYLES、lib/seriesStyle.ts参照)がそのまま既定のシリーズ設定になり、
  * categoriesを省略した場合も同様に観光地の現行カテゴリ
  * (DEFAULT_CATEGORIES、lib/category.ts参照)が既定になる。
  */
@@ -164,7 +152,7 @@ export interface SpotTypeDefinitionFile {
   key: string;
   label: string;
   settings?: Partial<Record<string, boolean | string>>;
-  ranks?: RankStyleDefinition[];
+  series?: SeriesStyleDefinition[];
   categories?: Category[];
 }
 
@@ -194,11 +182,11 @@ export function parseSpotTypeDefinition(
       }
     }
   }
-  if (obj.ranks !== undefined) {
-    if (!Array.isArray(obj.ranks) || !obj.ranks.every(isValidRankStyle)) {
+  if (obj.series !== undefined) {
+    if (!Array.isArray(obj.series) || !obj.series.every(isValidSeriesStyle)) {
       return {
         error:
-          "ranksは { rank, color, borderColor, size, label, textColor? } の配列である必要があります。",
+          "seriesは { series, color, borderColor, size, label, textColor? } の配列である必要があります。",
       };
     }
   }
@@ -214,7 +202,7 @@ export function parseSpotTypeDefinition(
       settings: obj.settings as
         | Partial<Record<string, boolean | string>>
         | undefined,
-      ranks: obj.ranks as RankStyleDefinition[] | undefined,
+      series: obj.series as SeriesStyleDefinition[] | undefined,
       categories: obj.categories as Category[] | undefined,
     },
   };
@@ -271,8 +259,8 @@ export interface Visit {
   id: string;
   user_id: string;
   spot_id: string;
+  /** 訪問日時(timestamptz。JSONではISO 8601文字列)。不明ならnull */
   visited_on: string | null;
-  date_precision: DatePrecision;
   memo: string | null;
   photos: string[];
   created_at: string;
@@ -319,7 +307,7 @@ export interface MyReview {
   created_at: string;
   spot_name: string;
   spot_region: string;
-  spot_rank: Rank | null;
+  spot_series: Series | null;
 }
 
 export const REVIEWS_PAGE_SIZE = 10;
@@ -381,19 +369,16 @@ export const PREFECTURES = [
   "沖縄県",
 ] as const;
 
-/** 訪問日を精度に応じて表示用文字列にする */
-export function formatVisitedOn(
-  visitedOn: string | null,
-  precision: DatePrecision
-): string {
-  if (!visitedOn || precision === "unknown") return "時期不明";
-  const [y, m, d] = visitedOn.split("-");
-  switch (precision) {
-    case "day":
-      return `${y}年${Number(m)}月${Number(d)}日`;
-    case "month":
-      return `${y}年${Number(m)}月`;
-    case "year":
-      return `${y}年`;
-  }
+/** 訪問日時(ISO 8601)を表示用文字列にする(未入力は「時期不明」) */
+export function formatVisitedOn(visitedOn: string | null): string {
+  if (!visitedOn) return "時期不明";
+  const d = new Date(visitedOn);
+  if (Number.isNaN(d.getTime())) return "時期不明";
+  return d.toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

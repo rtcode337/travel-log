@@ -93,14 +93,14 @@ export const api = {
       type: string;
       page: number;
       search?: string;
-      ranks?: string[];
+      series?: string[];
     }) => {
       const qs = new URLSearchParams();
       qs.set("type", opts.type);
       qs.set("page", String(opts.page));
       if (opts.search) qs.set("search", opts.search);
-      for (const rank of opts.ranks ?? []) qs.append("rank", rank);
-      return request<{ items: Spot[]; total: number; availableRanks: string[] }>(
+      for (const series of opts.series ?? []) qs.append("series", series);
+      return request<{ items: Spot[]; total: number; availableSeries: string[] }>(
         `/api/spots?${qs.toString()}`
       );
     },
@@ -144,8 +144,11 @@ export const api = {
   routes: {
     list: (type: string) =>
       request<SpotRoute[]>(`/api/routes?type=${encodeURIComponent(type)}`),
-    // ルート名ごとに経由地を丸ごと置き換えるupsert(ルートCSVインポート用)
-    replace: (type: string, routes: { name: string; spot_ids: string[] }[]) =>
+    // ルート名ごとにシリーズ・経由地を丸ごと置き換えるupsert(ルートCSVインポート用)
+    replace: (
+      type: string,
+      routes: { name: string; series: string | null; spot_ids: string[] }[]
+    ) =>
       request<{ updatedCount: number }>(
         `/api/routes?type=${encodeURIComponent(type)}`,
         { method: "POST", body: JSON.stringify({ routes }) }

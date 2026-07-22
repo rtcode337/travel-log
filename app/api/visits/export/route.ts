@@ -5,26 +5,32 @@ import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import { parseVisitPhotoPath } from "@/lib/photos";
 import { buildCsv } from "@/lib/csv";
+import { formatCategoryList } from "@/lib/category";
 import { buildZip, type ZipEntry } from "@/lib/zip";
-import { DATE_PRECISIONS, type DatePrecision } from "@/lib/types";
+
+/** JSTの「YYYY-MM-DD HH:mm」。timestamptzはpgがDateオブジェクトにパースして返す */
+function formatVisitedAtJst(visitedOn: Date | null): string {
+  if (!visitedOn) return "";
+  const jst = new Date(visitedOn.getTime() + 9 * 60 * 60 * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${jst.getUTCFullYear()}-${p(jst.getUTCMonth() + 1)}-${p(jst.getUTCDate())}` +
+    ` ${p(jst.getUTCHours())}:${p(jst.getUTCMinutes())}`
+  );
+}
 
 interface ExportRow {
-  visited_on: string | null;
-  date_precision: DatePrecision;
+  visited_on: Date | null;
   memo: string | null;
   photos: string[];
   name: string;
   name_kana: string | null;
-  region: string;
   lat: number;
   lng: number;
-  rank: string | null;
-  category: string | null;
+  region: string;
+  series: string | null;
+  categories: string[];
 }
-
-const PRECISION_LABELS = Object.fromEntries(
-  DATE_PRECISIONS.map((p) => [p.value, p.label])
-);
 
 /**
  * 自分の訪問記録を、`?type=<種別キー>`のスポット種別分だけZIPでエクスポートする
@@ -54,10 +60,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "spot type not found" }, { status: 404 });
   }
 
-  // lib/db.tsでdate型は"YYYY-MM-DD"文字列のまま返る
   const { rows } = await query<ExportRow>(
-    `select v.visited_on, v.date_precision, v.memo, v.photos,
-            s.name, s.name_kana, s.region, s.lat, s.lng, s.rank, s.category
+    `select v.visited_on, v.memo, v.photos,
+            s.name, s.name_kana, s.lat, s.lng, s.region, s.series, s.categories
      from visits v
      join spots s on s.id = v.spot_id
      join spot_types st on st.id = s.spot_type_id
@@ -71,13 +76,12 @@ export async function GET(request: Request) {
     [
       "スポット名",
       "ふりがな",
-      "地域",
       "緯度",
       "経度",
-      "ランク",
+      "地域",
+      "シリーズ",
       "カテゴリ",
-      "訪問日",
-      "訪問日の精度",
+      "訪問日時(JST)",
       "メモ",
       "写真",
     ],
@@ -103,13 +107,13 @@ export async function GET(request: Request) {
     csvRows.push([
       row.name,
       row.name_kana,
-      row.region,
       row.lat,
       row.lng,
-      row.rank,
-      row.category,
-      row.visited_on,
-      PRECISION_LABELS[row.date_precision] ?? row.date_precision,
+      row.region,
+      row.series,
+      // 複数カテゴリはインポート側のCSVと同じくパイプ区切りの1列にまとめる
+      formatCategoryList(row.categories),
+      formatVisitedAtJst(row.visited_on),
       row.memo,
       zipPaths.join(";"),
     ]);

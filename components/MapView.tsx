@@ -16,10 +16,10 @@ import {
 import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
 import type { Role, Spot, SpotRoute } from "@/lib/types";
-import type { RankStyleDefinition } from "@/lib/rankStyle";
+import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
-import { useRankStyles } from "@/lib/useRankStyles";
+import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useCategories } from "@/lib/useCategories";
 import FilterBar, {
   DEFAULT_FILTERS,
@@ -40,7 +40,7 @@ const ROUTES_SOURCE_ID = "spot-routes";
 const ROUTE_LINE_LAYER_ID = "spot-routes-line";
 const ROUTE_ARROW_LAYER_ID = "spot-routes-arrow";
 
-/** ルート名が種別のランク値と一致しないときの矢印色 */
+/** ルートにシリーズが設定されていない(または種別の一覧に無い)ときの矢印色 */
 const DEFAULT_ROUTE_COLOR = "#2563eb";
 
 /**
@@ -126,22 +126,25 @@ function ensureRouteLayers(map: maplibregl.Map) {
 }
 
 /**
- * ランク絞り込みを適用した表示対象のルート(経由地2点以上)を返す。
- * ルート名がこの種別のランク値と一致するルートだけ絞り込みに連動して出し分け、
- * 一致しない名前のルートは絞り込みの対象外として常に表示する
+ * シリーズ絞り込みを適用した表示対象のルート(経由地2点以上)を返す。
+ * シリーズが「すべて」(絞り込みなし)のときは全ルートの線が重なって地図が
+ * 見づらくなるため、ルートは一切表示しない。シリーズで絞り込んでいるときは、
+ * ルートのseriesがこの種別のシリーズ一覧にあるものだけ絞り込みに連動して
+ * 出し分け、シリーズ未指定・一覧に無いシリーズのルートは対象外として表示する
  */
 function filterVisibleRoutes(
   routes: SpotRoute[],
   filters: SpotFilters,
-  rankStyles: RankStyleDefinition[]
+  seriesStyles: SeriesStyleDefinition[]
 ): SpotRoute[] {
-  const knownRanks = new Set(rankStyles.map((s) => s.rank));
+  if (filters.series.length === 0) return [];
+  const knownSeries = new Set(seriesStyles.map((s) => s.series));
   return routes.filter(
     (route) =>
       route.points.length >= 2 &&
-      (filters.ranks.length === 0 ||
-        !knownRanks.has(route.name) ||
-        filters.ranks.includes(route.name))
+      (route.series === null ||
+        !knownSeries.has(route.series) ||
+        filters.series.includes(route.series))
   );
 }
 
@@ -149,15 +152,15 @@ function filterVisibleRoutes(
 function buildRouteGeoJSON(
   map: maplibregl.Map,
   routes: SpotRoute[],
-  rankStyles: RankStyleDefinition[]
+  seriesStyles: SeriesStyleDefinition[]
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, { color: string; icon: string }> {
   return {
     type: "FeatureCollection",
     features: routes.map((route) => {
-      // ルート名がランク値と一致すればそのランクの縁取り色(地の色より濃く、
-      // 地図上で見やすい)で描く
+      // ルートのシリーズが種別の一覧にあれば、そのシリーズの縁取り色
+      // (地の色より濃く、地図上で見やすい)で描く
       const color =
-        rankStyles.find((s) => s.rank === route.name)?.borderColor ??
+        seriesStyles.find((s) => s.series === route.series)?.borderColor ??
         DEFAULT_ROUTE_COLOR;
       return {
         type: "Feature",
@@ -173,7 +176,7 @@ function buildRouteGeoJSON(
 
 type ClusterFeatureProps = {
   id: string;
-  rank: string | null;
+  series: string | null;
   visited: boolean;
   /** ensurePinImageで登録済みのピン画像ID */
   icon: string;
@@ -190,10 +193,10 @@ function buildClusterGeoJSON(
       geometry: { type: "Point", coordinates: [spot.lng, spot.lat] },
       properties: {
         id: spot.id,
-        rank: spot.rank,
+        series: spot.series,
         visited: visitedIds.has(spot.id),
         icon: pinIconId(
-          spot.rank,
+          spot.series,
           visitedIds.has(spot.id),
           spot.status === "private"
         ),
@@ -253,7 +256,7 @@ function ensureClusterLayers(
     },
   });
 
-  // 下がとんがった吹き出し型のピン画像(ランク文字・チェックマーク込みで
+  // 下がとんがった吹き出し型のピン画像(シリーズ文字・チェックマーク込みで
   // lib/pinIcon.tsが生成し、GeoJSON側のiconプロパティでIDを指定する)。
   // とんがりの先端がスポットの座標を指すようにicon-anchorはbottomにする
   map.addLayer({
@@ -343,14 +346,14 @@ function loadSavedFilters(typeKey: string): SpotFilters {
     const strings = (v: unknown): string[] =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
     const filters: SpotFilters = {
-      ranks: strings(obj.ranks),
+      series: strings(obj.series),
       categories: strings(obj.categories),
       visited: strings(obj.visited).filter(
         (v): v is VisitedValue => v === "visited" || v === "unvisited"
       ),
     };
     if (
-      filters.ranks.length === 0 &&
+      filters.series.length === 0 &&
       filters.categories.length === 0 &&
       filters.visited.length === 0
     ) {
@@ -415,7 +418,7 @@ export default function MapView({
   }, []);
 
   const spotCache = useSpotCache(spotTypeKey);
-  const rankStyles = useRankStyles(spotTypeKey);
+  const seriesStyles = useSeriesStyles(spotTypeKey);
   // 種別のカテゴリ設定。絞り込みチップの並び順に使う
   const categories = useCategories(spotTypeKey);
   // 種別の対象地域スコープ。地名検索の対象国と、初回表示時の挙動
@@ -444,9 +447,9 @@ export default function MapView({
   useEffect(() => {
     setFiltersState(loadSavedFilters(spotTypeKey));
   }, [spotTypeKey]);
-  // ランク・カテゴリ・訪問状況のいずれかで絞り込み中か(絞り込みボタンの見た目に使う)
+  // シリーズ・カテゴリ・訪問状況のいずれかで絞り込み中か(絞り込みボタンの見た目に使う)
   const filtersActive =
-    filters.ranks.length > 0 ||
+    filters.series.length > 0 ||
     filters.categories.length > 0 ||
     filters.visited.length > 0;
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
@@ -796,23 +799,23 @@ export default function MapView({
     if (!map) return;
     let cancelled = false;
 
-    // 表示対象のルートの経由地は、スポット自体のランクが絞り込みで外れていても
-    // ピンを表示する(別の回・企画のランクに属する再訪スポットが、ルートの線だけ
-    // 通ってピンが無い状態になるのを防ぐ)。免除するのはランク条件のみで、
+    // 表示対象のルートの経由地は、スポット自体のシリーズが絞り込みで外れていても
+    // ピンを表示する(別のシリーズに属する再訪スポットが、ルートの線だけ
+    // 通ってピンが無い状態になるのを防ぐ)。免除するのはシリーズ条件のみで、
     // カテゴリ・訪問状況の絞り込みは通常どおり適用する
     const routeMemberIds = new Set(
-      filterVisibleRoutes(routes, filters, rankStyles).flatMap((route) =>
+      filterVisibleRoutes(routes, filters, seriesStyles).flatMap((route) =>
         route.points.map((p) => p.spot_id)
       )
     );
     const filteredSpots = spots.filter(
       (spot) =>
-        passesFilters(filters, spot.rank, spot.category, visitedIds.has(spot.id)) ||
+        passesFilters(filters, spot.series, spot.categories, visitedIds.has(spot.id)) ||
         (routeMemberIds.has(spot.id) &&
           passesFilters(
-            { ...filters, ranks: [] },
-            spot.rank,
-            spot.category,
+            { ...filters, series: [] },
+            spot.series,
+            spot.categories,
             visitedIds.has(spot.id)
           ))
     );
@@ -820,16 +823,16 @@ export default function MapView({
     const renderSpots = async () => {
       ensureClusterLayers(map, setDetailSpotId);
       showClusterLayers(map);
-      // 使われるピン画像(ランク×訪問済み×非公開)を先に登録してからデータを流し込む
+      // 使われるピン画像(シリーズ×訪問済み×非公開)を先に登録してからデータを流し込む
       // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
       await Promise.all(
         filteredSpots.map((spot) =>
           ensurePinImage(
             map,
-            spot.rank,
+            spot.series,
             visitedIds.has(spot.id),
             spot.status === "private",
-            rankStyles
+            seriesStyles
           )
         )
       );
@@ -845,24 +848,24 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [spots, visitedIds, filters, runWhenMapReady, rankStyles, routes]);
+  }, [spots, visitedIds, filters, runWhenMapReady, seriesStyles, routes]);
 
   // ルートの矢印描画。経由地2点以上のルートを、巡った順(seq昇順)に繋いだ
-  // ラインと進行方向の矢印で描く。ランク絞り込みとの連動はfilterVisibleRoutes参照
+  // ラインと進行方向の矢印で描く。シリーズ絞り込みとの連動はfilterVisibleRoutes参照
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const visibleRoutes = filterVisibleRoutes(routes, filters, rankStyles);
+    const visibleRoutes = filterVisibleRoutes(routes, filters, seriesStyles);
 
     runWhenMapReady(() => {
       ensureRouteLayers(map);
       const source = map.getSource(ROUTES_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
-      source?.setData(buildRouteGeoJSON(map, visibleRoutes, rankStyles));
+      source?.setData(buildRouteGeoJSON(map, visibleRoutes, seriesStyles));
     });
-  }, [routes, filters, rankStyles, runWhenMapReady]);
+  }, [routes, filters, seriesStyles, runWhenMapReady]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
   // (通常の取得はpublishedのみなので、それ以外は一覧に反映されるまでこれで見せる)
@@ -972,7 +975,7 @@ export default function MapView({
               spots={spots}
               filters={filters}
               onChange={setFilters}
-              rankStyles={rankStyles}
+              seriesStyles={seriesStyles}
               categories={categories}
             />
 

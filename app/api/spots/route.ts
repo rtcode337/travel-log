@@ -11,7 +11,7 @@ import {
   type Spot,
 } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
-import { resolveRankStyles } from "@/lib/rankStyle";
+import { resolveSeriesStyles } from "@/lib/seriesStyle";
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
   }
 
   // pageが指定されない呼び出し元(自分の非公開スポット取得・管理画面の件数集計等)は
-  // 従来通り全件返す。ランクから探す画面(重い一覧)のみ検索・ランク絞り込み込みで
+  // 従来通り全件返す。シリーズから探す画面(重い一覧)のみ検索・シリーズ絞り込み込みで
   // ページングする
   const pageParam = searchParams.get("page");
   if (!pageParam) {
@@ -83,31 +83,31 @@ export async function GET(request: Request) {
     );
   }
 
-  const ranks = searchParams.getAll("rank");
-  if (ranks.length > 0) {
-    listParams.push(ranks);
-    conditions.push(`rank = any($${listParams.length}::text[])`);
+  const series = searchParams.getAll("series");
+  if (series.length > 0) {
+    listParams.push(series);
+    conditions.push(`series = any($${listParams.length}::text[])`);
   }
 
-  // ランクの並び順はこの種別のランク設定(activeType.settings.rank_styles、無ければ
-  // 観光地のA〜E)の並びをそのまま使う。lib/rankStyle.tsのgetRankOrderと揃えること
-  // (すべてランク表示時にランクが高い順になるように)
-  const rankOrder = resolveRankStyles(activeType).map((s) => s.rank);
+  // シリーズの並び順はこの種別のシリーズ設定(activeType.settings.series_styles、無ければ
+  // 観光地のA〜E)の並びをそのまま使う。lib/seriesStyle.tsのgetSeriesOrderと揃えること
+  // (絞り込みなしで全件表示したときに、定義順の先頭のシリーズから並ぶように)
+  const seriesOrder = resolveSeriesStyles(activeType).map((s) => s.series);
 
   const where = conditions.join(" and ");
-  const rankOrderParams = [...listParams, rankOrder];
-  const rankOrderIdx = rankOrderParams.length;
-  const [{ rows: items }, { rows: countRows }, { rows: rankRows }] = await Promise.all([
+  const seriesOrderParams = [...listParams, seriesOrder];
+  const seriesOrderIdx = seriesOrderParams.length;
+  const [{ rows: items }, { rows: countRows }, { rows: seriesRows }] = await Promise.all([
     query<Spot>(
       `select * from spots where ${where}
-       order by coalesce(array_position($${rankOrderIdx}::text[], rank), 999999), region, name
-       limit $${rankOrderIdx + 1} offset $${rankOrderIdx + 2}`,
-      [...rankOrderParams, SPOTS_PAGE_SIZE, (page - 1) * SPOTS_PAGE_SIZE]
+       order by coalesce(array_position($${seriesOrderIdx}::text[], series), 999999), region, name
+       limit $${seriesOrderIdx + 1} offset $${seriesOrderIdx + 2}`,
+      [...seriesOrderParams, SPOTS_PAGE_SIZE, (page - 1) * SPOTS_PAGE_SIZE]
     ),
     query<{ count: string }>(`select count(*) from spots where ${where}`, listParams),
-    // ランク選択肢は検索文字列・選択中ランクの影響を受けず、種別全体から出す
-    query<{ rank: string }>(
-      `select distinct rank from spots where ${baseConditions.join(" and ")} and rank is not null`,
+    // シリーズ選択肢は検索文字列・選択中シリーズの影響を受けず、種別全体から出す
+    query<{ series: string }>(
+      `select distinct series from spots where ${baseConditions.join(" and ")} and series is not null`,
       params
     ),
   ]);
@@ -116,7 +116,7 @@ export async function GET(request: Request) {
     data: {
       items,
       total: Number(countRows[0].count),
-      availableRanks: rankRows.map((r) => r.rank),
+      availableSeries: seriesRows.map((r) => r.series),
     },
   });
 }
@@ -126,11 +126,12 @@ interface SpotInput {
   key?: string | null;
   name: string;
   name_kana: string | null;
-  region: string;
   lat: number;
   lng: number;
-  rank: string | null;
-  category: string | null;
+  region: string;
+  series: string | null;
+  /** 0個以上。省略・nullは「カテゴリなし」(空配列)として扱う */
+  categories?: string[] | null;
   description: string | null;
 }
 
@@ -143,12 +144,16 @@ async function insertSpots(
   statuses: string[],
   createdBy: string
 ) {
+  // categoriesは1件ごとに要素数が異なるため、他の列のように text[] を横に並べる
+  // unnestには載せられない(2次元配列は全行同じ長さである必要がある)。
+  // 1件分を1つのJSON配列にまとめた jsonb[] として渡し、SQL側で text[] に開く
   const { rows } = await query<Spot>(
     `insert into spots
-      (spot_type_id, key, name, name_kana, region, lat, lng, rank, category, description, status, created_by)
-     select $1, u.key, u.name, u.name_kana, u.region, u.lat, u.lng, u.rank, u.category, u.description, u.status, $2
-     from unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::float8[], $8::float8[], $9::text[], $10::text[], $11::text[], $12::text[])
-       with ordinality as u(key, name, name_kana, region, lat, lng, rank, category, description, status, ord)
+      (spot_type_id, key, name, name_kana, lat, lng, region, series, categories, description, status, created_by)
+     select $1, u.key, u.name, u.name_kana, u.lat, u.lng, u.region, u.series,
+            array(select jsonb_array_elements_text(u.categories)), u.description, u.status, $2
+     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::jsonb[], $11::text[], $12::text[])
+       with ordinality as u(key, name, name_kana, lat, lng, region, series, categories, description, status, ord)
      order by u.ord
      returning *`,
     [
@@ -157,11 +162,11 @@ async function insertSpots(
       records.map((r) => r.key ?? null),
       records.map((r) => r.name),
       records.map((r) => r.name_kana),
-      records.map((r) => r.region),
       records.map((r) => r.lat),
       records.map((r) => r.lng),
-      records.map((r) => r.rank),
-      records.map((r) => r.category),
+      records.map((r) => r.region),
+      records.map((r) => r.series),
+      records.map((r) => JSON.stringify(r.categories ?? [])),
       records.map((r) => r.description),
       statuses,
     ]
