@@ -170,8 +170,9 @@ name,name_kana,region,lat,lng,rank,category,description,key
 
 - 必須列: `name`, `region`, `lat`, `lng`。`rank`/`category`は自由入力。`key`は省略可の
   種別内一意な参照キー(ルートCSVがスポットを指すのに使う)
-- 差分更新(`name`+`lat`+`lng`の完全一致で重複判定)のため、同じCSVを
-  何度アップロードしても重複登録されない
+- 差分更新(`key`一致を最優先、無ければ`name`+`lat`+`lng`の完全一致で同一判定)。
+  一致した既存スポットは内容が違えばCSVの内容で上書きされるため、CSV側の修正も
+  再アップロードだけで反映され、同じCSVを何度アップロードしても重複登録されない
 - スポットを巡った順に矢印で繋ぐルートは、別ファイル`routes.csv`(列:
   `route,seq,spot_key`)を同じ管理画面からスポットCSVの後に取り込む
   (スキーマの詳細はtravel-log-data/README.md参照)

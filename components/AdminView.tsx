@@ -569,6 +569,19 @@ export default function AdminView({
   const spotDiffKey = (name: string, lat: number, lng: number) =>
     `${name}|${lat}|${lng}`;
 
+  interface CsvSpotRecord {
+    key: string | null;
+    name: string;
+    name_kana: string | null;
+    region: string;
+    lat: number;
+    lng: number;
+    rank: string | null;
+    category: string | null;
+    description: string | null;
+    status: string;
+  }
+
   const handleCsvFile = async (file: File) => {
     setImporting(true);
     setMessage(null);
@@ -590,7 +603,7 @@ export default function AdminView({
         }
       }
 
-      const records = [];
+      const records: CsvSpotRecord[] = [];
       const errors: string[] = [];
       for (let i = 1; i < rows.length; i++) {
         const get = (c: (typeof CSV_COLUMNS)[number]) =>
@@ -625,8 +638,8 @@ export default function AdminView({
         return;
       }
 
-      // key列はDB側で種別内一意のため、CSV内の重複と「別スポットが既に同じkeyを
-      // 持っている」衝突を事前に検出して中止する(途中まで入って失敗、を防ぐ)
+      // key列はDB側で種別内一意のため、CSV内の重複だけは事前に検出して中止する
+      // (どちらの行を正とすべきか決められないため)
       const existingByDiffKey = new Map(
         spots.map((s) => [spotDiffKey(s.name, s.lat, s.lng), s])
       );
@@ -639,18 +652,8 @@ export default function AdminView({
         if (!record.key) continue;
         if (seenCsvKeys.has(record.key)) {
           keyErrors.push(`key「${record.key}」がCSV内で重複`);
-          continue;
         }
         seenCsvKeys.add(record.key);
-        const holder = existingByKey.get(record.key);
-        const matched = existingByDiffKey.get(
-          spotDiffKey(record.name, record.lat, record.lng)
-        );
-        if (holder && holder.id !== matched?.id) {
-          keyErrors.push(
-            `key「${record.key}」は既存の別スポット「${holder.name}」が使用中`
-          );
-        }
       }
       if (keyErrors.length > 0) {
         setMessage(
@@ -659,35 +662,55 @@ export default function AdminView({
         return;
       }
 
-      // 差分更新: 既に(status問わず)このスポット種別に存在する行、およびCSV内で
-      // 重複している行はスキップし、新規分だけ追加する。既存行はスキップする際、
-      // CSVのkeyが未反映(過去にkey列なしで取り込んだ等)なら、keyだけ既存行に反映する
+      // 差分更新: 既存行との同一判定はkey一致を最優先し(改名・座標修正もCSVから
+      // 反映できるように)、keyで見つからなければname+lat+lngの完全一致で突き合わせる。
+      // 一致した既存行は、内容がCSVと異なればCSVの内容で上書きし、同一ならスキップする
+      // (同じCSVを何度アップロードしても2回目以降は何も起きない)。ただし公開以外の
+      // 既存行(他ユーザーの承認待ち等。編集権限が投稿者本人に限られる)は上書きしない。
+      // CSVにkey列が無い場合は既存行のkeyを消さず維持する
       const seenKeys = new Set<string>();
       const newRecords = [];
-      const keyUpdates: { spot: Spot; key: string }[] = [];
+      const updates: { spot: Spot; record: CsvSpotRecord }[] = [];
+      let unchangedCount = 0;
+      let untouchableCount = 0;
+      const isChanged = (spot: Spot, record: CsvSpotRecord) =>
+        spot.name !== record.name ||
+        spot.name_kana !== record.name_kana ||
+        spot.region !== record.region ||
+        spot.lat !== record.lat ||
+        spot.lng !== record.lng ||
+        spot.rank !== record.rank ||
+        spot.category !== record.category ||
+        spot.description !== record.description ||
+        (record.key !== null && spot.key !== record.key);
       for (const record of records) {
         const diffKey = spotDiffKey(record.name, record.lat, record.lng);
-        const existing = existingByDiffKey.get(diffKey);
-        if (existing || seenKeys.has(diffKey)) {
-          if (existing && record.key && existing.key !== record.key) {
-            keyUpdates.push({ spot: existing, key: record.key });
-          }
+        const existing =
+          (record.key ? existingByKey.get(record.key) : undefined) ??
+          existingByDiffKey.get(diffKey);
+        if (existing) {
+          if (existing.status !== "published") untouchableCount++;
+          else if (isChanged(existing, record)) updates.push({ spot: existing, record });
+          else unchangedCount++;
           continue;
         }
+        if (seenKeys.has(diffKey)) continue; // CSV内でname+lat+lngが重複している行
         seenKeys.add(diffKey);
         newRecords.push(record);
       }
-      const skippedCount = records.length - newRecords.length;
 
-      if (newRecords.length === 0 && keyUpdates.length === 0) {
-        setMessage(`新規行はありませんでした(${skippedCount}件は既存のためスキップ)。`);
+      if (newRecords.length === 0 && updates.length === 0) {
+        setMessage(
+          `追加・変更はありませんでした(${unchangedCount}件は既存と同一のためスキップ)。`
+        );
         return;
       }
 
       // 1000件ずつ順番に送信し、進捗を表示する(大量データで1リクエストが
       // タイムアウトするのも避けられる)
+      const totalCount = newRecords.length + updates.length;
       let insertedCount = 0;
-      setImportProgress({ done: 0, total: newRecords.length + keyUpdates.length });
+      setImportProgress({ done: 0, total: totalCount });
       for (
         let offset = 0;
         offset < newRecords.length;
@@ -704,45 +727,43 @@ export default function AdminView({
           return;
         }
         insertedCount += chunk.length;
-        setImportProgress({
-          done: insertedCount,
-          total: newRecords.length + keyUpdates.length,
-        });
+        setImportProgress({ done: insertedCount, total: totalCount });
       }
 
-      // 既存スポットへのkey反映(1件ずつPATCH。key以外の列は既存の値のまま送る)
-      let keyUpdatedCount = 0;
-      for (const { spot, key } of keyUpdates) {
+      // 既存スポットの上書き更新(1件ずつPATCH)。CSVにkeyが無い行は既存のkeyを
+      // 消さないよう、keyフィールド自体を送らない(PATCH側が未指定時は維持する)
+      let updatedCount = 0;
+      for (const { spot, record } of updates) {
         const { error } = await api.spots.update(spot.id, {
-          name: spot.name,
-          name_kana: spot.name_kana,
-          region: spot.region,
-          lat: spot.lat,
-          lng: spot.lng,
-          rank: spot.rank,
-          category: spot.category,
-          description: spot.description,
-          key,
+          name: record.name,
+          name_kana: record.name_kana,
+          region: record.region,
+          lat: record.lat,
+          lng: record.lng,
+          rank: record.rank,
+          category: record.category,
+          description: record.description,
+          ...(record.key !== null ? { key: record.key } : {}),
         });
         if (error) {
           setMessage(
-            `${insertedCount}件追加・${keyUpdatedCount}件のkey反映後に失敗しました: ` +
+            `${insertedCount}件追加・${updatedCount}件更新した時点で失敗しました: ` +
               error.message
           );
           load();
           return;
         }
-        keyUpdatedCount++;
-        setImportProgress({
-          done: insertedCount + keyUpdatedCount,
-          total: newRecords.length + keyUpdates.length,
-        });
+        updatedCount++;
+        setImportProgress({ done: insertedCount + updatedCount, total: totalCount });
       }
 
       setMessage(
-        `${insertedCount}件追加しました` +
-          (keyUpdatedCount > 0 ? `(既存${keyUpdatedCount}件にkeyを反映)` : "") +
-          (skippedCount > 0 ? `(${skippedCount}件は既存のためスキップ)。` : "。")
+        `${insertedCount}件追加・${updatedCount}件更新しました` +
+          (unchangedCount > 0 ? `(${unchangedCount}件は既存と同一のためスキップ)` : "") +
+          (untouchableCount > 0
+            ? `(${untouchableCount}件は公開以外のスポットのため未変更)`
+            : "") +
+          "。"
       );
       load();
     } finally {
@@ -1205,10 +1226,11 @@ export default function AdminView({
               <p className="mb-3 text-xs text-gray-500">
                 個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
                 ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは最初から公開される)。
-                差分更新: name+lat+lngが完全一致するスポットが既に
-                (status問わず)存在する行はスキップし、新規分だけ追加するため、同じCSVを
-                何度アップロードしても重複登録されない(既存行にCSVのkeyが未反映の
-                場合のみ、スキップせずkeyだけを反映する)。
+                差分更新: 既存スポットとの同一判定はkey一致を最優先し、keyで見つからなければ
+                name+lat+lngの完全一致で行う。一致した既存行は内容が異なればCSVの内容で
+                上書きし(keyが同じなら改名・座標修正も反映される)、同一ならスキップ、
+                どちらにも一致しなければ新規追加するため、同じCSVを何度アップロードしても
+                重複登録されない(公開以外のスポットに一致した行だけは上書きしない)。
               </p>
 
               {message && (
