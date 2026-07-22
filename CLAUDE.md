@@ -106,7 +106,7 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 `reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、必訪ランクの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される。`photos`(text[])にはBase64ではなく、`photos/`フォルダ(docker-composeでbindマウント、`lib/photos.ts`)へ保存したファイルの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
 
-自分の全訪問記録(全スポット種別分)は`/[type]/account`のボタンからZIPで一括エクスポートできる(`GET /api/visits/export`)。ZIPの中身は`visits.csv`(BOM付きUTF-8。訪問のメモ+スポット情報、`lib/csv.ts`の`buildCsv`)と`photos/<uuid>.<ext>`(添付写真。CSVの「写真」列がこのZIP内パスを指す)。ZIP生成は依存を増やさず`lib/zip.ts`の自前実装(無圧縮STORE。中身が圧縮済み画像と小さなCSVのみのため)で、写真ファイルは配信APIと同じく`parseVisitPhotoPath`の所有者チェックを通ったものだけを読む。
+自分の訪問記録は`/[type]/account`のボタンからZIPで一括エクスポートできる(`GET /api/visits/export`。既定は全スポット種別分、`?type=<種別キー>`で現在開いている種別のみに絞れる — UI上は「◯◯のみ」/「すべての種別」の2ボタン)。ZIPの中身は`visits.csv`(BOM付きUTF-8。訪問のメモ+スポット情報、`lib/csv.ts`の`buildCsv`)と`photos/<uuid>.<ext>`(添付写真。CSVの「写真」列がこのZIP内パスを指す)。ZIP生成は依存を増やさず`lib/zip.ts`の自前実装(無圧縮STORE。中身が圧縮済み画像と小さなCSVのみのため)で、写真ファイルは配信APIと同じく`parseVisitPhotoPath`の所有者チェックを通ったものだけを読む。
 
 ### touristのランクについて
 

@@ -28,16 +28,29 @@ const PRECISION_LABELS = Object.fromEntries(
 );
 
 /**
- * 自分の全訪問記録をZIPでエクスポートする(アカウント画面のボタンから)。
+ * 自分の訪問記録をZIPでエクスポートする(アカウント画面のボタンから)。
+ * 既定は全スポット種別分で、`?type=<種別キー>`を付けるとその種別の記録だけに絞る。
  * ZIPの中身は visits.csv(訪問のメモ+スポット情報)と photos/(その訪問記録に
  * 添付した写真。ファイル名は保存時のUUIDのまま)で、CSVの「写真」列がZIP内の
  * 写真パスを指す。写真と同様に本人の記録しか含まれない(user_idで絞り込み、
  * 写真ファイルもパスの所有者チェックを通ったものだけ読む)。
  */
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await getCurrentUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  // 種別の絞り込みは訪問記録の有無に関わらずキーの実在だけ確認する
+  // (打ち間違いを空ZIPの正常終了として返さないため)
+  const typeKey = new URL(request.url).searchParams.get("type");
+  if (typeKey) {
+    const { rows } = await query("select 1 from spot_types where key = $1", [
+      typeKey,
+    ]);
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "spot type not found" }, { status: 404 });
+    }
   }
 
   // lib/db.tsでdate型は"YYYY-MM-DD"文字列のまま返る
@@ -48,9 +61,9 @@ export async function GET() {
      from visits v
      join spots s on s.id = v.spot_id
      join spot_types st on st.id = s.spot_type_id
-     where v.user_id = $1
+     where v.user_id = $1 and ($2::text is null or st.key = $2)
      order by v.visited_on asc nulls last, v.created_at asc`,
-    [userId]
+    [userId, typeKey]
   );
 
   const photoEntries: ZipEntry[] = [];
@@ -117,7 +130,9 @@ export async function GET() {
   return new NextResponse(new Uint8Array(zip), {
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="travel-log-visits-${jstDate}.zip"`,
+      "Content-Disposition": `attachment; filename="travel-log-visits-${
+        typeKey ? `${typeKey}-` : ""
+      }${jstDate}.zip"`,
       "Cache-Control": "no-store",
     },
   });

@@ -11,7 +11,7 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
   const [email, setEmail] = useState<string | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<"current" | "all" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,11 +36,15 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
 
   // ZIPバイナリのためapi-client(JSON前提)を使わず直接fetchし、
   // blob化してからaタグのdownloadで保存させる
-  const handleExport = async () => {
-    setExporting(true);
+  const handleExport = async (scope: "current" | "all") => {
+    setExporting(scope);
     setExportError(null);
     try {
-      const res = await fetch("/api/visits/export");
+      const res = await fetch(
+        scope === "current"
+          ? `/api/visits/export?type=${encodeURIComponent(typeKey)}`
+          : "/api/visits/export"
+      );
       if (!res.ok) throw new Error();
       const blob = await res.blob();
       const filename =
@@ -58,7 +62,7 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
     } catch {
       setExportError("エクスポートに失敗しました。時間をおいて再度お試しください。");
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   };
 
@@ -87,19 +91,30 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
       <section className="mb-4 rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="mb-2 text-sm font-bold">訪問記録のエクスポート</h2>
         <p className="text-xs text-gray-500">
-          自分の全ての訪問記録を、CSV(訪問のメモとスポット情報)と添付写真入りの
+          自分の訪問記録を、CSV(訪問のメモとスポット情報)と添付写真入りの
           ZIPファイルでダウンロードします。
         </p>
         {exportError && (
           <p className="mt-2 text-xs text-red-600">{exportError}</p>
         )}
-        <button
-          onClick={handleExport}
-          disabled={exporting}
-          className="mt-3 flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:opacity-50"
-        >
-          {exporting ? "エクスポート中…" : "📦 ZIPをダウンロード"}
-        </button>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={() => handleExport("current")}
+            disabled={exporting !== null}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:opacity-50"
+          >
+            {exporting === "current"
+              ? "エクスポート中…"
+              : `📦 ${currentType?.label ?? typeKey}のみ`}
+          </button>
+          <button
+            onClick={() => handleExport("all")}
+            disabled={exporting !== null}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:opacity-50"
+          >
+            {exporting === "all" ? "エクスポート中…" : "📦 すべての種別"}
+          </button>
+        </div>
       </section>
 
       {otherTypes.length > 0 && (
