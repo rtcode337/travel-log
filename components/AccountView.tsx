@@ -11,6 +11,8 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
   const [email, setEmail] = useState<string | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     api.auth.me().then(({ data }) => {
@@ -32,6 +34,34 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
     router.refresh();
   };
 
+  // ZIPバイナリのためapi-client(JSON前提)を使わず直接fetchし、
+  // blob化してからaタグのdownloadで保存させる
+  const handleExport = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const res = await fetch("/api/visits/export");
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const filename =
+        res.headers
+          .get("Content-Disposition")
+          ?.match(/filename="([^"]+)"/)?.[1] ?? "travel-log-visits.zip";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError("エクスポートに失敗しました。時間をおいて再度お試しください。");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <main className="mx-auto max-w-lg p-4">
       <h1 className="mb-4 text-lg font-bold">アカウント</h1>
@@ -51,6 +81,24 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
           className="mt-3 flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700"
         >
           🚪 ログアウト
+        </button>
+      </section>
+
+      <section className="mb-4 rounded-xl border border-gray-200 bg-white p-4">
+        <h2 className="mb-2 text-sm font-bold">訪問記録のエクスポート</h2>
+        <p className="text-xs text-gray-500">
+          自分の全ての訪問記録を、CSV(訪問のメモとスポット情報)と添付写真入りの
+          ZIPファイルでダウンロードします。
+        </p>
+        {exportError && (
+          <p className="mt-2 text-xs text-red-600">{exportError}</p>
+        )}
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="mt-3 flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:opacity-50"
+        >
+          {exporting ? "エクスポート中…" : "📦 ZIPをダウンロード"}
         </button>
       </section>
 
