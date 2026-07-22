@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。db/init/配下は db/data/ が空の場合のみ自動実行される
-docker compose up --build                              # 本番用(NAS等): next buildの成果物で起動。SESSION_SECRET環境変数が必須
+docker compose pull app && docker compose up -d        # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。SESSION_SECRET環境変数が必須(.env可)
 npm run dev                                             # Next.js開発サーバー(ローカルPostgresを直接使う場合のみ)
 npm run build                                            # 本番ビルド
 npm run lint                                              # next lint

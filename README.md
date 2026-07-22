@@ -86,6 +86,28 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 </details>
 
+### 本番運用
+
+`main`へのpushでGitHub Actions(`.github/workflows/docker-publish.yml`)が本番用イメージを
+ビルドして`ghcr.io/rtcode337/travel-log:latest`(+コミットSHAタグ)へ公開する。
+本番ホストでは本リポジトリのクローン(`docker-compose.yml`と`db/init/`を使う)を置き、
+イメージはビルドせずpullして使う。
+
+```bash
+# 初回のみ: SESSION_SECRETを設定(リポジトリ直下の.envに書いておくのが楽)
+echo "SESSION_SECRET=$(openssl rand -base64 32)" >> .env
+
+# 初回・更新とも共通
+docker compose pull app && docker compose up -d
+```
+
+- GHCRのパッケージは初回公開時点では非公開のため、GitHubのPackages設定でPublicに
+  切り替えるか、本番ホストで`docker login ghcr.io`(`read:packages`権限のPAT)しておく
+- イメージは`linux/amd64`のみ。arm64ホストで動かす場合はワークフローの`platforms`に
+  `linux/arm64`を追記する
+- 特定時点に戻したいときは`docker-compose.yml`のイメージタグを`latest`から
+  `sha-xxxxxxx`(Actionsが付けるコミットSHAタグ)に一時的に変えてpullし直す
+
 ## 画面
 
 すべて`/[種別キー]/...`の形式(例: `/tourist/map`)で、種別ごとに切り替えて使う。
