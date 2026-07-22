@@ -7,7 +7,7 @@ import {
   PREFECTURES,
   STATUS_LABELS,
   distinctValues,
-  type Rank,
+  type Series,
   type Category,
   type Role,
   type Spot,
@@ -37,7 +37,7 @@ export default function AddSpotModal({
   /** 指定すると編集モードになり、フォームに既存の値を読み込む。非公開スポットの
    * 作成者本人のみがこのモードで開ける想定(呼び出し元で権限チェック済み) */
   spot?: Spot;
-  /** ランク・カテゴリ入力のサジェスト用に、現在アクティブな種別の既存スポットを渡す */
+  /** シリーズ・カテゴリ入力のサジェスト用に、現在アクティブな種別の既存スポットを渡す */
   spots: Spot[];
   /** 選べるstatusの選択肢を決める(新規作成時のみ使用。nullなら非公開のみ扱う) */
   role: Role | null;
@@ -60,11 +60,13 @@ export default function AddSpotModal({
 
   const [name, setName] = useState(spot?.name ?? "");
   const [nameKana, setNameKana] = useState(spot?.name_kana ?? "");
-  const [region, setRegion] = useState(spot?.region ?? "");
   const [spotLat, setSpotLat] = useState(String(spot?.lat ?? lat ?? ""));
   const [spotLng, setSpotLng] = useState(String(spot?.lng ?? lng ?? ""));
-  const [rank, setRank] = useState<Rank>(spot?.rank ?? "");
-  const [category, setCategory] = useState<Category>(spot?.category ?? "");
+  const [region, setRegion] = useState(spot?.region ?? "");
+  const [series, setSeries] = useState<Series>(spot?.series ?? "");
+  const [categories, setCategories] = useState<Category[]>(spot?.categories ?? []);
+  // 一覧に無いカテゴリを手入力で足すための欄(確定するとcategoriesに入る)
+  const [categoryInput, setCategoryInput] = useState("");
   const [description, setDescription] = useState(spot?.description ?? "");
   const [status, setStatus] = useState<SpotStatus>(defaultStatus);
   const [saving, setSaving] = useState(false);
@@ -92,8 +94,8 @@ export default function AddSpotModal({
     });
   }, [isEdit, lat, lng, regionScope]);
 
-  const availableRanks = useMemo(
-    () => distinctValues(spots.map((s) => s.rank)),
+  const availableSeries = useMemo(
+    () => distinctValues(spots.map((s) => s.series)),
     [spots]
   );
   // 'jp'以外のスコープでは地域は自由入力のため、既存スポットの地域をサジェストする
@@ -105,12 +107,29 @@ export default function AddSpotModal({
   // 設定に無い既存スポットの値(過去データ等)を後ろに足して出す
   const definedCategories = useCategories(typeKey);
   const availableCategories = useMemo(() => {
-    const existing = distinctValues(spots.map((s) => s.category));
-    return [
+    const existing = distinctValues(spots.flatMap((s) => s.categories));
+    const merged = [
       ...definedCategories,
       ...existing.filter((c) => !definedCategories.includes(c)),
     ];
-  }, [spots, definedCategories]);
+    // 手入力で足した直後の値も選択チップとして出す(まだどのスポットにも無いため)
+    return [...merged, ...categories.filter((c) => !merged.includes(c))];
+  }, [spots, definedCategories, categories]);
+
+  const toggleCategory = (category: Category) => {
+    setCategories((prev) =>
+      prev.includes(category)
+        ? prev.filter((c) => c !== category)
+        : [...prev, category]
+    );
+  };
+
+  const addCategoryFromInput = () => {
+    const value = categoryInput.trim();
+    if (!value) return;
+    setCategories((prev) => (prev.includes(value) ? prev : [...prev, value]));
+    setCategoryInput("");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,11 +138,11 @@ export default function AddSpotModal({
     const payload = {
       name: name.trim(),
       name_kana: nameKana.trim() || null,
-      region: region.trim(),
       lat: Number(spotLat),
       lng: Number(spotLng),
-      rank: rank.trim() || null,
-      category: category.trim() || null,
+      region: region.trim(),
+      series: series.trim() || null,
+      categories,
       description: description.trim() || null,
     };
     const { data, error } = isEdit
@@ -225,6 +244,32 @@ export default function AddSpotModal({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </div>
+        {(isEdit || lat == null) && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">緯度 *</label>
+              <input
+                required
+                type="number"
+                step="any"
+                value={spotLat}
+                onChange={(e) => setSpotLat(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">経度 *</label>
+              <input
+                required
+                type="number"
+                step="any"
+                value={spotLng}
+                onChange={(e) => setSpotLng(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+              />
+            </div>
+          </div>
+        )}
         {locating && (
           <p className="text-xs text-gray-400">座標から住所を自動取得中…</p>
         )}
@@ -264,60 +309,69 @@ export default function AddSpotModal({
             </>
           )}
         </div>
-        {(isEdit || lat == null) && (
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium">緯度 *</label>
-              <input
-                required
-                type="number"
-                step="any"
-                value={spotLat}
-                onChange={(e) => setSpotLat(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">経度 *</label>
-              <input
-                required
-                type="number"
-                step="any"
-                value={spotLng}
-                onChange={(e) => setSpotLng(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-              />
-            </div>
-          </div>
-        )}
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">ランク</label>
-            <input
-              value={rank}
-              onChange={(e) => setRank(e.target.value as Rank)}
-              list="add-spot-rank-suggestions"
-              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-            />
-            <datalist id="add-spot-rank-suggestions">
-              {availableRanks.map((r) => (
-                <option key={r} value={r} />
-              ))}
-            </datalist>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">カテゴリ</label>
-            <input
-              value={category}
-              onChange={(e) => setCategory(e.target.value as Category)}
-              list="add-spot-category-suggestions"
-              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-            />
-            <datalist id="add-spot-category-suggestions">
+        <div>
+          <label className="mb-1 block text-sm font-medium">シリーズ</label>
+          <input
+            value={series}
+            onChange={(e) => setSeries(e.target.value as Series)}
+            list="add-spot-series-suggestions"
+            className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+          />
+          <datalist id="add-spot-series-suggestions">
+            {availableSeries.map((r) => (
+              <option key={r} value={r} />
+            ))}
+          </datalist>
+        </div>
+        {/* カテゴリは1スポットに複数付けられるため、選択チップ(トグル)で選ぶ。
+            一覧に無いものは下の入力欄から足す(足した値もチップとして並ぶ) */}
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            カテゴリ
+            <span className="ml-1 text-xs font-normal text-gray-500">
+              (複数選択可)
+            </span>
+          </label>
+          {availableCategories.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
               {availableCategories.map((c) => (
-                <option key={c} value={c} />
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => toggleCategory(c)}
+                  className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                    categories.includes(c)
+                      ? "border-transparent bg-blue-600 text-white"
+                      : "border-gray-300 bg-white text-gray-500"
+                  }`}
+                >
+                  {c}
+                </button>
               ))}
-            </datalist>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              value={categoryInput}
+              onChange={(e) => setCategoryInput(e.target.value)}
+              onKeyDown={(e) => {
+                // フォーム全体の送信ではなく、カテゴリの追加として扱う
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCategoryFromInput();
+                }
+              }}
+              placeholder="一覧に無いカテゴリを追加"
+              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={addCategoryFromInput}
+              disabled={!categoryInput.trim()}
+              className="shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium disabled:opacity-40"
+            >
+              追加
+            </button>
           </div>
         </div>
         <div>

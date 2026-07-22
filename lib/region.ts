@@ -1,7 +1,7 @@
 import { PREFECTURES, type SpotType } from "./types";
 
 /**
- * スポット種別ごとの「対象地域」設定(region_scope)。rank_stylesと同じく
+ * スポット種別ごとの「対象地域」設定(region_scope)。series_stylesと同じく
  * boolean以外の値を持つためSpotTypeSettingKeyとは別扱いで、spot_type_settingsに
  * 文字列としてそのまま保存する。値は次の3種類:
  * - 'jp'(既定): 従来どおり日本。spots.region には47都道府県が入り、

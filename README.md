@@ -6,13 +6,13 @@
 
 ## 主な機能
 
-- **地図中心のスポット閲覧**。ランク別のピン(A〜Eの順に大きく・目立つ色)、ランク・訪問状態・カテゴリでの絞り込み
-- **必訪ランク(A〜E)** をキュレーション項目として付与(口コミ評価とは別軸)
-- **訪問記録**(いつ・何回・メモ・写真)と、同一スポットへの複数回訪問に対応
+- **地図中心のスポット閲覧**。シリーズ別のピン(種別ごとに色・大きさを設定)、シリーズ・訪問状態・カテゴリでの絞り込み
+- **シリーズ**(1スポットに1つ)と**カテゴリ**(1スポットに複数可)をキュレーション項目として付与(口コミ評価とは別軸)。観光地では知名度をA〜Eの5段階にしたものをシリーズに使っている
+- **訪問記録**(いつ・何回・メモ・写真)と、同一スポットへの複数回訪問に対応(訪問日時は未入力なら「時期不明」)
 - **訪問予定**(行きたい場所のブックマーク)。訪問を記録すると自動的に外れる
 - **口コミ**(公開・本文のみのシンプルな投稿)
-- スポットには「種別」があり(観光地・郵便局・御朱印など)、種別ごとに独立したURL・独自のランク/カテゴリ/対象地域を持てる。管理者が自由に追加・削除できる
-- **ルート(巡った順の矢印)**。スポットを巡った順に繋いだラインと進行方向の矢印を地図に表示できる(訪問順のある種別向け。CSVで取り込み、ランク絞り込みにも連動)
+- スポットには「種別」があり(観光地・郵便局・御朱印など)、種別ごとに独立したURL・独自のシリーズ/カテゴリ/対象地域を持てる。管理者が自由に追加・削除できる
+- **ルート(巡った順の矢印)**。スポットを巡った順に繋いだラインと進行方向の矢印を地図に表示できる(訪問順のある種別向け。CSVで取り込み、シリーズで絞り込んでいるときのみ表示され、絞り込みにも連動)
 - 種別ごとに**対象地域**を選べる(既定は日本=都道府県、特定の国=州・県、世界全体=国ごと)
 - **PWA対応**(インストール可能)。スマホの「ホーム画面に追加」やPCブラウザのインストール機能で、アドレスバーなしの独立アプリとして起動できる(オフライン対応は未実装)
 
@@ -43,9 +43,10 @@
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-Node や Postgres をローカルにインストールする必要はない。初回起動時、Postgres コンテナが
-`db/init/` 配下のSQLを自動実行してテーブルと既定のスポット種別(`tourist`=観光地、
-データは空)を作成する。
+Node や Postgres をローカルにインストールする必要はない。初回起動時、
+`db-migrate` コンテナが `01_schema.sql` を自動実行してテーブルと既定のスポット種別
+(`tourist`=観光地、データは空)を作成する。以降スキーマに変更が入った場合も、
+起動するたびに未適用のマイグレーションが自動で当たる。
 
 http://localhost:3000 を開くと `/login` にリダイレクトされる。初回はアカウントが
 存在しないため「アカウントを作成」フォームが表示されるので、メールアドレスと
@@ -62,7 +63,7 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 ローカルに Postgres を別途用意し、`.env.example` を `.env.local` としてコピーして
 `DATABASE_URL` / `SESSION_SECRET` を設定した上で `npm install && npm run dev` でも
-起動できる。その場合は `db/init/` 配下のSQLを番号順に手動で実行する。
+起動できる。その場合は `db/init/01_schema.sql` と `db/migrations/*.sql` を手動で実行する。
 
 </details>
 
@@ -91,7 +92,7 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 `main`へのpushでGitHub Actions(`.github/workflows/docker-publish.yml`)が本番用イメージを
 ビルドして`ghcr.io/rtcode337/travel-log:latest`(+コミットSHAタグ)へ公開する。
-本番ホストでは本リポジトリのクローン(`docker-compose.yml`と`db/init/`を使う)を置き、
+本番ホストでは本リポジトリのクローン(`docker-compose.yml`を使う)を置き、
 イメージはビルドせずpullして使う。
 
 ```bash
@@ -99,9 +100,16 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 echo "SESSION_SECRET=$(openssl rand -base64 32)" >> .env
 
 # 初回・更新とも共通
-docker compose pull app && docker compose up -d
+docker compose pull && docker compose up -d
 ```
 
+- 公開されるイメージは2つ。`ghcr.io/rtcode337/travel-log`(アプリ本体)と
+  `ghcr.io/rtcode337/travel-log-db-init`(DBの準備とマイグレーション適用)
+- **DBスキーマの更新は自動**。`docker compose up`すると`db-migrate`サービスが未適用の
+  マイグレーションを順に当ててから`app`を起動する(失敗した場合は`app`も起動しないので
+  古いスキーマのまま動くことはない)。適用状況は
+  `docker compose exec db psql -U travel_log -d travel_log -c "select * from schema_migrations"`、
+  ログは`docker compose logs db-migrate`で確認できる
 - GitHub Actions(`GITHUB_TOKEN`)から公開したパッケージはリポジトリに自動リンクされ、
   可視性もリポジトリと同じ(=public)になるため、追加設定なしで匿名pullできる。
   リポジトリをprivateにした場合は本番ホストで`docker login ghcr.io`
@@ -110,6 +118,8 @@ docker compose pull app && docker compose up -d
   ホストに合う方が自動選択される
 - 特定時点に戻したいときは`docker-compose.yml`のイメージタグを`latest`から
   `sha-xxxxxxx`(Actionsが付けるコミットSHAタグ)に一時的に変えてpullし直す
+  (マイグレーションは前進のみで、巻き戻しスクリプトは持たない。スキーマ変更を伴う
+  リリースを戻す場合はDBのバックアップからのリストアが必要)
 - Actionsはビルド番号(`20260722-1035-9162ba9`のようなJST日時+短縮コミットハッシュ)を
   イメージに埋め込み、管理画面`/[種別キー]/admin`の見出し横に表示する。今動いている
   イメージがいつのどのコミットのものか、pull後の反映確認に使える(ローカル開発時など
@@ -122,8 +132,8 @@ docker compose pull app && docker compose up -d
 
 | パス | 内容 |
 |---|---|
-| `/[type]/map` | 地図(ホーム)。ランク・訪問状態・カテゴリでフィルタ。ピンタップ→スポット詳細モーダルへ |
-| `/[type]/spots` | 「都道府県から探す」(地域別ドリルダウン)と「ランクから探す」(検索+絞り込み+ページング)の2タブ |
+| `/[type]/map` | 地図(ホーム)。シリーズ・訪問状態・カテゴリでフィルタ。ピンタップ→スポット詳細モーダルへ |
+| `/[type]/spots` | 「都道府県から探す」(地域別ドリルダウン)と「シリーズから探す」(検索+絞り込み+ページング)の2タブ |
 | `/[type]/admin` | (管理者・スポット管理者専用)スポットの承認待ちキュー・追加・編集・削除・CSVインポート・ルート(巡った順の矢印)のインポート。adminのみスポット種別の管理・ユーザー管理も可能 |
 | `/[type]/account` | 自分のロール表示、ログアウト、他のスポット種別への切り替え |
 | `/login` | メールログイン、または Google でログイン(任意、要設定) |
@@ -164,23 +174,25 @@ docker compose pull app && docker compose up -d
 CSVとして置き、`/[type]/admin`のCSVインポート機能で取り込む(`tourist`=観光地も含め全種別共通)。
 
 ```csv
-name,name_kana,region,lat,lng,rank,category,description,key
-厳島神社,いつくしまじんじゃ,広島県,34.2959,132.3197,A,神社仏閣,海に浮かぶ大鳥居,厳島神社
+name,name_kana,lat,lng,region,series,categories,description,key
+厳島神社,いつくしまじんじゃ,34.2959,132.3197,広島県,A,神社仏閣|建築,海に浮かぶ大鳥居,厳島神社
 ```
 
-- 必須列: `name`, `region`, `lat`, `lng`。`rank`/`category`は自由入力。`key`は省略可の
-  種別内一意な参照キー(ルートCSVがスポットを指すのに使う)
+- 必須列: `name`, `lat`, `lng`, `region`。`series`/`categories`は自由入力。
+  `categories`は1スポットに複数付けられ、パイプ区切りで書く(列ごと省略した場合は
+  既存スポットのカテゴリを変更しない)。`key`は省略可の種別内一意な参照キー
+  (ルートCSVがスポットを指すのに使う)
 - 差分更新(`key`一致を最優先、無ければ`name`+`lat`+`lng`の完全一致で同一判定)。
   一致した既存スポットは内容が違えばCSVの内容で上書きされるため、CSV側の修正も
   再アップロードだけで反映され、同じCSVを何度アップロードしても重複登録されない
 - スポットを巡った順に矢印で繋ぐルートは、別ファイル`routes.csv`(列:
-  `route,seq,spot_key`)を同じ管理画面からスポットCSVの後に取り込む
+  `route,series,seq,spot_key`)を同じ管理画面からスポットCSVの後に取り込む
   (スキーマの詳細はtravel-log-data/README.md参照)
 
 観光地(`tourist`)データの`description`はWikipedia記事冒頭文の引用(CC BY-SA 4.0)、
 `name`/`lat`/`lng`の一部はOpenStreetMap由来(ODbL)のため、それぞれの出典表示は
 travel-log-data側で行っている(本リポジトリのMITライセンスはアプリのコードにのみ適用)。
-ランクの決め方などデータの詳細はtravel-log-data/README.mdを参照。
+シリーズの決め方などデータの詳細はtravel-log-data/README.mdを参照。
 
 ## スポット種別のカスタマイズ
 
@@ -188,9 +200,9 @@ travel-log-data側で行っている(本リポジトリのMITライセンスは�
 
 - 一般公開のON/OFF(既定OFF=admin/spot_admin限定)、口コミ・Wikipediaリンクの有効/無効
 - 対象地域(日本/特定の国/世界)、Wikipedia検索の言語版
-- ランクの一覧・見た目(色・地図ピンの大きさ・ラベル)、カテゴリの一覧
+- シリーズの一覧・見た目(色・地図ピンの大きさ・ラベル)、カテゴリの一覧
 
-キー・表示名の手入力フォームのほか、`{ key, label, settings?, ranks?, categories? }`形式の
+キー・表示名の手入力フォームのほか、`{ key, label, settings?, series?, categories? }`形式の
 JSONファイルアップロードでも一括設定できる(travel-log-dataリポジトリの
 `<スポットキー>/settings.json`が実例。スキーマの詳細はtravel-log-data/README.md参照)。
 

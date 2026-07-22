@@ -4,20 +4,20 @@ import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { osmStyle } from "@/lib/mapStyle";
-import type { Rank } from "@/lib/types";
-import { findRankStyle, type RankStyleDefinition } from "@/lib/rankStyle";
+import type { Series } from "@/lib/types";
+import { findSeriesStyle, type SeriesStyleDefinition } from "@/lib/seriesStyle";
 
 export default function MiniMap({
   lat,
   lng,
-  rank,
-  rankStyles,
+  series,
+  seriesStyles,
 }: {
   lat: number;
   lng: number;
-  rank: Rank | null;
-  /** このスポットが属するスポット種別のランク設定(lib/useRankStyles.ts参照) */
-  rankStyles: RankStyleDefinition[];
+  series: Series | null;
+  /** このスポットが属するスポット種別のシリーズ設定(lib/useSeriesStyles.ts参照) */
+  seriesStyles: SeriesStyleDefinition[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -33,13 +33,13 @@ export default function MiniMap({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
-    const color = findRankStyle(rank, rankStyles).color;
+    const color = findSeriesStyle(series, seriesStyles).color;
     new maplibregl.Marker({ color }).setLngLat([lng, lat]).addTo(map);
     return () => {
       map.remove();
       mapRef.current = null;
     };
-  }, [lat, lng, rank, rankStyles]);
+  }, [lat, lng, series, seriesStyles]);
 
   return (
     <div

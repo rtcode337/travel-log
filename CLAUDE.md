@@ -9,8 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## コマンド
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。db/init/配下は db/data/ が空の場合のみ自動実行される
-docker compose pull app && docker compose up -d        # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。SESSION_SECRET環境変数が必須(.env可)
+docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。スキーマ作成・未適用マイグレーションはdb-migrateサービスが自動で行う
+docker compose pull && docker compose up -d            # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。未適用のマイグレーションはdb-migrateサービスが自動で当てる。SESSION_SECRET環境変数が必須(.env可)
 npm run dev                                             # Next.js開発サーバー(ローカルPostgresを直接使う場合のみ)
 npm run build                                            # 本番ビルド
 npm run lint                                              # next lint
@@ -20,15 +20,56 @@ npm run lint                                              # next lint
 
 このプロジェクトにテストスイート/テストコマンドは存在しない。
 
-`db/init/`配下は既存の`db/data/`(Postgresの実データ。リポジトリ直下にbindマウントされるが`.gitignore`対象)に対しては自動実行されない。`db/data/`が既に存在する場合、新規または変更したinitファイルは手動で適用する(`.sql`ファイルはそのままpsqlに流し込めばよい)。
+### スキーマ変更のルール
+
+DB定義は`db/init/01_schema.sql`の1ファイルにすべてまとまっている(テーブル・索引・トリガー・既定のスポット種別の投入まで)。**このファイルが「現在あるべきスキーマの唯一の定義」**で、追加分を`02_...`のような別の初期化ファイルに切り出す方式は取らない。スキーマを変えるときは常にこのファイルだけを編集すること。
+
+あわせて、**テーブルに変更を加えた場合は同じコミットで`db/migrations/`に移行スクリプトを追加し、本番DBを既存データを保持したまま移行可能にすること**(本番には利用者の訪問記録・写真が入るため、`db/data/`を捨てる運用はできない)。ファイル名は`<連番>_<内容>.sql`で、ファイル名がそのまま`schema_migrations.version`になる。**`begin`/`commit`と`schema_migrations`へのinsertはスクリプトに書かない**(どちらも`db/entrypoint.sh`が受け持つ)。全文idempotentにすること — 新規DBに対しても一度は実行される。詳細は`db/migrations/README.md`。
+
+適用は`docker compose up`で自動的に行われる(手で流す必要はない。下記「DBの初期化・マイグレーションの流れ」参照)。
+
+移行スクリプトを書いたら、**旧スキーマのダンプに当てた結果が新規作成したDBと一致することを確認する**(`information_schema.columns`・`pg_trigger`・`pg_indexes`を新旧で突き合わせる。手順は`db/migrations/README.md`)。列の並び順だけはPostgresでは既存テーブルに対して変更できないため一致しないが、アプリは常に列名で読み書きしているため影響しない。
+
+### DBの初期化・マイグレーションの流れ
+
+composeは`db-init` → `db` → `db-migrate` → `app`の順に起動する。`db-init`と`db-migrate`は同じイメージ(`db/Dockerfile`、`db/entrypoint.sh`のサブコマンド違い)で、どちらも1回走って終了するワンショット。
+
+| サービス | 役割 | タイミング |
+|---|---|---|
+| `db-init` (`prepare`) | `db/data`の作成と所有者/パーミッション調整 | dbの起動**前** |
+| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない) | — |
+| `db-migrate` (`migrate`) | スキーマ本体(`/init/01_schema.sql`)と`/migrations`の未適用SQLを適用し`schema_migrations`に記録 | dbのhealthcheck通過**後** |
+| `app` | Next.js。`db-migrate`が正常終了するまで起動しない | 最後 |
+
+スキーマ本体もマイグレーションSQLも`db-init`イメージに焼き込まれるため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される。マイグレーションが失敗すると`db-migrate`が非ゼロ終了し、`app`も起動しないため、古いスキーマのままアプリが動くことはない。
+
+`01_schema.sql`は`schema_migrations`上では`000_init_schema`という名前の「一番先頭のマイグレーション」として扱う。空のDBには実行し、既にテーブルがあるDB(旧方式でinitdbが作ったもの)には実行せず適用済みとして記録するだけにするので、既存の本番DBをそのまま引き継げる。
+
+**`db/init`をdbコンテナにマウントしないのは意図的**。かつては`docker-entrypoint-initdb.d`に`:ro`マウントし、`db-init`が`chmod -R a+rX`をかけていたが、git管理下のファイルのパーミッションをrootで書き換えるため、`01_schema.sql`を更新するとホスト側の`git pull`が失敗するようになっていた。スキーマ本体もイメージ側から流す方式にして解消した(`prepare`が触るのはgit管理外の`db/data`だけ)。
+
+開発環境では、スキーマを変えたら`db/data/`を捨てて作り直すのが手軽(移行スクリプトの検証は下記の使い捨てDBで行う)。
 
 ```bash
-docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d travel_log < db/init/<file>.sql
+docker compose -f docker-compose.dev.yml down
+rm -rf db/data/pgdata   # 既存データを捨てる(訪問記録・アカウントも消える)
+docker compose -f docker-compose.dev.yml up --build
 ```
 
-[travel-log-data](../travel-log-data)側の`tourist/spots.csv`(観光地データ全件。列は`name,name_kana,region,lat,lng,rank,category,description`)を編集する際は、本番の`spots`/`spot_types`テーブルではなく使い捨てのスキーマで検証すること(このリポジトリの過去のやり方: `create schema lint_check`→`create table lint_check.spots (like public.spots including all)`→`search_path`をそこに向けてCOPYする→`drop schema lint_check cascade`)。シードファイルの検証のために本物の`public.spots`を`truncate`・再投入しないこと。
+既存データ(`db/data/`。Postgresの実データで、リポジトリ直下にbindマウントされるが`.gitignore`対象)を消さずにスキーマ・移行スクリプトを試したい場合は、同じPostgresコンテナ内に使い捨てDBを作って流すとよい。
 
-`docker-entrypoint-initdb.d`(=`db/init/`)は`*.sql`ファイルしか自動実行しない(postgres公式イメージの`docker-entrypoint.sh`が拡張子で判定するため、CSVを置くだけでは読み込まれず、サブディレクトリも1階層しかglobせず`ignoring`されて無視される)ため、CSVをそのまま自動実行対象に置くことはしていない。`tourist`を含む全種別のスポットデータは`/[type]/admin`のCSVインポートから手動で取り込む(下記「外部データソース」の段落参照)。
+```bash
+docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres -c "create database schema_check"
+docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d schema_check -v ON_ERROR_STOP=1 < db/init/01_schema.sql
+docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres -c "drop database schema_check"
+```
+
+全テーブルが`created_at`/`updated_at`を持ち、`updated_at`は共通の`set_updated_at()`トリガーで自動更新される。テーブルを追加したら、対応する`create trigger <table>_set_updated_at`をファイル下部のトリガー定義の並びにも追加すること。
+
+
+
+[travel-log-data](../travel-log-data)側の`tourist/spots.csv`(観光地データ全件。列は`name,name_kana,lat,lng,region,series,categories,description`)を編集する際は、本番の`spots`/`spot_types`テーブルではなく使い捨てのスキーマで検証すること(このリポジトリの過去のやり方: `create schema lint_check`→`create table lint_check.spots (like public.spots including all)`→`search_path`をそこに向けてCOPYする→`drop schema lint_check cascade`)。シードファイルの検証のために本物の`public.spots`を`truncate`・再投入しないこと。
+
+スポットのシードデータは`db/init/`に置かず、`tourist`を含む全種別のスポットデータを`/[type]/admin`のCSVインポートから手動で取り込む(下記「外部データソース」の段落参照)。
 
 ## アーキテクチャ
 
@@ -54,9 +95,9 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 画面は`/[type]/map`のように`spot_types.key`をURLの動的セグメントとして持ち、種別ごとに独立してアクセスする(ルート`/`アクセス時のリダイレクト先は、最後に開いていた種別のCookie `last_spot_type` — `lib/last-spot-type.ts`。`middleware.ts`が`/[type]/(map|spots|account|admin)`アクセス時に書き込み、`app/page.tsx`が読み取り時に`canViewSpotType`で検証する — を最優先し、無い・開けない場合に`app_settings.active_spot_type_id`の既定へフォールバックする。どちらも他の種別を隠すものではない)。種別ごとの公開範囲は`spot_type_settings`の`public_visible`設定(既定false=admin/spot_admin限定)で制御し、`lib/spot-type-access.ts`の`canViewSpotType`で判定する(`/[type]/admin`だけは`public_visible`に関わらず常にアクセス可)。かつてあった`spot_types.visibility`列(`public`/`admin_only`/`disabled`の3値)は廃止し、`disabled`(誰にも見せない)相当は種別自体の削除で代替するようにした。
 
-新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, ranks?, categories? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/ranks/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/ranks/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。
+新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, series?, categories? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/series/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/series/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。
 
-`spots.rank`/`category`は自由入力で、`spot_type = 'tourist'`のときのみtravel-log-data/README.mdに記載のランク基準が意味を持つ(値の一覧は`lib/types.ts`の`RANKS`と`lib/category.ts`の`DEFAULT_CATEGORIES`とそのコメントを参照)。
+`spots.series`(1スポットに1つ・nullable text)/`spots.categories`(1スポットに複数・`text[]`)はどちらも自由入力で、`spot_type = 'tourist'`のときのみtravel-log-data/README.mdに記載のシリーズ基準(A〜E)が意味を持つ(既定値の一覧は`lib/seriesStyle.ts`の`DEFAULT_SERIES_STYLES`と`lib/category.ts`の`DEFAULT_CATEGORIES`、およびそのコメントを参照)。
 
 ### 対象地域(`region_scope`)
 
@@ -76,27 +117,32 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 ### スポット種別ごとのON/OFF設定(EAV: `spot_type_settings`)
 
-`reviews_enabled`/`wikipedia_enabled`/`public_visible`は`spot_types`に列を持たず、EAV形式の`spot_type_settings`テーブル(`spot_type_id, key, value` — boolean設定は`'true'`/`'false'`の文字列。同じテーブルに`rank_styles`・`region_scope`・`wikipedia_lang`・`categories`のような文字列値のキーも同居する)に保存する。新しい設定を増やす際にDBマイグレーションが要らないようにするための設計で、キー・既定値・表示名は`lib/types.ts`の`SPOT_TYPE_SETTING_DEFAULTS`/`SPOT_TYPE_SETTING_LABELS`に登録するだけでよい(行が存在しないキーは設定ごとの既定値扱い、`getSpotTypeSetting`参照)。`public_visible`は既定`false`(=種別追加当初は非公開・admin/spot_admin限定)で、他2つは既定`true`。`app/api/spot-types/[id]/route.ts`のPATCHは`{ settings: { key: boolean, ... } }`を受け取り`spot_type_settings`へupsertする汎用エンドポイントで、設定を増やしてもAPI自体の変更は不要。`SpotType`型の`settings`フィールド(`key→value`の文字列マップ)は`lib/spot-types-query.ts`の`SPOT_TYPE_SELECT`(`spot_type_settings`をjsonbに集約するSELECT共通部品)を使うクエリでのみ埋まる点に注意(`select * from spot_types`だけでは`settings`は付与されない)。
+`reviews_enabled`/`wikipedia_enabled`/`public_visible`は`spot_types`に列を持たず、EAV形式の`spot_type_settings`テーブル(`spot_type_id, key, value` — boolean設定は`'true'`/`'false'`の文字列。同じテーブルに`series_styles`・`region_scope`・`wikipedia_lang`・`categories`のような文字列値のキーも同居する)に保存する。新しい設定を増やす際にDBマイグレーションが要らないようにするための設計で、キー・既定値・表示名は`lib/types.ts`の`SPOT_TYPE_SETTING_DEFAULTS`/`SPOT_TYPE_SETTING_LABELS`に登録するだけでよい(行が存在しないキーは設定ごとの既定値扱い、`getSpotTypeSetting`参照)。`public_visible`は既定`false`(=種別追加当初は非公開・admin/spot_admin限定)で、他2つは既定`true`。`app/api/spot-types/[id]/route.ts`のPATCHは`{ settings: { key: boolean, ... } }`を受け取り`spot_type_settings`へupsertする汎用エンドポイントで、設定を増やしてもAPI自体の変更は不要。`SpotType`型の`settings`フィールド(`key→value`の文字列マップ)は`lib/spot-types-query.ts`の`SPOT_TYPE_SELECT`(`spot_type_settings`をjsonbに集約するSELECT共通部品)を使うクエリでのみ埋まる点に注意(`select * from spot_types`だけでは`settings`は付与されない)。
 
-### ランクの見た目(`rank_styles`)
+### シリーズ(`series`)とその見た目(`series_styles`)
 
-ランクの一覧・見た目(色・縁取り線の色・地図ピンの大きさ・ラベル)もスポット種別ごとにJSONで持つ(`lib/rankStyle.ts`)。値がbooleanではないため`SpotTypeSettingKey`の仕組みとは別扱いで、`spot_type_settings`の`rank_styles`キー(`RANK_STYLES_SETTING_KEY`)にJSON文字列(`RankStyleDefinition[]`)を保存する。行が無い・parse失敗時は`DEFAULT_RANK_STYLES`(観光地の現行A〜E配色)にフォールバックする(`resolveRankStyles`)。配列の並び順がそのままランクの並び順(`getRankOrder`、旧`lib/rankStyle.ts`の`KNOWN_ORDER`ハードコードの後継)になり、`app/api/spots/route.ts`のページング一覧もSQLの`array_position`でこの並びをそのまま使う(旧CASE文のハードコードは廃止)。
+かつて「ランク」(`spots.rank`・`rank_styles`・`RankBadge`等)と呼んでいた概念は、`spot_types`が増えて序列でない使い方(並列の区分をシリーズとして持つ種別)が主になったため、**`series`(シリーズ)に全面改名した**(DB列・API・型名・UI表記・ファイル名すべて。後方互換は持たせていない)。
 
-ラベルは文字列または`{ image: base64 dataURL }`のどちらか(`isImageLabel`で判定)。`textColor`は省略可で、省略時は`autoTextColor`が背景色の明度から白/濃色を自動選択する。地図ピン(`lib/pinIcon.ts`の`ensurePinImage`、画像ラベル読み込みのため非同期)・バッジ(`components/RankBadge.tsx`、Tailwindの動的クラスはJITに拾われないため常にinline styleで色を当てる)・ミニマップ(`components/MiniMap.tsx`)・絞り込みチップ(`components/FilterBar.tsx`)はいずれも`useRankStyles(typeKey)`フック(`/api/spot-types`の結果から解決、GETキャッシュにより同一ページでの重複リクエストなし)経由でこの配列を受け取って描画する。非公開スポット(`status='private'`)は縁取り線の色はそのまま破線にするだけで、色・大きさ・ラベルはランクと同じにする(公開スポットの縁取りも常に実線で描く。旧実装は非公開のときしか縁取り自体を描いていなかった点の修正でもある)。
 
-`app/api/spot-types/[id]/route.ts`のPATCHの`settings`は文字列値(`rank_styles`)も受け付けるよう`boolean | string`に拡張し、保存前に`parseRankStyles`で妥当性を検証する。管理画面からのスポット種別JSON作成(`SpotTypeDefinitionFile`)の`ranks`フィールドもこの形式で、省略時・手入力フォームでの追加時はDEFAULT_RANK_STYLESのままになる。
+シリーズの一覧・見た目(色・縁取り線の色・地図ピンの大きさ・ラベル)もスポット種別ごとにJSONで持つ(`lib/seriesStyle.ts`)。値がbooleanではないため`SpotTypeSettingKey`の仕組みとは別扱いで、`spot_type_settings`の`series_styles`キー(`SERIES_STYLES_SETTING_KEY`)にJSON文字列(`SeriesStyleDefinition[]`)を保存する。行が無い・parse失敗時は`DEFAULT_SERIES_STYLES`(観光地の現行A〜E配色)にフォールバックする(`resolveSeriesStyles`)。配列の並び順がそのままシリーズの並び順(`getSeriesOrder`、旧`lib/seriesStyle.ts`の`KNOWN_ORDER`ハードコードの後継)になり、`app/api/spots/route.ts`のページング一覧もSQLの`array_position`でこの並びをそのまま使う(旧CASE文のハードコードは廃止)。
+
+ラベルは文字列または`{ image: base64 dataURL }`のどちらか(`isImageLabel`で判定)。`textColor`は省略可で、省略時は`autoTextColor`が背景色の明度から白/濃色を自動選択する。地図ピン(`lib/pinIcon.ts`の`ensurePinImage`、画像ラベル読み込みのため非同期)・バッジ(`components/SeriesBadge.tsx`、Tailwindの動的クラスはJITに拾われないため常にinline styleで色を当てる)・ミニマップ(`components/MiniMap.tsx`)・絞り込みチップ(`components/FilterBar.tsx`)はいずれも`useSeriesStyles(typeKey)`フック(`/api/spot-types`の結果から解決、GETキャッシュにより同一ページでの重複リクエストなし)経由でこの配列を受け取って描画する。非公開スポット(`status='private'`)は縁取り線の色はそのまま破線にするだけで、色・大きさ・ラベルはシリーズと同じにする(公開スポットの縁取りも常に実線で描く。旧実装は非公開のときしか縁取り自体を描いていなかった点の修正でもある)。
+
+`app/api/spot-types/[id]/route.ts`のPATCHの`settings`は文字列値(`series_styles`)も受け付けるよう`boolean | string`に拡張し、保存前に`parseSeriesStyles`で妥当性を検証する。管理画面からのスポット種別JSON作成(`SpotTypeDefinitionFile`)の`series`フィールドもこの形式で、省略時・手入力フォームでの追加時はDEFAULT_SERIES_STYLESのままになる。
 
 ### カテゴリ(`categories`)
 
-カテゴリの一覧も同じパターンでスポット種別ごとに持つ(`lib/category.ts`)。`spot_type_settings`の`categories`キー(`CATEGORIES_SETTING_KEY`)にJSON文字列(`string[]`。見た目は持たない)を保存し、行が無い・parse失敗時は`DEFAULT_CATEGORIES`(観光地の現行カテゴリ、旧`lib/types.ts`の`CATEGORIES`ハードコードの後継)にフォールバックする(`resolveCategories`)。明示的に空配列`"[]"`を保存した種別は「定義済みカテゴリなし」の扱い。配列の並び順がカテゴリの並び順(`getCategoryOrder`)で、地図・スポット一覧の絞り込みチップ(`components/FilterBar.tsx`の`SpotFilters.categories`。ランク・訪問状況と同じ複数選択+「すべて」チップ、選択肢は実データに存在する値から作る)と、スポット追加・編集フォーム(`AddSpotModal`)のサジェスト(設定の一覧を先頭に、設定外の既存値を後ろに合成)がこの並びを使う。取得は`useCategories(typeKey)`フック(`useRankStyles`のカテゴリ版)。管理画面`/[type]/admin`「スポット種別の設定」のカテゴリ欄(カンマ・読点区切りで入力、admin専用)と、スポット種別JSON作成の`categories`フィールド(文字列配列)から設定でき、PATCH `/api/spot-types/[id]`が`parseCategories`で妥当性を検証する。`category`列自体は従来どおり自由入力で、一覧に無い値も動く(並びは末尾)。
+**1スポットは複数のカテゴリを持てる**(`spots.categories`は`text[]`。かつては単数の`spots.category text`だった)。絞り込みはOR条件で、選択中のカテゴリのいずれかを持つスポットが通る(`FilterBar`の`passesFilters`)。CSV・訪問記録エクスポートでは`categories`という1列にパイプ区切り(`CATEGORY_SEPARATOR`)で書く — カンマだとCSVの区切りと衝突して値全体の引用が要るため(`parseCategoryList`/`formatCategoryList`)。CSVに`categories`列自体が無い場合は、`key`列と同じく既存スポットのカテゴリを変更しない(全消しを防ぐため)。PATCH `/api/spots/[id]`も同じ理由で、ボディに`categories`が含まれるときだけ更新する(「カテゴリなし」にするには空配列を明示的に送る)。
+
+カテゴリの一覧(種別ごとに使える値の定義)も同じパターンでスポット種別ごとに持つ(`lib/category.ts`)。`spot_type_settings`の`categories`キー(`CATEGORIES_SETTING_KEY`)にJSON文字列(`string[]`。見た目は持たない)を保存し、行が無い・parse失敗時は`DEFAULT_CATEGORIES`(観光地の現行カテゴリ、旧`lib/types.ts`の`CATEGORIES`ハードコードの後継)にフォールバックする(`resolveCategories`)。明示的に空配列`"[]"`を保存した種別は「定義済みカテゴリなし」の扱い。配列の並び順がカテゴリの並び順(`getCategoryOrder`)で、地図・スポット一覧の絞り込みチップ(`components/FilterBar.tsx`の`SpotFilters.categories`。シリーズ・訪問状況と同じ複数選択+「すべて」チップ、選択肢は実データに存在する値から作る)と、スポット追加・編集フォーム(`AddSpotModal`)の選択チップ(複数選択のトグル。設定の一覧を先頭に、設定外の既存値を後ろに合成し、一覧に無い値は下の入力欄から足せる)がこの並びを使う。取得は`useCategories(typeKey)`フック(`useSeriesStyles`のカテゴリ版)。管理画面`/[type]/admin`「スポット種別の設定」のカテゴリ欄(カンマ・読点区切りで入力、admin専用)と、スポット種別JSON作成の`categories`フィールド(文字列配列)から設定でき、PATCH `/api/spot-types/[id]`が`parseCategories`で妥当性を検証する。`categories`列自体は従来どおり自由入力で、一覧に無い値も動く(並びは末尾)。
 
 ### ルート(`spot_routes`/`spot_route_points`)とスポット参照キー(`spots.key`)
 
-スポットを「巡った順」に矢印で繋ぐルート機能(水曜どうでしょうの企画のような、訪問順のある種別向け)。スキーマは`db/init/02_spot_key_routes.sql`(初期スキーマ後の追加分。新規DBでは自動実行されるが、既存の`db/data/`には上記「コマンド」の手順で手動適用が必要。全文idempotentのため再適用しても害はない)。`spot_routes`(種別ごとのルート名、`(spot_type_id, name)`一意)+`spot_route_points`(route_id, seq, spot_id)の2テーブルで、経由地はスポット削除時にFKカスケードで点だけ抜け、ルートは残る。公開スポットの全削除(purge)はルートも丸ごと消し、種別削除は`spot_types`へのFKカスケードで消える。
+スポットを「巡った順」に矢印で繋ぐルート機能(訪問順に意味がある種別向け)。スキーマは`db/init/01_schema.sql`(他のテーブルと同じファイル)。`spot_routes`(種別ごとのルート名、`(spot_type_id, name)`一意。加えて色分け・絞り込み連動に使う`series`列)+`spot_route_points`(route_id, seq, spot_id)の2テーブルで、経由地はスポット削除時にFKカスケードで点だけ抜け、ルートは残る。公開スポットの全削除(purge)はルートも丸ごと消し、種別削除は`spot_types`へのFKカスケードで消える。
 
-ルートのデータはtravel-log-data側の`<スポットキー>/routes.csv`(列: `route,seq,spot_key`)に置き、`/[type]/admin`の「ルート(巡った順の矢印)のインポート」から取り込む(spot_admin/admin可)。`spot_key`がスポットを指すために`spots.key`列(種別内一意・nullable。`spots (spot_type_id, key)`の部分uniqueインデックス)を追加してあり、スポットCSVの省略可の`key`列で設定する。名前・座標のような自然キーではなく明示キーにしたのは、改名・座標修正でルートの参照が壊れないようにするため。`AdminView`のルートCSVインポートは全行を検証(未知のspot_key・seq重複・経由地1件以下はエラー)してから、既存と経由地の並びが同一のルートをスキップしてPOST `/api/routes`(ルート名ごとに経由地を丸ごと置き換えるupsert)に送る。個別ルートの削除はDELETE `/api/routes/[id]`。
+ルートのデータはtravel-log-data側の`<スポットキー>/routes.csv`(列: `route,series,seq,spot_key`。`series`は省略可)に置き、`/[type]/admin`の「ルート(巡った順の矢印)のインポート」から取り込む(spot_admin/admin可)。`spot_key`がスポットを指すために`spots.key`列(種別内一意・nullable。`spots (spot_type_id, key)`の部分uniqueインデックス)を追加してあり、スポットCSVの省略可の`key`列で設定する。名前・座標のような自然キーではなく明示キーにしたのは、改名・座標修正でルートの参照が壊れないようにするため。`AdminView`のルートCSVインポートは全行を検証(未知のspot_key・seq重複・経由地1件以下はエラー)してから、既存と経由地の並びが同一のルートをスキップしてPOST `/api/routes`(ルート名ごとに経由地を丸ごと置き換えるupsert)に送る。個別ルートの削除はDELETE `/api/routes/[id]`。
 
-地図(`MapView`)はGET `/api/routes?type=`の結果を`spot-routes`ソースのLineString+進行方向の矢印アイコン(canvas生成・色ごとに登録)で描画する(ピンのクラスタレイヤーより下)。ルート名が種別のランク値と一致する場合はそのランクの`borderColor`で塗り、ランク絞り込みにも連動する(一致しないルート名は既定色で常時表示。`filterVisibleRoutes`)。表示対象のルートの経由地スポットは、スポット自体のランクが絞り込みで外れていてもピンを表示する(別の回・企画のランクに属する再訪スポットの上をルートの線だけが通る状態を防ぐ。免除するのはランク条件のみで、カテゴリ・訪問状況の絞り込みは通常どおり適用)。経由地のうち他人の非公開スポット等の見えないスポットはAPI側で除外され、矢印は残りの点を繋ぐ。
+地図(`MapView`)はGET `/api/routes?type=`の結果を`spot-routes`ソースのLineString+進行方向の矢印アイコン(canvas生成・色ごとに登録)で描画する(ピンのクラスタレイヤーより下)。ルートの`series`が種別のシリーズ一覧にある場合はそのシリーズの`borderColor`で塗り、シリーズ絞り込みにも連動する(シリーズ未指定・一覧に無い値のルートは既定色で表示。`filterVisibleRoutes`)。かつてはルート名(`name`)をシリーズ値と突き合わせていたが、表示名とシリーズは別物(同じシリーズに複数のルートを持たせたい)ため列を分けた。シリーズの絞り込みが「すべて」(未指定)のときは、全ルートの線が重なって地図が見づらくなるためルートを一切表示しない。表示対象のルートの経由地スポットは、スポット自体のシリーズが絞り込みで外れていてもピンを表示する(別のシリーズに属する再訪スポットの上をルートの線だけが通る状態を防ぐ。免除するのはシリーズ条件のみで、カテゴリ・訪問状況の絞り込みは通常どおり適用)。経由地のうち他人の非公開スポット等の見えないスポットはAPI側で除外され、矢印は残りの点を繋ぐ。
 
 これに合わせてCSVインポートの差分更新の突き合わせキーを`name`+`region`+`lat`+`lng`から`name`+`lat`+`lng`に変更し(lat/lngが同じでregionだけ違う使い方は想定しないため。region表記の修正で別スポット扱いになる事故も防ぐ)、さらに`key`一致を最優先の同一判定として、一致した既存行は内容が異なればCSVの内容で上書き更新するようにした(スキップではなく上書きにすることで、CSV側での改名・座標修正・説明文の更新が再インポートだけで反映される。詳細は上記「スポットの新規登録フロー」参照)。
 
@@ -114,13 +160,15 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 ### `reviews`と`visits`の非対称設計
 
-`reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、必訪ランクの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される。`photos`(text[])にはBase64ではなく、`photos/`フォルダ(docker-composeでbindマウント、`lib/photos.ts`)へ保存したファイルの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
+`reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、シリーズの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される。`photos`(text[])にはBase64ではなく、`photos/`フォルダ(docker-composeでbindマウント、`lib/photos.ts`)へ保存したファイルの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
+
+`visits.visited_on`(timestamptz、nullable)は訪問した日時で、未入力なら`null`=表示は「時期不明」(`formatVisitedOn`)。入力は`datetime-local`のため常にローカル時刻で、送信時にISO 8601(UTC)へ変換してから渡す(文字列のまま送るとDB側がサーバーのタイムゾーンで解釈してずれる)。かつては`date`型+`date_precision`列(`day`/`month`/`year`/`unknown`)で「年だけ分かる」等の粒度を持たせ、表示時に年月日を落としていたが、入力の手間に対して使われず廃止した(列ごと削除)。
 
 自分の訪問記録は`/[type]/spots`の「最近の訪問場所」見出し右のボタンからZIPで一括エクスポートできる(`GET /api/visits/export?type=<種別キー>`。typeは必須で、その種別の分のみ。種別横断のエクスポートは意図的に持たない)。ZIPの中身は`visits.csv`(BOM付きUTF-8。訪問のメモ+スポット情報、`lib/csv.ts`の`buildCsv`)と`photos/<uuid>.<ext>`(添付写真。CSVの「写真」列がこのZIP内パスを指す)。ZIP生成は依存を増やさず`lib/zip.ts`の自前実装(無圧縮STORE。中身が圧縮済み画像と小さなCSVのみのため)で、写真ファイルは配信APIと同じく`parseVisitPhotoPath`の所有者チェックを通ったものだけを読む。
 
-### touristのランクについて
+### touristのシリーズについて
 
-tourist spotsの`rank`はこのリポジトリの外で一度だけ計算されたパイプラインの成果物であり、アプリ側が動的に計算するものではない。Wikipedia(ja)月次ページビュー数に基づく相対順位(パーセンタイル)の機械分類(詳細はtravel-log-data/README.md「各データの出典」参照。ランクの決め方自体はデータの成り立ちの話のためtravel-log本体のREADMEには置いていない)。手動でスポットを追加する場合も、この基準に沿ったランクを付けること。
+tourist spotsの`series`(A〜E)はこのリポジトリの外で一度だけ計算されたパイプラインの成果物であり、アプリ側が動的に計算するものではない。Wikipedia(ja)月次ページビュー数に基づく相対順位(パーセンタイル)の機械分類(詳細はtravel-log-data/README.md「各データの出典」参照。シリーズの決め方自体はデータの成り立ちの話のためtravel-log本体のREADMEには置いていない)。手動でスポットを追加する場合も、この基準に沿ったシリーズを付けること。
 
 ## 外部データソース(Wikipedia、OSM Overpass/Nominatim、政府オープンデータ等)を扱う際の注意
 
@@ -137,4 +185,4 @@ tourist spotsの`rank`はこのリポジトリの外で一度だけ計算され�
 
 このアプリは実際のユーザーデータ(`users.email`、`visits.memo`、`visits.photos`が指す写真ファイル、`reviews.body`)を保持する。コミット前には、差分にプレースホルダーではない実際の個人情報(実メールアドレス・実名・写真・DBダンプ/エクスポート等)が紛れ込んでいないか確認すること — ローカルのDocker DBに実際のテストアカウントを入れたまま作業していると、気づかず混入しやすい。
 
-コードに変更を加えたら、その変更でREADME.md・CLAUDE.mdの記述(画面のパス、ロール、データ件数、機能の説明など)が古くならないか確認し、必要なら同じコミットで更新すること。特にルーティング構造・ロールの種別と権限・スポット種別ごとのデータ件数・`db/init/`のファイル構成は変更が入りやすく、記述が古いまま放置されがち。
+コードに変更を加えたら、その変更でREADME.md・CLAUDE.mdの記述(画面のパス、ロール、データ件数、機能の説明など)が古くならないか確認し、必要なら同じコミットで更新すること。特にルーティング構造・ロールの種別と権限・スポット種別ごとのデータ件数・`db/init/01_schema.sql`のスキーマは変更が入りやすく、記述が古いまま放置されがち。

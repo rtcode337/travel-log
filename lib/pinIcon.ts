@@ -1,13 +1,13 @@
 import type maplibregl from "maplibre-gl";
-import type { Rank } from "./types";
-import { autoTextColor, findRankStyle, isImageLabel, type RankStyleDefinition } from "./rankStyle";
+import type { Series } from "./types";
+import { autoTextColor, findSeriesStyle, isImageLabel, type SeriesStyleDefinition } from "./seriesStyle";
 
 /**
  * 地図ピン(下が三角にとんがった吹き出し型)の画像をcanvasで生成し、
  * MapLibreのスタイル画像として登録する。とんがりの先端が画像の下端中央に
  * 来るように描くので、symbolレイヤー側は `icon-anchor: "bottom"` で使う。
  * 縁取り線は常に描き、非公開スポットだけ破線にする(色・大きさ・ラベルは
- * ランクのまま変えない)。
+ * シリーズのまま変えない)。
  */
 
 const PIXEL_RATIO = 2;
@@ -24,11 +24,11 @@ function pinTailHeight(size: number): number {
 }
 
 export function pinIconId(
-  rank: Rank | null,
+  series: Series | null,
   visited: boolean,
   isPrivate: boolean
 ): string {
-  return `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}-${rank ?? "__null__"}`;
+  return `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}-${series ?? "__null__"}`;
 }
 
 /** data URL画像をHTMLImageElementとして読み込む(base64は同期的に近いが、確実性のためdecode()を待つ) */
@@ -42,17 +42,17 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
 /** ピン画像を(未登録なら)生成して登録し、そのIDを返す。冪等。ラベルが画像の場合は非同期で読み込む */
 export async function ensurePinImage(
   map: maplibregl.Map,
-  rank: Rank | null,
+  series: Series | null,
   visited: boolean,
   /** 自分だけの非公開スポット。公開スポットと見分けられるよう破線で縁取る */
   isPrivate: boolean,
-  rankStyles: RankStyleDefinition[]
+  seriesStyles: SeriesStyleDefinition[]
 ): Promise<string> {
-  const id = pinIconId(rank, visited, isPrivate);
+  const id = pinIconId(series, visited, isPrivate);
   if (map.hasImage(id)) return id;
 
-  const style = findRankStyle(rank, rankStyles);
-  // 訪問済みは(ランクの色より視認性を優先し)ピン全体を緑+チェックマークにする
+  const style = findSeriesStyle(series, seriesStyles);
+  // 訪問済みは(シリーズの色より視認性を優先し)ピン全体を緑+チェックマークにする
   const fill = visited ? "#16a34a" : style.color;
   const borderColor = visited ? "#15803d" : style.borderColor;
   const label = visited ? "✓" : style.label;
@@ -87,7 +87,7 @@ export async function ensurePinImage(
   ctx.fill();
   ctx.shadowColor = "transparent";
 
-  // 縁取りは常に描く。非公開だけ破線にする(それ以外はランクの見た目のまま)
+  // 縁取りは常に描く。非公開だけ破線にする(それ以外はシリーズの見た目のまま)
   ctx.setLineDash(isPrivate ? [3, 2.5] : []);
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = borderColor;
@@ -105,7 +105,7 @@ export async function ensurePinImage(
   } else {
     const text = visited ? "✓" : typeof label === "string" ? label : "";
     if (text) {
-      // rankは自由入力で複数文字もありうるので、その場合は少し小さくして収める
+      // seriesは自由入力で複数文字もありうるので、その場合は少し小さくして収める
       const fontSize = Math.max(
         8,
         Math.round(size * (text.length > 1 ? 0.38 : 0.6))
