@@ -386,10 +386,14 @@ export default function SpotDetailModal({
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
               {readOnly ? (
                 // 重ね表示から開いた別種別のスポットは、表示中の種別の地図では
-                // 表示できないため、元のスポット種別の地図へのリンクを出す
+                // 表示できないため、元のスポット種別の地図へのリンクを出す。
+                // fromに今表示中の種別を渡すと、遷移先の地図に「元の地図に戻る」
+                // リンクが出る(戻り先の表示位置はMapViewのlastViewsが復元する)
                 currentSpotType && (
                   <Link
-                    href={`/${currentSpotType.key}/map?spot=${spot.id}`}
+                    href={`/${currentSpotType.key}/map?spot=${spot.id}${
+                      typeKey ? `&from=${encodeURIComponent(typeKey)}` : ""
+                    }`}
                     className="inline-block text-sm text-blue-600 underline"
                   >
                     「{currentSpotType.label}」の地図で開く
