@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { parseCsv } from "@/lib/csv";
+import { buildCsv, parseCsv } from "@/lib/csv";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import {
   CATEGORIES_SETTING_KEY,
+  formatCategoryList,
   parseCategoryList,
   resolveCategories,
   sameCategories,
@@ -95,6 +96,10 @@ export default function AdminView({
     done: number;
     total: number;
   } | null>(null);
+
+  // travel-log-dataへの還元用エクスポート(手動追加の公開スポット+削除の墓標)
+  const [exportingManual, setExportingManual] = useState(false);
+  const [manualExportMessage, setManualExportMessage] = useState<string | null>(null);
 
   // ルート(スポットを巡った順に矢印で繋ぐ)の一覧とCSVインポート用
   const [routes, setRoutes] = useState<SpotRoute[]>([]);
@@ -680,6 +685,7 @@ export default function AdminView({
     categories: string[] | null;
     description: string | null;
     status: string;
+    origin: "csv";
   }
 
   const handleCsvFile = async (file: File) => {
@@ -744,6 +750,9 @@ export default function AdminView({
             // CSVインポートはこのページ(spot_admin/admin専用)からのみ行えるため、
             // 承認待ちを経由せずそのまま公開する
             status: "published",
+            // 登録経路の記録。手動追加(既定'manual')と区別し、還元用エクスポートの
+            // 抽出対象から外す
+            origin: "csv",
           });
       }
       if (errors.length > 0) {
@@ -798,7 +807,10 @@ export default function AdminView({
         (record.categories !== null &&
           !sameCategories(spot.categories, record.categories)) ||
         spot.description !== record.description ||
-        (record.key !== null && spot.key !== record.key);
+        (record.key !== null && spot.key !== record.key) ||
+        // 手動追加(manual)の行がCSVと一致した=travel-log-dataへ還元済みなので、
+        // 内容が同一でもPATCHしてorigin='csv'に倒す(次回の還元用エクスポートから外す)
+        spot.origin !== "csv";
       for (const record of records) {
         const diffKey = spotDiffKey(record.name, record.lat, record.lng);
         const existing =
@@ -862,6 +874,7 @@ export default function AdminView({
             : {}),
           description: record.description,
           ...(record.key !== null ? { key: record.key } : {}),
+          origin: record.origin,
         });
         if (error) {
           setMessage(
@@ -887,6 +900,107 @@ export default function AdminView({
     } finally {
       setImporting(false);
       setImportProgress(null);
+    }
+  };
+
+  /**
+   * travel-log-dataへの還元用エクスポート。画面から手動追加された公開スポット
+   * (origin='manual'。spots.csvへの収録候補)と、画面から個別削除されたCSV由来の
+   * 公開スポット(削除の墓標。exclude.txtへの追記候補)を1つのMarkdownにまとめて
+   * ダウンロードする。還元作業はClaude Code等が読む前提のため、インポータで
+   * 機械的に読み込める形式にはしていない(人間/AIが読める整理を優先)
+   */
+  const handleExportManualSpots = async () => {
+    setExportingManual(true);
+    setManualExportMessage(null);
+    try {
+      const { data: deletions, error } = await api.spotDeletions.list(typeKey);
+      if (error) {
+        setManualExportMessage("削除の記録の取得に失敗しました: " + error.message);
+        return;
+      }
+      const manualSpots = spots.filter(
+        (s) => s.origin === "manual" && s.status === "published"
+      );
+      const deleted = deletions ?? [];
+      if (manualSpots.length === 0 && deleted.length === 0) {
+        setManualExportMessage(
+          "還元する対象がありません(手動追加された公開スポット・画面から削除されたCSV由来のスポットのどちらも0件)。"
+        );
+        return;
+      }
+
+      const now = new Date();
+      const dateKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+      const spotsCsv = buildCsv([
+        ["name", "name_kana", "lat", "lng", "region", "series", "categories", "description"],
+        ...manualSpots.map((s) => [
+          s.name,
+          s.name_kana,
+          s.lat,
+          s.lng,
+          s.region,
+          s.series,
+          formatCategoryList(s.categories),
+          s.description,
+        ]),
+      ]).trimEnd();
+      const excludeKeys = deleted.map((d) => d.key ?? d.name).join("\n");
+      const md = [
+        `# travel-log-data 還元用エクスポート`,
+        ``,
+        `- スポット種別: \`${typeKey}\``,
+        `- エクスポート日時: ${now.toLocaleString("ja-JP")}`,
+        `- 画面から手動追加された公開スポットと、画面から個別削除されたCSV由来の公開スポットの一覧。`,
+        `  travel-log-data への還元(スポットCSVへの収録・exclude.txt への追記)に使う`,
+        ``,
+        `## 手動追加された公開スポット(${manualSpots.length}件)`,
+        ``,
+        ...(manualSpots.length === 0
+          ? [`なし。`]
+          : [
+              `スポットCSVへの追加候補。key列は付けていないので、travel-log-data側の規則`,
+              `(スポット名、重複時のみ連番サフィックス)で収録時に振ること。`,
+              ``,
+              "```csv",
+              spotsCsv,
+              "```",
+            ]),
+        ``,
+        `## 画面から削除されたCSV由来の公開スポット(${deleted.length}件)`,
+        ``,
+        ...(deleted.length === 0
+          ? [`なし。`]
+          : [
+              `スポットCSVから該当行を消し、exclude.txt に以下のキーを追記する`,
+              `(key未設定だったスポットは名前で載せている)。`,
+              ``,
+              "```",
+              excludeKeys,
+              "```",
+              ``,
+              `詳細:`,
+              ``,
+              ...deleted.map(
+                (d) =>
+                  `- ${d.name}(key: ${d.key ?? "未設定"}、${d.region}、lat: ${d.lat}、lng: ${d.lng}、削除日時: ${new Date(d.created_at).toLocaleString("ja-JP")})`
+              ),
+            ]),
+        ``,
+      ].join("\n");
+
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${typeKey}_feedback_${dateKey}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setManualExportMessage(
+        `エクスポートしました(追加候補${manualSpots.length}件・削除候補${deleted.length}件)。`
+      );
+    } finally {
+      setExportingManual(false);
     }
   };
 
@@ -1453,6 +1567,35 @@ export default function AdminView({
                 付けられ、パイプ区切りで書く(例: 自然|夜景|展望)。keyは省略可の
                 種別内一意な参照キーで、ルートCSVからスポットを指すのに使う)
               </p>
+            </section>
+
+            <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <h3 className="mb-2 text-base font-bold">
+                travel-log-dataへの還元用エクスポート
+              </h3>
+              <p className="mb-3 text-xs text-gray-500">
+                画面から手動追加された公開スポット(スポットCSVへの収録候補)と、
+                画面から個別削除されたCSV由来の公開スポット(exclude.txtへの追記候補)を
+                1つのMarkdownファイルにまとめてダウンロードする。還元作業で
+                Claude Code等に渡す前提の形式で、そのまま再インポートはできない。
+                還元後にkeyを付けたCSVを再インポートすると、一致したスポットは
+                CSV由来(還元済み)の扱いに変わり、次回のエクスポートから外れる。
+              </p>
+
+              {manualExportMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                  {manualExportMessage}
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={handleExportManualSpots}
+                disabled={exportingManual}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                {exportingManual ? "エクスポート中…" : "還元用エクスポート"}
+              </button>
             </section>
 
             <section className="rounded-xl border border-gray-200 bg-white p-3">

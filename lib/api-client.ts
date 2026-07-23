@@ -5,6 +5,7 @@ import type {
   Review,
   Role,
   Spot,
+  SpotDeletion,
   SpotRoute,
   SpotType,
   SpotTypeSettingKey,
@@ -154,6 +155,11 @@ export const api = {
         `/api/spots/delete-by-keys?type=${encodeURIComponent(type)}`,
         { method: "POST", body: JSON.stringify({ keys }) }
       ),
+  },
+  spotDeletions: {
+    // 削除の墓標(画面から個別削除されたCSV由来の公開スポット)。還元用エクスポートで使う
+    list: (type: string) =>
+      request<SpotDeletion[]>(`/api/spot-deletions?type=${encodeURIComponent(type)}`),
   },
   routes: {
     list: (type: string) =>
