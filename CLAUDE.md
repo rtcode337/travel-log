@@ -154,7 +154,9 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 絞り込みモーダルの「訪問日」セレクト(`MapView`。重ね表示セクションと同じ`border-t`区切り線を上に置く)の選択肢は、先頭が常に「今日」、次が「表示しない」(=`null`)、続けて自分の訪問記録がある他の日(新しい順。`visitDates`/`visitDateOptions`。表示中の種別のスポットへの訪問がある日のみ。選択中の日が一覧に無くても選択を保てるよう残す)。既定値は今日。「表示しない」(`null`)は`saveFilters`が文字列`"none"`で保存し、`loadSavedFilters`は`"none"`のときだけ`null`=表示しないにする。日付はその日、それ以外(旧仕様の絞り込みだった頃の`null`・キー欠落・不正値)は今日に倒すため、**既存ユーザーも初回から今日の経路が出る**(`todayKey`/`defaultMapFilters`)。セレクトで日を選んだとき(`handleSelectVisitDate`)は、対象日をセットしたうえで**その日の訪問順の経路全体が画面に収まるよう`fitBounds`する**(1地点だけの日はmaxZoomまで寄る。経路が0件・「表示しない」のときは地図を動かさない)。ユーザーが明示的に選んだときだけ移動し、マウント時の既定(今日)の復元では移動しない。日付キーへの変換は`toVisitDateKey`(`visits.visited_on`はtimestamptzでUTC文字列のため、**必ずローカル時刻で日を切る** — UTCのまま切ると日本時間の朝9時前の訪問が前日になる)。
 
-訪問日が選ばれているとき、`MapView`は**その日の訪問記録を訪問時刻の昇順に矢印で結んだ「訪問順の経路」**を描く(`buildVisitPath`)。ルートCSVのルートと同じ`spot-routes`ソース・同じ線/矢印レイヤーに載せるだけなので描画コードは共用で、色だけ`VISIT_PATH_COLOR`(緑`#16a34a`=訪問済みピンの塗りと同じ)にしてルートと区別する。同じスポットへの再訪はそのまま複数回経由地として現れる(行って戻る線になる)が、連続する同じスポットへの訪問は長さ0の線分になり矢印の向きが定まらないためまとめる。他の種別の訪問記録・日時不明の訪問は除外する。**この経路上のスポット(`visitPathIds`)は、シリーズ・カテゴリ・訪問状況の絞り込みで外れていても必ずピンを表示する**(絞り込みではなくその日の訪問を辿るための表示のため全条件を免除。ルートCSVの経由地はシリーズ・カテゴリのみ免除で訪問状況は適用する点と対照的)。
+訪問日が選ばれているとき、`MapView`は**その日の訪問記録を訪問時刻の昇順に矢印で結んだ「訪問順の経路」**を描く(`buildVisitPath`)。ルートCSVのルートと同じ`spot-routes`ソース・同じ線/矢印レイヤーに載せるだけなので描画コードは共用で、色だけ`VISIT_PATH_COLOR`(緑`#16a34a`=訪問済みピンの塗りと同じ)にしてルートと区別する。同じスポットへの再訪はそのまま複数回経由地として現れる(行って戻る線になる)が、連続する同じスポットへの訪問は長さ0の線分になり矢印の向きが定まらないためまとめる。他の種別の訪問記録・日時不明の訪問は除外する。**この経路上のスポット(`pathIds`)は、シリーズ・カテゴリ・訪問状況の絞り込みで外れていても必ずピンを表示する**(絞り込みではなくその日の訪問を辿るための表示のため全条件を免除。ルートCSVの経由地はシリーズ・カテゴリのみ免除で訪問状況は適用する点と対照的)。
+
+同じ仕組みで、絞り込みモーダルの訪問日の下に**「訪問予定リスト」セレクト**があり、選んだリスト(旅程)のスポットを**リスト順に矢印(紫`PLAN_LIST_PATH_COLOR`=`#9333ea`)で結んだ経路**を描く(`filters.planListId`・`buildPlanListPath`)。訪問日の経路と同じ`spot-routes`ソース/レイヤーに色違いで重ねるだけで(`buildRouteGeoJSON`は色付き経路の配列`extraPaths`を受け取る)、選んだときに`handleSelectPlanList`が経路全体へ`fitBounds`し、経路上のスポットは`pathIds`で絞り込みから免除する点も訪問日と同じ。リストは`MapView`が`api.visitPlanLists.list`で読み(1件以上あるときだけセレクトを出す)、選択は`loadSavedFilters`/`saveFilters`で保存する(削除済み等で見つからないIDは描画側で無視)。地図のリセットは`planListId`も含めて`null`に戻す。
 
 ### 別スポット種別の重ね表示(地図)
 
@@ -209,6 +211,14 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 かつては`date`型+`date_precision`列(`day`/`month`/`year`/`unknown`)で「年だけ分かる」等の粒度を持たせ、表示時に年月日を落としていたが、入力の手間に対して使われず廃止した(列ごと削除)。
 
 自分の訪問記録は`/[type]/spots`の「最近の訪問場所」見出し右のボタンからZIPで一括エクスポートできる(`GET /api/visits/export?type=<種別キー>`。typeは必須で、その種別の分のみ。種別横断のエクスポートは意図的に持たない)。ZIPの中身は`visits.csv`(BOM付きUTF-8。訪問のメモ+スポット情報、`lib/csv.ts`の`buildCsv`)と`photos/<uuid>.<ext>`(添付写真。CSVの「写真」列がこのZIP内パスを指す)。ZIP生成は依存を増やさず`lib/zip.ts`の自前実装(無圧縮STORE。中身が圧縮済み画像と小さなCSVのみのため)で、写真ファイルは配信APIと同じく`parseVisitPhotoPath`の所有者チェックを通ったものだけを読む。
+
+### 訪問予定リスト(旅程)
+
+複数スポットを順序付きでまとめる「訪問予定リスト」(旅程)。1スポットごとの`visit_plans`(行きたい場所のブックマーク)とは**独立**で、`/[type]/spots`の訪問予定欄に個別の予定スポットと**混じって**並ぶ(見出しは0件でも常に表示する)。スキーマは`visit_plan_lists`(種別ごと=`spot_type_id`、`title`・`description`・`start_date`・`end_date`(単日は開始=終了)・`user_id`)+`visit_plan_list_items`(`list_id`・`spot_id`・`seq`、`(list_id, spot_id)`一意)の2テーブル(`db/init/01_schema.sql`、移行は`migrations/006`)。**種別ごと**(地図の作成が`/[type]/map`上で行われるため。CLAUDE作成時の判断で種別横断は不可)。
+
+作成フローは、訪問予定欄の「+ 訪問予定リストを追加」→ 基本情報モーダル(`VisitPlanListFormModal`。タイトル・説明・期間)→ **下書きをlocalStorageへ保存**(`lib/planListDraft.ts`。「入力完了」までDBに保存しないため、SpotsView→MapViewのページ遷移をまたいで保持する必要がある)→ `/[type]/map?buildList=1`へ遷移して**地図の作成モード**に入る。作成モードでは`MapView`が右側に`PlanBuildPanel`(リスト名・選択済みスポットの並び替え/削除・「入力完了」)を出し、**ピンのタップを詳細表示ではなく追加確認ダイアログに回す**(`buildModeRef`で`ensureClusterLayers`が一度だけ束縛するクリックハンドラ`handleSpotSelect`の分岐を切り替える)。並び替えはタッチでも動くようポインタイベントの自前実装(ライブラリ非依存。3本線ハンドル)。「入力完了」で`POST /api/visit-plan-lists`(`{ type, title, description, start_date, end_date, spot_ids }`。spot_idsはseq順)して下書きを消し`/[type]/spots`へ戻る。
+
+一覧APIは`GET /api/visit-plan-lists?type=<キー>`で、各リストの経由スポットを**seq順の`spot_ids`(UUID配列)**として返す(スポット詳細は呼び出し側が保持済みの一覧から解決するため軽い)。リストのタップで`VisitPlanListDetailModal`(タイトル・説明・期間・経由スポット一覧・リスト削除)。`GET/DELETE /api/visit-plan-lists/[id]`は作成者本人のみ。
 
 ### touristのシリーズについて
 

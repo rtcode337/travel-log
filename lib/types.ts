@@ -314,6 +314,24 @@ export interface VisitPlan {
   created_at: string;
 }
 
+/**
+ * 訪問予定リスト(旅程)。複数スポットを順序付きでまとめたもの。種別ごとに紐づき、
+ * 1スポットごとの visit_plans とは独立(詳細はmigrations/006)。
+ * `spot_ids`はseq順の経由スポットのUUID(スポット詳細は呼び出し側が保持済みの一覧から解決)。
+ */
+export interface VisitPlanList {
+  id: string;
+  spot_type_id: string;
+  title: string;
+  description: string | null;
+  /** 訪問予定期間(`YYYY-MM-DD`)。終了日未入力時は開始日と同じ(=単日) */
+  start_date: string;
+  end_date: string;
+  spot_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 /** 口コミ投稿1件(投稿するたびに新しく増える。編集・upsertはしない) */
 export interface Review {
   id: string;
