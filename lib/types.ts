@@ -77,6 +77,8 @@ export interface SpotRoute {
   name: string;
   /** このルートが属するシリーズ(spots.seriesと同じ値空間。未指定ならnull) */
   series: string | null;
+  /** ルートの説明文(地図のルート詳細に表示。未指定ならnull) */
+  description: string | null;
   created_at: string;
   points: SpotRoutePoint[];
 }

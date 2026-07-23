@@ -44,7 +44,7 @@ export async function GET(request: Request) {
   if (resolved.error) return resolved.error;
 
   const { rows } = await query<SpotRoute>(
-    `select r.id, r.spot_type_id, r.name, r.series, r.created_at,
+    `select r.id, r.spot_type_id, r.name, r.series, r.description, r.created_at,
        coalesce(
          (select json_agg(json_build_object(
              'spot_id', p.spot_id, 'seq', p.seq,
@@ -68,6 +68,8 @@ interface RouteInput {
   name: string;
   /** このルートが属するシリーズ。省略・nullなら既定色のルートになる */
   series?: string | null;
+  /** ルートの説明文。省略・nullなら説明なし */
+  description?: string | null;
   spot_ids: string[];
 }
 
@@ -95,6 +97,7 @@ export async function POST(request: Request) {
       typeof route?.name !== "string" ||
       !route.name.trim() ||
       (route.series != null && typeof route.series !== "string") ||
+      (route.description != null && typeof route.description !== "string") ||
       !Array.isArray(route.spot_ids) ||
       route.spot_ids.length < 2 ||
       !route.spot_ids.every((id) => typeof id === "string")
@@ -128,11 +131,14 @@ export async function POST(request: Request) {
     for (const route of routes) {
       const name = route.name.trim();
       const series = route.series?.trim() || null;
+      const description = route.description?.trim() || null;
       const { rows } = await client.query<{ id: string }>(
-        `insert into spot_routes (spot_type_id, name, series) values ($1, $2, $3)
-         on conflict (spot_type_id, name) do update set series = excluded.series
+        `insert into spot_routes (spot_type_id, name, series, description)
+         values ($1, $2, $3, $4)
+         on conflict (spot_type_id, name)
+           do update set series = excluded.series, description = excluded.description
          returning id`,
-        [spotTypeId, name, series]
+        [spotTypeId, name, series, description]
       );
       const routeId = rows[0].id;
       await client.query("delete from spot_route_points where route_id = $1", [

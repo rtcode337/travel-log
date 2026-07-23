@@ -42,6 +42,7 @@ const UNCLUSTERED_LAYER_ID = "spots-unclustered-point";
 const ROUTES_SOURCE_ID = "spot-routes";
 const ROUTE_LINE_LAYER_ID = "spot-routes-line";
 const ROUTE_ARROW_LAYER_ID = "spot-routes-arrow";
+const ROUTE_HIT_LAYER_ID = "spot-routes-hit";
 
 /** ルートにシリーズが設定されていない(または種別の一覧に無い)ときの矢印色 */
 const DEFAULT_ROUTE_COLOR = "#2563eb";
@@ -89,9 +90,15 @@ function ensureRouteArrowImage(map: maplibregl.Map, color: string): string {
 /**
  * ルート用のsource/layerを(まだなければ)追加する。冪等。
  * ピンのクラスタレイヤーが既にあればその下に挿し込み、無ければそのまま追加する
- * (クラスタレイヤーは後から追加されるとルートの上に載るため、どちらの順でもピンが上になる)
+ * (クラスタレイヤーは後から追加されるとルートの上に載るため、どちらの順でもピンが上になる)。
+ * onSelectRouteはルートの線・矢印のタップで呼ぶ(ルート詳細モーダルを開く)。
+ * 初回のレイヤー作成時にしか登録しないため、再レンダーで変わらない関数
+ * (setStateなど)を渡すこと
  */
-function ensureRouteLayers(map: maplibregl.Map) {
+function ensureRouteLayers(
+  map: maplibregl.Map,
+  onSelectRoute: (routeId: string) => void
+) {
   if (map.getSource(ROUTES_SOURCE_ID)) return;
 
   map.addSource(ROUTES_SOURCE_ID, {
@@ -129,6 +136,43 @@ function ensureRouteLayers(map: maplibregl.Map) {
     },
     beforeId
   );
+  // タップの当たり判定用の透明な太い線(2.5pxの線そのものは指で正確に
+  // 押せないため)。queryRenderedFeaturesは不透明度に関係なく形状で判定する
+  map.addLayer(
+    {
+      id: ROUTE_HIT_LAYER_ID,
+      type: "line",
+      source: ROUTES_SOURCE_ID,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-width": 22, "line-opacity": 0 },
+    },
+    beforeId
+  );
+
+  map.on("click", ROUTE_HIT_LAYER_ID, (e) => {
+    // ピン・クラスタと重なった位置のタップはピン側の操作(スポット詳細・
+    // クラスタ展開)を優先する — ピンのレイヤーはルートより上に描かれている
+    const pinLayers = [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID].filter((id) =>
+      map.getLayer(id)
+    );
+    if (
+      pinLayers.length > 0 &&
+      map.queryRenderedFeatures(e.point, { layers: pinLayers }).length > 0
+    ) {
+      return;
+    }
+    // 訪問順の経路(routeIdなし)はルートではないため対象外
+    const routeId = e.features?.find(
+      (f) => typeof f.properties?.routeId === "string"
+    )?.properties?.routeId;
+    if (routeId) onSelectRoute(routeId);
+  });
+  map.on("mouseenter", ROUTE_HIT_LAYER_ID, () => {
+    map.getCanvas().style.cursor = "pointer";
+  });
+  map.on("mouseleave", ROUTE_HIT_LAYER_ID, () => {
+    map.getCanvas().style.cursor = "";
+  });
 }
 
 /**
@@ -221,6 +265,9 @@ function buildVisitPath(
     .filter((spot, i, list) => i === 0 || spot.id !== list[i - 1].id);
 }
 
+/** routeIdはタップでルート詳細を開くのに使う(訪問順の経路には付けない) */
+type RouteFeatureProps = { color: string; icon: string; routeId?: string };
+
 /**
  * ルート(と、訪問日で絞り込み中なら訪問順の経路)をGeoJSONのLineString群にする。
  * 矢印画像の登録もここで済ませる
@@ -230,11 +277,8 @@ function buildRouteGeoJSON(
   routes: SpotRoute[],
   seriesStyles: SeriesStyleDefinition[],
   visitPath: Spot[]
-): GeoJSON.FeatureCollection<GeoJSON.LineString, { color: string; icon: string }> {
-  const visitFeatures: GeoJSON.Feature<
-    GeoJSON.LineString,
-    { color: string; icon: string }
-  >[] =
+): GeoJSON.FeatureCollection<GeoJSON.LineString, RouteFeatureProps> {
+  const visitFeatures: GeoJSON.Feature<GeoJSON.LineString, RouteFeatureProps>[] =
     visitPath.length >= 2
       ? [
           {
@@ -255,23 +299,27 @@ function buildRouteGeoJSON(
     type: "FeatureCollection",
     features: [
       ...visitFeatures,
-      ...routes.map<
-        GeoJSON.Feature<GeoJSON.LineString, { color: string; icon: string }>
-      >((route) => {
-        // ルートのシリーズが種別の一覧にあれば、そのシリーズの縁取り色
-        // (地の色より濃く、地図上で見やすい)で描く
-        const color =
-          seriesStyles.find((s) => s.series === route.series)?.borderColor ??
-          DEFAULT_ROUTE_COLOR;
-        return {
-          type: "Feature",
-          geometry: {
-            type: "LineString",
-            coordinates: route.points.map((p) => [p.lng, p.lat]),
-          },
-          properties: { color, icon: ensureRouteArrowImage(map, color) },
-        };
-      }),
+      ...routes.map<GeoJSON.Feature<GeoJSON.LineString, RouteFeatureProps>>(
+        (route) => {
+          // ルートのシリーズが種別の一覧にあれば、そのシリーズの縁取り色
+          // (地の色より濃く、地図上で見やすい)で描く
+          const color =
+            seriesStyles.find((s) => s.series === route.series)?.borderColor ??
+            DEFAULT_ROUTE_COLOR;
+          return {
+            type: "Feature",
+            geometry: {
+              type: "LineString",
+              coordinates: route.points.map((p) => [p.lng, p.lat]),
+            },
+            properties: {
+              color,
+              icon: ensureRouteArrowImage(map, color),
+              routeId: route.id,
+            },
+          };
+        }
+      ),
     ],
   };
 }
@@ -594,6 +642,8 @@ export default function MapView({
   // 何らかの絞り込みが掛かっているか(絞り込みボタンの見た目に使う。ルート表示のオン/オフは含めない)
   const filtersActive = hasActiveFilters(filters);
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
+  // タップされたルート(ルート詳細モーダルの表示対象)
+  const [detailRouteId, setDetailRouteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [role, setRole] = useState<Role | null>(null);
@@ -1021,7 +1071,7 @@ export default function MapView({
     const visitPath = buildVisitPath(visits, filters, spotById);
 
     runWhenMapReady(() => {
-      ensureRouteLayers(map);
+      ensureRouteLayers(map, setDetailRouteId);
       const source = map.getSource(ROUTES_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
@@ -1055,6 +1105,11 @@ export default function MapView({
       pendingMarkersRef.current.push(marker);
     }
   }, [pendingSpots]);
+
+  // タップされたルート(絞り込み等でルート一覧が入れ替わって見つからなければ閉じる扱い)
+  const detailRoute = detailRouteId
+    ? routes.find((r) => r.id === detailRouteId) ?? null
+    : null;
 
   return (
     <div className="relative h-[calc(100dvh-4rem)]">
@@ -1258,6 +1313,70 @@ export default function MapView({
             setAddSpotAt(null);
           }}
         />
+      )}
+
+      {/* ルート詳細モーダル(ルートの線・矢印のタップで開く) */}
+      {detailRoute && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+          onClick={() => setDetailRouteId(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="font-bold">{detailRoute.name}</h2>
+              <button
+                type="button"
+                onClick={() => setDetailRouteId(null)}
+                aria-label="閉じる"
+                className="text-xl leading-none text-gray-400"
+              >
+                ✕
+              </button>
+            </div>
+            {detailRoute.description && (
+              <p className="whitespace-pre-wrap text-sm text-gray-700">
+                {detailRoute.description}
+              </p>
+            )}
+            {detailRoute.points.length > 0 && (
+              <div className="space-y-1.5 border-t border-gray-100 pt-3 text-sm">
+                {[
+                  { label: "始点", point: detailRoute.points[0] },
+                  {
+                    label: "終点",
+                    point: detailRoute.points[detailRoute.points.length - 1],
+                  },
+                ].map(({ label, point }) => (
+                  <div key={label} className="flex items-baseline gap-2">
+                    <span className="w-8 shrink-0 text-xs font-medium text-gray-500">
+                      {label}
+                    </span>
+                    {/* スポット名のタップでその位置へ飛ぶ(モーダルは閉じる) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDetailRouteId(null);
+                        mapRef.current?.flyTo({
+                          center: [point.lng, point.lat],
+                          zoom: 16,
+                        });
+                      }}
+                      className="min-w-0 truncate text-left font-medium text-blue-600 underline"
+                    >
+                      {point.spot_name}
+                    </button>
+                  </div>
+                ))}
+                <p className="pt-1 text-xs text-gray-500">
+                  経由地{detailRoute.points.length}件。スポット名をタップすると、その位置に地図を移動します。
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* スポット詳細モーダル */}
