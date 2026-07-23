@@ -205,14 +205,18 @@ create index spot_routes_series_idx on spot_routes (series);
 -- =============================================================
 -- spot_route_points: ルートの経由地(順序付き)。seqの昇順が巡った順で、
 -- 隣り合う2点の間に矢印が引かれる。スポット削除時はcascadeで点だけ抜け、
--- ルート自体は残る(矢印は残った点同士を繋ぐ)
+-- ルート自体は残る(矢印は残った点同士を繋ぐ)。
+-- descriptionはこの経由地から次の経由地への区間の説明(移動手段など。
+-- ルート詳細の経由地一覧で2点の間に表示する)。最終地点には次の区間が
+-- 無いため常にnull。ルート全体の説明はspot_routes.description
 -- =============================================================
 create table spot_route_points (
-  route_id   uuid not null references spot_routes (id) on delete cascade,
-  seq        integer not null,
-  spot_id    uuid not null references spots (id) on delete cascade,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
+  route_id    uuid not null references spot_routes (id) on delete cascade,
+  seq         integer not null,
+  spot_id     uuid not null references spots (id) on delete cascade,
+  description text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
   primary key (route_id, seq)
 );
 
