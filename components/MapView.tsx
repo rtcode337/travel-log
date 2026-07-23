@@ -18,9 +18,15 @@ import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
 import type { Role, Spot, SpotRoute, SpotType, Visit } from "@/lib/types";
 import { expandSpot, readSpotCacheDb } from "@/lib/spotCacheDb";
-import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
+import { autoTextColor, type SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
-import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
+import {
+  downloadSpotCacheFor,
+  formatBytes,
+  formatDownloadedAt,
+  useSpotCache,
+  type DownloadProgress,
+} from "@/lib/useSpotCache";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useCategories } from "@/lib/useCategories";
 import FilterBar, {
@@ -34,7 +40,9 @@ import FilterBar, {
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotDetailModal from "@/components/SpotDetailModal";
-import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
+import SpotDownloadDialogs, {
+  DownloadProgressDialog,
+} from "@/components/SpotDownloadDialogs";
 
 const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
@@ -275,6 +283,8 @@ function ensureOverlayLayers(
     source: OVERLAY_SOURCE_ID,
     filter: ["has", "point_count"],
     paint: {
+      // circle-colorは初期値。描画時に重ね先の種別の先頭シリーズの色で上書きされる
+      // (対応するtext-colorの上書きも同様)
       "circle-color": "#2563eb",
       "circle-opacity": OVERLAY_OPACITY * 0.85,
       "circle-stroke-width": 2,
@@ -901,11 +911,26 @@ export default function MapView({
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
   const [overlayDetailSpotId, setOverlayDetailSpotId] = useState<string | null>(null);
   const [overlayDetailRouteId, setOverlayDetailRouteId] = useState<string | null>(null);
+  // 未ダウンロードの種別を選んだときの「ダウンロードしますか?」確認(値は対象の種別キー)
+  const [overlayDownloadPrompt, setOverlayDownloadPrompt] = useState<string | null>(
+    null
+  );
+  const [overlayDownloading, setOverlayDownloading] = useState(false);
+  const [overlayProgress, setOverlayProgress] = useState<DownloadProgress | null>(
+    null
+  );
+  const overlayAbortRef = useRef<AbortController | null>(null);
+  // 未ダウンロード時にダウンロード確認を出してよいか。ユーザーがセレクトで選んだ
+  // 直後だけtrueにする(保存済み選択の復元でキャッシュが無かった場合=後から
+  // キャッシュを削除した場合は、地図を開いただけで突然ダイアログが出ないよう
+  // 従来どおり黙って選択を解除する)
+  const overlayPromptOnMissingRef = useRef(false);
   // 重ね表示が無効の間は使われない(現在種別の値を返すだけ)
   const overlaySeriesStyles = useSeriesStyles(overlayTypeKey ?? spotTypeKey);
 
   const setOverlayTypeKey = useCallback(
     (next: string | null) => {
+      overlayPromptOnMissingRef.current = true;
       saveOverlayTypeKey(spotTypeKey, next);
       setOverlayTypeKeyState(next);
       setOverlayMessage(null);
@@ -915,9 +940,13 @@ export default function MapView({
 
   // 重ね表示の選択も、絞り込み条件と同様に保存済みの値を復元する
   useEffect(() => {
+    overlayPromptOnMissingRef.current = false;
     setOverlayTypeKeyState(loadSavedOverlayTypeKey(spotTypeKey));
     setOverlayMessage(null);
   }, [spotTypeKey]);
+
+  // アンマウント時は進行中の重ね表示用ダウンロードを打ち切る
+  useEffect(() => () => overlayAbortRef.current?.abort(), []);
 
   // 重ね表示の選択肢用の種別一覧(GETはapi-client側でキャッシュされる)
   useEffect(() => {
@@ -938,13 +967,19 @@ export default function MapView({
       const stored = await readSpotCacheDb(overlayTypeKey);
       if (cancelled) return;
       if (!stored) {
-        // 未ダウンロードの種別は重ねられない(ここからはダウンロードさせず、
-        // その種別の地図画面で明示的にダウンロードしてもらう)
-        setOverlayMessage(
-          "選んだ種別の公開スポットが未ダウンロードのため重ねられません。その種別の地図画面でダウンロードしてから選び直してください。"
-        );
-        setOverlayTypeKeyState(null);
-        saveOverlayTypeKey(spotTypeKey, null);
+        if (overlayPromptOnMissingRef.current) {
+          // セレクトで選んだ直後なら、その場でダウンロードするか確認する
+          // (選択は保持したまま。キャンセル・失敗時にハンドラ側で解除する)
+          setOverlayDownloadPrompt(overlayTypeKey);
+        } else {
+          // 保存済み選択の復元でキャッシュが無かった場合(後からキャッシュを
+          // 削除した場合)は、突然ダイアログを出さず黙って選択を解除する
+          setOverlayMessage(
+            "選んだ種別の公開スポットが未ダウンロードのため重ねられません。もう一度選ぶとダウンロードできます。"
+          );
+          setOverlayTypeKeyState(null);
+          saveOverlayTypeKey(spotTypeKey, null);
+        }
         return;
       }
       setOverlaySpots(stored.spots.map(expandSpot));
@@ -954,6 +989,47 @@ export default function MapView({
       cancelled = true;
     };
   }, [overlayTypeKey, spotTypeKey]);
+
+  /** ダウンロード確認の「キャンセル」: 重ね表示の選択ごと解除する */
+  const cancelOverlayDownloadPrompt = useCallback(() => {
+    setOverlayDownloadPrompt(null);
+    setOverlayTypeKey(null);
+  }, [setOverlayTypeKey]);
+
+  /**
+   * ダウンロード確認の「ダウンロード」: その種別の公開スポット+ルートを取得して
+   * IndexedDBキャッシュへ保存し(その種別の地図・一覧でもそのまま使われる)、
+   * そのまま重ね表示に反映する。中断・失敗時は選択を解除する
+   */
+  const confirmOverlayDownload = useCallback(async () => {
+    const typeKey = overlayDownloadPrompt;
+    setOverlayDownloadPrompt(null);
+    if (!typeKey) return;
+    const controller = new AbortController();
+    overlayAbortRef.current = controller;
+    setOverlayDownloading(true);
+    setOverlayProgress(null);
+    try {
+      const entry = await downloadSpotCacheFor(typeKey, controller, setOverlayProgress);
+      if (!entry) {
+        // キャンセル時は選択も解除する
+        setOverlayTypeKey(null);
+        return;
+      }
+      setOverlaySpots(entry.spots);
+      setOverlayRoutes(entry.routes);
+    } catch (err) {
+      // setOverlayTypeKey(null)がoverlayMessageを消すため、メッセージは解除の後に出す
+      setOverlayTypeKey(null);
+      setOverlayMessage(
+        `ダウンロードに失敗しました${err instanceof Error && err.message ? `: ${err.message}` : ""}`
+      );
+    } finally {
+      overlayAbortRef.current = null;
+      setOverlayDownloading(false);
+      setOverlayProgress(null);
+    }
+  }, [overlayDownloadPrompt, setOverlayTypeKey]);
 
   const [loading, setLoading] = useState(true);
 
@@ -1445,6 +1521,15 @@ export default function MapView({
 
       const render = async () => {
         ensureOverlayLayers(map, setOverlayDetailSpotId, setOverlayDetailRouteId);
+        // クラスタは重ね先の種別の先頭シリーズの色で塗り、本体の青いクラスタと
+        // 見分けられるようにする(シリーズ設定が空の種別は未知シリーズのピンと同系のグレー)
+        const clusterColor = overlaySeriesStyles[0]?.color ?? "#9ca3af";
+        map.setPaintProperty(OVERLAY_CLUSTER_LAYER_ID, "circle-color", clusterColor);
+        map.setPaintProperty(
+          OVERLAY_CLUSTER_COUNT_LAYER_ID,
+          "text-color",
+          autoTextColor(clusterColor)
+        );
         // キャッシュには公開スポットしか入らないため、非公開(破線)のピンは不要
         await Promise.all(
           filtered.map((spot) =>
@@ -1665,7 +1750,7 @@ export default function MapView({
                   <p className="mt-1 text-xs text-red-600">{overlayMessage}</p>
                 )}
                 <p className="mt-1 text-xs text-gray-500">
-                  選んだ種別のダウンロード済み公開スポットとルートを半透明で重ねて表示します。絞り込みとルート表示のオン/オフは、その種別の地図で自分が設定した内容に従います。
+                  選んだ種別の公開スポットとルートを半透明で重ねて表示します(未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは、その種別の地図で自分が設定した内容に従います。
                 </p>
               </div>
             )}
@@ -1885,6 +1970,43 @@ export default function MapView({
       )}
 
       <SpotDownloadDialogs cache={spotCache} />
+
+      {/* 「別の種別を重ねて表示」で未ダウンロードの種別を選んだときの確認と進捗。
+          絞り込みモーダル(z-50)より上に出す */}
+      {overlayDownloadPrompt && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4">
+            <p className="text-sm text-gray-700">
+              「
+              {spotTypes.find((t) => t.key === overlayDownloadPrompt)?.label ??
+                overlayDownloadPrompt}
+              」の公開スポットが未ダウンロードです。ダウンロードして重ねて表示しますか?
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={cancelOverlayDownloadPrompt}
+                className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={confirmOverlayDownload}
+                className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
+              >
+                ダウンロード
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {overlayDownloading && (
+        <DownloadProgressDialog
+          progress={overlayProgress}
+          onCancel={() => overlayAbortRef.current?.abort()}
+        />
+      )}
     </div>
   );
 }
