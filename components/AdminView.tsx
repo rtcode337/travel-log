@@ -57,7 +57,7 @@ const CSV_COLUMNS = [
 
 // ルートCSV(スポットを巡った順に矢印で繋ぐ)の列。spot_keyはスポットCSVのkey列を指す
 // seriesは省略可(ルートを地図でどのシリーズの色に塗るか。同じrouteの全行に同じ値を書く)
-const ROUTE_CSV_COLUMNS = ["route", "series", "seq", "spot_key"] as const;
+const ROUTE_CSV_COLUMNS = ["route", "series", "seq", "spot_key", "description"] as const;
 
 /**
  * ヘッダーに定義外の列があれば、その一覧を返す(無ければ空配列)。
@@ -925,19 +925,28 @@ export default function AdminView({
       );
       const errors: string[] = [];
       const grouped = new Map<string, { seq: number; spotId: string }[]>();
-      // seriesはルート単位の値だが、CSVは行単位なので同じrouteの各行に同じ値が並ぶ。
-      // 最初に現れた値を採り、同一route内で食い違う行はエラーにする
+      // series・descriptionはルート単位の値だが、CSVは行単位なので同じrouteの
+      // 各行に同じ値が並ぶ。最初に現れた値を採り、同一route内で食い違う行はエラーにする
       const seriesByRoute = new Map<string, string | null>();
+      const descriptionByRoute = new Map<string, string | null>();
       const seenSeq = new Set<string>();
       for (let i = 1; i < rows.length; i++) {
         const get = (c: (typeof ROUTE_CSV_COLUMNS)[number]) =>
           idx[c] === -1 ? "" : (rows[i][idx[c]] ?? "").trim();
         const route = get("route");
         const series = get("series") || null;
+        const description = get("description") || null;
         const seq = Number(get("seq"));
         const spotKey = get("spot_key");
         if (route && seriesByRoute.has(route) && seriesByRoute.get(route) !== series) {
           errors.push(`${i + 1}行目: route「${route}」のseriesが他の行と食い違う`);
+        }
+        if (
+          route &&
+          descriptionByRoute.has(route) &&
+          descriptionByRoute.get(route) !== description
+        ) {
+          errors.push(`${i + 1}行目: route「${route}」のdescriptionが他の行と食い違う`);
         }
         if (!route) errors.push(`${i + 1}行目: route が空`);
         else if (!Number.isFinite(seq)) errors.push(`${i + 1}行目: seq が数値でない`);
@@ -951,6 +960,7 @@ export default function AdminView({
         else {
           seenSeq.add(`${route}|${seq}`);
           if (!seriesByRoute.has(route)) seriesByRoute.set(route, series);
+          if (!descriptionByRoute.has(route)) descriptionByRoute.set(route, description);
           const list = grouped.get(route) ?? [];
           list.push({ seq, spotId: spotsByKey.get(spotKey)!.id });
           grouped.set(route, list);
@@ -966,25 +976,39 @@ export default function AdminView({
         return;
       }
 
-      // 差分更新: 既存ルートとシリーズ・経由地の並びが完全一致するものはスキップし、
+      // 差分更新: 既存ルートとシリーズ・説明・経由地の並びが完全一致するものはスキップし、
       // 変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと置き換え)
       const existingByName = new Map(
         routes.map((r) => [
           r.name,
-          { series: r.series, spotIds: r.points.map((p) => p.spot_id).join("|") },
+          {
+            series: r.series,
+            description: r.description,
+            spotIds: r.points.map((p) => p.spot_id).join("|"),
+          },
         ])
       );
-      const changed: { name: string; series: string | null; spot_ids: string[] }[] = [];
+      const changed: {
+        name: string;
+        series: string | null;
+        description: string | null;
+        spot_ids: string[];
+      }[] = [];
       let unchangedCount = 0;
       for (const [route, list] of grouped) {
         const spotIds = list.sort((a, b) => a.seq - b.seq).map((p) => p.spotId);
         const series = seriesByRoute.get(route) ?? null;
+        const description = descriptionByRoute.get(route) ?? null;
         const existing = existingByName.get(route);
-        if (existing?.spotIds === spotIds.join("|") && existing.series === series) {
+        if (
+          existing?.spotIds === spotIds.join("|") &&
+          existing.series === series &&
+          existing.description === description
+        ) {
           unchangedCount++;
           continue;
         }
-        changed.push({ name: route, series, spot_ids: spotIds });
+        changed.push({ name: route, series, description, spot_ids: spotIds });
       }
       if (changed.length === 0) {
         setRouteMessage(
@@ -1437,15 +1461,17 @@ export default function AdminView({
               </h3>
               <p className="mb-3 text-xs text-gray-500">
                 スポットを巡った順に矢印で繋ぐルートをCSVで取り込み、地図に表示する。
-                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(seriesのみ省略可)。routeはルート名、
-                seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、spot_keyは
-                スポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
+                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(seriesとdescriptionは省略可)。
+                routeはルート名、seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、
+                spot_keyはスポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
                 矢印がそのシリーズの縁取り色で描かれ、地図のシリーズ絞り込みにも
                 連動する(表示中のルートの経由地は、スポット自体のシリーズが
-                絞り込みで外れていてもピンが表示される)。seriesはルート単位の値なので、
-                同じrouteの行にはすべて同じ値を書く(空欄なら既定色)。
+                絞り込みで外れていてもピンが表示される)。descriptionはルートの説明文で、
+                地図でルートの線をタップすると出る詳細に表示される。
+                series・descriptionはルート単位の値なので、同じrouteの行には
+                すべて同じ値を書く(空欄なら既定色・説明なし)。
                 差分更新: 既存と同名のルートは
-                シリーズと経由地を丸ごと置き換え、CSVに無いルートには触らない。
+                シリーズ・説明・経由地を丸ごと置き換え、CSVに無いルートには触らない。
                 取り込みの前に、spot_keyが指すスポットをスポットCSVでインポートして
                 おくこと(key未設定のスポットは参照できない)。
               </p>

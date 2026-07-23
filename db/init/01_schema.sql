@@ -152,13 +152,15 @@ create unique index spots_spot_type_key_idx
 -- nameはルートの表示名。seriesはこのルートが属するシリーズ(spots.seriesと
 -- 同じ値空間)で、指定するとその色で矢印が描かれ、シリーズ絞り込みにも連動する。
 -- 表示名とシリーズは別物のため列を分けてある(同じシリーズに複数のルートを
--- 持たせられる)。未指定(null)のルートは既定色で描かれる
+-- 持たせられる)。未指定(null)のルートは既定色で描かれる。
+-- descriptionはルートの説明文(地図でルートの線をタップすると出る詳細に表示)
 -- =============================================================
 create table spot_routes (
   id           uuid primary key default gen_random_uuid(),
   spot_type_id uuid not null references spot_types (id) on delete cascade,
   name         text not null,
   series       text,
+  description  text,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   unique (spot_type_id, name)
