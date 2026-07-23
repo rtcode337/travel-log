@@ -24,6 +24,7 @@ import { useCategories } from "@/lib/useCategories";
 import FilterBar, {
   DEFAULT_FILTERS,
   FilterResetButton,
+  hasActiveFilters,
   passesFilters,
   toVisitDateKey,
   type SpotFilters,
@@ -132,8 +133,10 @@ function ensureRouteLayers(map: maplibregl.Map) {
 
 /**
  * シリーズ・カテゴリの絞り込みを適用した表示対象のルート(経由地2点以上)を返す。
- * どちらも「すべて」(絞り込みなし)のときは全ルートの線が重なって地図が
- * 見づらくなるため、ルートは一切表示しない。
+ * 表示するかどうか自体は絞り込みモーダルの「ルートを表示」トグル
+ * (`filters.showRoutes`)だけで決まり、オフなら一切表示しない
+ * (かつての「シリーズ・カテゴリで絞り込み中のみ自動表示」ルールは廃止した)。
+ * オンならシリーズ・カテゴリの絞り込みが無くても全ルートを表示する。
  *
  * シリーズで絞り込んでいるときは、ルートのseriesがこの種別のシリーズ一覧に
  * あるものだけ絞り込みに連動して出し分け、シリーズ未指定・一覧に無いシリーズの
@@ -155,7 +158,7 @@ function filterVisibleRoutes(
   seriesStyles: SeriesStyleDefinition[],
   spotById: Map<string, Spot>
 ): SpotRoute[] {
-  if (filters.series.length === 0 && filters.categories.length === 0) return [];
+  if (!filters.showRoutes) return [];
   const knownSeries = new Set(seriesStyles.map((s) => s.series));
   return routes.filter((route) => {
     if (route.points.length < 2) return false;
@@ -456,15 +459,9 @@ function loadSavedFilters(typeKey: string): SpotFilters {
         (v): v is VisitedValue => v === "visited" || v === "unvisited"
       ),
       visitedDate: date(obj.visitedDate),
+      showRoutes: obj.showRoutes === true,
     };
-    if (
-      filters.series.length === 0 &&
-      filters.categories.length === 0 &&
-      filters.visited.length === 0 &&
-      !filters.visitedDate
-    ) {
-      return DEFAULT_FILTERS;
-    }
+    if (!hasActiveFilters(filters)) return DEFAULT_FILTERS;
     return filters;
   } catch {
     return DEFAULT_FILTERS;
@@ -589,12 +586,8 @@ export default function MapView({
   useEffect(() => {
     setFiltersState(loadSavedFilters(spotTypeKey));
   }, [spotTypeKey]);
-  // シリーズ・カテゴリ・訪問状況・訪問日のいずれかで絞り込み中か(絞り込みボタンの見た目に使う)
-  const filtersActive =
-    filters.series.length > 0 ||
-    filters.categories.length > 0 ||
-    filters.visited.length > 0 ||
-    !!filters.visitedDate;
+  // 絞り込み条件が既定から変わっているか(ルート表示のオンを含む。絞り込みボタンの見た目に使う)
+  const filtersActive = hasActiveFilters(filters);
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -1148,6 +1141,7 @@ export default function MapView({
               seriesStyles={seriesStyles}
               categories={categories}
               visitDates={visitDates}
+              showRouteToggle={routes.length > 0}
             />
 
             <div className="border-t border-gray-100 pt-3">

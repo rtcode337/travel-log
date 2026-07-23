@@ -20,6 +20,13 @@ export interface SpotFilters {
    * null = 訪問日による絞り込みなし。選べるのは自分の訪問記録がある日のみ
    */
   visitedDate: string | null;
+  /**
+   * ルート(巡った順の矢印)を地図に表示するか。オンならシリーズ・カテゴリの
+   * 絞り込みが無くても全ルートを表示し、絞り込み中はそれに連動して絞られる
+   * (`MapView`の`filterVisibleRoutes`)。地図専用の設定だがスポット一覧と
+   * 型を共用しているため、一覧側では単に使われないだけ
+   */
+  showRoutes: boolean;
 }
 
 export const DEFAULT_FILTERS: SpotFilters = {
@@ -27,6 +34,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   categories: [],
   visited: [],
   visitedDate: null,
+  showRoutes: false,
 };
 
 /**
@@ -81,13 +89,14 @@ export function passesFilters(
   return true;
 }
 
-/** 何らかの絞り込みが掛かっているか(リセットボタンの表示条件) */
+/** 既定から変わっている条件があるか(リセットボタンの表示条件) */
 export function hasActiveFilters(filters: SpotFilters): boolean {
   return (
     filters.series.length > 0 ||
     filters.categories.length > 0 ||
     filters.visited.length > 0 ||
-    filters.visitedDate !== null
+    filters.visitedDate !== null ||
+    filters.showRoutes
   );
 }
 
@@ -172,6 +181,7 @@ export default function FilterBar({
   categories,
   visitDates,
   showReset = true,
+  showRouteToggle = false,
 }: {
   /** 現在アクティブなスポット種別の実データから、シリーズ・カテゴリの選択肢を動的に作る */
   spots: Spot[];
@@ -188,6 +198,11 @@ export default function FilterBar({
   categories: Category[];
   /** falseにすると内蔵のリセットボタンを出さない(呼び出し側で別の場所に置く場合) */
   showReset?: boolean;
+  /**
+   * ルート表示のオン/オフトグルを出す(地図で、かつルートのある種別のみ。
+   * スポット一覧はルートを描かないため出さない)
+   */
+  showRouteToggle?: boolean;
 }) {
   const availableSeries = useMemo(
     () =>
@@ -294,6 +309,27 @@ export default function FilterBar({
           />
         </div>
       </div>
+
+      {showRouteToggle && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-gray-500">
+            ルート
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            <Chip
+              label="ルートを表示"
+              active={filters.showRoutes}
+              activeClassName={ALL_CHIP_ACTIVE_CLASS}
+              onClick={() =>
+                onChange({ ...filters, showRoutes: !filters.showRoutes })
+              }
+            />
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            オンにすると、巡った順の矢印(ルート)を地図に表示します。シリーズ・カテゴリで絞り込み中は、該当するルートだけに絞られます。
+          </p>
+        </div>
+      )}
 
       {visitDateOptions.length > 0 && (
         <div>
