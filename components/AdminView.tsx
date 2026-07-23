@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { parseCsv } from "@/lib/csv";
+import { buildCsv, parseCsv } from "@/lib/csv";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import {
   CATEGORIES_SETTING_KEY,
+  formatCategoryList,
   parseCategoryList,
   resolveCategories,
   sameCategories,
@@ -29,6 +30,7 @@ import {
   SPOT_ADMIN_ROLES,
   SPOT_TYPE_SETTING_KEYS,
   SPOT_TYPE_SETTING_LABELS,
+  STATUS_LABELS,
   type AppUser,
   type Role,
   type Spot,
@@ -57,7 +59,7 @@ const CSV_COLUMNS = [
 
 // ルートCSV(スポットを巡った順に矢印で繋ぐ)の列。spot_keyはスポットCSVのkey列を指す
 // seriesは省略可(ルートを地図でどのシリーズの色に塗るか。同じrouteの全行に同じ値を書く)
-const ROUTE_CSV_COLUMNS = ["route", "series", "seq", "spot_key"] as const;
+const ROUTE_CSV_COLUMNS = ["route", "series", "seq", "spot_key", "description"] as const;
 
 /**
  * ヘッダーに定義外の列があれば、その一覧を返す(無ければ空配列)。
@@ -95,6 +97,10 @@ export default function AdminView({
     done: number;
     total: number;
   } | null>(null);
+
+  // travel-log-dataへの還元用エクスポート(手動追加の公開スポット+削除の墓標)
+  const [exportingManual, setExportingManual] = useState(false);
+  const [manualExportMessage, setManualExportMessage] = useState<string | null>(null);
 
   // ルート(スポットを巡った順に矢印で繋ぐ)の一覧とCSVインポート用
   const [routes, setRoutes] = useState<SpotRoute[]>([]);
@@ -680,6 +686,7 @@ export default function AdminView({
     categories: string[] | null;
     description: string | null;
     status: string;
+    origin: "csv";
   }
 
   const handleCsvFile = async (file: File) => {
@@ -744,6 +751,9 @@ export default function AdminView({
             // CSVインポートはこのページ(spot_admin/admin専用)からのみ行えるため、
             // 承認待ちを経由せずそのまま公開する
             status: "published",
+            // 登録経路の記録。手動追加(既定'manual')と区別し、還元用エクスポートの
+            // 抽出対象から外す
+            origin: "csv",
           });
       }
       if (errors.length > 0) {
@@ -798,7 +808,10 @@ export default function AdminView({
         (record.categories !== null &&
           !sameCategories(spot.categories, record.categories)) ||
         spot.description !== record.description ||
-        (record.key !== null && spot.key !== record.key);
+        (record.key !== null && spot.key !== record.key) ||
+        // 手動追加(manual)の行がCSVと一致した=travel-log-dataへ還元済みなので、
+        // 内容が同一でもPATCHしてorigin='csv'に倒す(次回の還元用エクスポートから外す)
+        spot.origin !== "csv";
       for (const record of records) {
         const diffKey = spotDiffKey(record.name, record.lat, record.lng);
         const existing =
@@ -862,6 +875,7 @@ export default function AdminView({
             : {}),
           description: record.description,
           ...(record.key !== null ? { key: record.key } : {}),
+          origin: record.origin,
         });
         if (error) {
           setMessage(
@@ -887,6 +901,107 @@ export default function AdminView({
     } finally {
       setImporting(false);
       setImportProgress(null);
+    }
+  };
+
+  /**
+   * travel-log-dataへの還元用エクスポート。画面から手動追加された公開スポット
+   * (origin='manual'。spots.csvへの収録候補)と、画面から個別削除されたCSV由来の
+   * 公開スポット(削除の墓標。exclude.txtへの追記候補)を1つのMarkdownにまとめて
+   * ダウンロードする。還元作業はClaude Code等が読む前提のため、インポータで
+   * 機械的に読み込める形式にはしていない(人間/AIが読める整理を優先)
+   */
+  const handleExportManualSpots = async () => {
+    setExportingManual(true);
+    setManualExportMessage(null);
+    try {
+      const { data: deletions, error } = await api.spotDeletions.list(typeKey);
+      if (error) {
+        setManualExportMessage("削除の記録の取得に失敗しました: " + error.message);
+        return;
+      }
+      const manualSpots = spots.filter(
+        (s) => s.origin === "manual" && s.status === "published"
+      );
+      const deleted = deletions ?? [];
+      if (manualSpots.length === 0 && deleted.length === 0) {
+        setManualExportMessage(
+          "還元する対象がありません(手動追加された公開スポット・画面から削除されたCSV由来のスポットのどちらも0件)。"
+        );
+        return;
+      }
+
+      const now = new Date();
+      const dateKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+      const spotsCsv = buildCsv([
+        ["name", "name_kana", "lat", "lng", "region", "series", "categories", "description"],
+        ...manualSpots.map((s) => [
+          s.name,
+          s.name_kana,
+          s.lat,
+          s.lng,
+          s.region,
+          s.series,
+          formatCategoryList(s.categories),
+          s.description,
+        ]),
+      ]).trimEnd();
+      const excludeKeys = deleted.map((d) => d.key ?? d.name).join("\n");
+      const md = [
+        `# travel-log-data 還元用エクスポート`,
+        ``,
+        `- スポット種別: \`${typeKey}\``,
+        `- エクスポート日時: ${now.toLocaleString("ja-JP")}`,
+        `- 画面から手動追加された公開スポットと、画面から個別削除されたCSV由来の公開スポットの一覧。`,
+        `  travel-log-data への還元(スポットCSVへの収録・exclude.txt への追記)に使う`,
+        ``,
+        `## 手動追加された公開スポット(${manualSpots.length}件)`,
+        ``,
+        ...(manualSpots.length === 0
+          ? [`なし。`]
+          : [
+              `スポットCSVへの追加候補。key列は付けていないので、travel-log-data側の規則`,
+              `(スポット名、重複時のみ連番サフィックス)で収録時に振ること。`,
+              ``,
+              "```csv",
+              spotsCsv,
+              "```",
+            ]),
+        ``,
+        `## 画面から削除されたCSV由来の公開スポット(${deleted.length}件)`,
+        ``,
+        ...(deleted.length === 0
+          ? [`なし。`]
+          : [
+              `スポットCSVから該当行を消し、exclude.txt に以下のキーを追記する`,
+              `(key未設定だったスポットは名前で載せている)。`,
+              ``,
+              "```",
+              excludeKeys,
+              "```",
+              ``,
+              `詳細:`,
+              ``,
+              ...deleted.map(
+                (d) =>
+                  `- ${d.name}(key: ${d.key ?? "未設定"}、${d.region}、lat: ${d.lat}、lng: ${d.lng}、削除日時: ${new Date(d.created_at).toLocaleString("ja-JP")})`
+              ),
+            ]),
+        ``,
+      ].join("\n");
+
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${typeKey}_feedback_${dateKey}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setManualExportMessage(
+        `エクスポートしました(追加候補${manualSpots.length}件・削除候補${deleted.length}件)。`
+      );
+    } finally {
+      setExportingManual(false);
     }
   };
 
@@ -925,19 +1040,28 @@ export default function AdminView({
       );
       const errors: string[] = [];
       const grouped = new Map<string, { seq: number; spotId: string }[]>();
-      // seriesはルート単位の値だが、CSVは行単位なので同じrouteの各行に同じ値が並ぶ。
-      // 最初に現れた値を採り、同一route内で食い違う行はエラーにする
+      // series・descriptionはルート単位の値だが、CSVは行単位なので同じrouteの
+      // 各行に同じ値が並ぶ。最初に現れた値を採り、同一route内で食い違う行はエラーにする
       const seriesByRoute = new Map<string, string | null>();
+      const descriptionByRoute = new Map<string, string | null>();
       const seenSeq = new Set<string>();
       for (let i = 1; i < rows.length; i++) {
         const get = (c: (typeof ROUTE_CSV_COLUMNS)[number]) =>
           idx[c] === -1 ? "" : (rows[i][idx[c]] ?? "").trim();
         const route = get("route");
         const series = get("series") || null;
+        const description = get("description") || null;
         const seq = Number(get("seq"));
         const spotKey = get("spot_key");
         if (route && seriesByRoute.has(route) && seriesByRoute.get(route) !== series) {
           errors.push(`${i + 1}行目: route「${route}」のseriesが他の行と食い違う`);
+        }
+        if (
+          route &&
+          descriptionByRoute.has(route) &&
+          descriptionByRoute.get(route) !== description
+        ) {
+          errors.push(`${i + 1}行目: route「${route}」のdescriptionが他の行と食い違う`);
         }
         if (!route) errors.push(`${i + 1}行目: route が空`);
         else if (!Number.isFinite(seq)) errors.push(`${i + 1}行目: seq が数値でない`);
@@ -951,6 +1075,7 @@ export default function AdminView({
         else {
           seenSeq.add(`${route}|${seq}`);
           if (!seriesByRoute.has(route)) seriesByRoute.set(route, series);
+          if (!descriptionByRoute.has(route)) descriptionByRoute.set(route, description);
           const list = grouped.get(route) ?? [];
           list.push({ seq, spotId: spotsByKey.get(spotKey)!.id });
           grouped.set(route, list);
@@ -966,25 +1091,50 @@ export default function AdminView({
         return;
       }
 
-      // 差分更新: 既存ルートとシリーズ・経由地の並びが完全一致するものはスキップし、
-      // 変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと置き換え)
+      // 差分更新: 既存ルートとシリーズ・説明・経由地の並びが完全一致するものはスキップし、
+      // 変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと置き換え)。
+      // スポットのCSVインポートと同じく常にstatus: 'published'を明示するため、
+      // 公開以外の既存ルートは内容が同一でも公開に倒す(スキップしない)
       const existingByName = new Map(
         routes.map((r) => [
           r.name,
-          { series: r.series, spotIds: r.points.map((p) => p.spot_id).join("|") },
+          {
+            series: r.series,
+            description: r.description,
+            status: r.status,
+            spotIds: r.points.map((p) => p.spot_id).join("|"),
+          },
         ])
       );
-      const changed: { name: string; series: string | null; spot_ids: string[] }[] = [];
+      const changed: {
+        name: string;
+        series: string | null;
+        description: string | null;
+        status: "published";
+        spot_ids: string[];
+      }[] = [];
       let unchangedCount = 0;
       for (const [route, list] of grouped) {
         const spotIds = list.sort((a, b) => a.seq - b.seq).map((p) => p.spotId);
         const series = seriesByRoute.get(route) ?? null;
+        const description = descriptionByRoute.get(route) ?? null;
         const existing = existingByName.get(route);
-        if (existing?.spotIds === spotIds.join("|") && existing.series === series) {
+        if (
+          existing?.spotIds === spotIds.join("|") &&
+          existing.series === series &&
+          existing.description === description &&
+          existing.status === "published"
+        ) {
           unchangedCount++;
           continue;
         }
-        changed.push({ name: route, series, spot_ids: spotIds });
+        changed.push({
+          name: route,
+          series,
+          description,
+          status: "published",
+          spot_ids: spotIds,
+        });
       }
       if (changed.length === 0) {
         setRouteMessage(
@@ -1433,19 +1583,50 @@ export default function AdminView({
 
             <section className="rounded-xl border border-gray-200 bg-white p-3">
               <h3 className="mb-2 text-base font-bold">
+                travel-log-dataへの還元用エクスポート
+              </h3>
+              <p className="mb-3 text-xs text-gray-500">
+                画面から手動追加された公開スポット(スポットCSVへの収録候補)と、
+                画面から個別削除されたCSV由来の公開スポット(exclude.txtへの追記候補)を
+                1つのMarkdownファイルにまとめてダウンロードする。還元作業で
+                Claude Code等に渡す前提の形式で、そのまま再インポートはできない。
+                還元後にkeyを付けたCSVを再インポートすると、一致したスポットは
+                CSV由来(還元済み)の扱いに変わり、次回のエクスポートから外れる。
+              </p>
+
+              {manualExportMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                  {manualExportMessage}
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={handleExportManualSpots}
+                disabled={exportingManual}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                {exportingManual ? "エクスポート中…" : "還元用エクスポート"}
+              </button>
+            </section>
+
+            <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <h3 className="mb-2 text-base font-bold">
                 ルート(巡った順の矢印)のインポート
               </h3>
               <p className="mb-3 text-xs text-gray-500">
                 スポットを巡った順に矢印で繋ぐルートをCSVで取り込み、地図に表示する。
-                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(seriesのみ省略可)。routeはルート名、
-                seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、spot_keyは
-                スポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
+                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(seriesとdescriptionは省略可)。
+                routeはルート名、seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、
+                spot_keyはスポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
                 矢印がそのシリーズの縁取り色で描かれ、地図のシリーズ絞り込みにも
                 連動する(表示中のルートの経由地は、スポット自体のシリーズが
-                絞り込みで外れていてもピンが表示される)。seriesはルート単位の値なので、
-                同じrouteの行にはすべて同じ値を書く(空欄なら既定色)。
+                絞り込みで外れていてもピンが表示される)。descriptionはルートの説明文で、
+                地図でルートの線をタップすると出る詳細に表示される。
+                series・descriptionはルート単位の値なので、同じrouteの行には
+                すべて同じ値を書く(空欄なら既定色・説明なし)。
                 差分更新: 既存と同名のルートは
-                シリーズと経由地を丸ごと置き換え、CSVに無いルートには触らない。
+                シリーズ・説明・経由地を丸ごと置き換え、CSVに無いルートには触らない。
                 取り込みの前に、spot_keyが指すスポットをスポットCSVでインポートして
                 おくこと(key未設定のスポットは参照できない)。
               </p>
@@ -1461,6 +1642,11 @@ export default function AdminView({
                   {routes.map((r) => (
                     <li key={r.id} className="flex items-center gap-3 px-3 py-2">
                       <span className="flex-1 truncate text-sm">{r.name}</span>
+                      {r.status !== "published" && (
+                        <span className="shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">
+                          {STATUS_LABELS[r.status]}
+                        </span>
+                      )}
                       <span className="shrink-0 text-xs text-gray-500">
                         経由地{r.points.length}件
                       </span>

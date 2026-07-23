@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import {
+  ALLOWED_STATUS_BY_ROLE,
   getSpotTypeSetting,
+  MODERATION_ROLES,
   SPOT_ADMIN_ROLES,
   type Role,
   type SpotRoute,
@@ -31,9 +33,11 @@ async function resolveType(request: Request, user: { role: Role }) {
 }
 
 /**
- * 種別のルート一覧(経由地込み)。経由地はスポットの閲覧権限に合わせて
- * 「公開スポット、または自分が追加したスポット」の分だけ返す(他人の非公開
- * スポットがルートに入っていても、その点は座標ごと見えない)
+ * 種別のルート一覧(経由地込み)。ルート自体の閲覧権限はスポットと同じ
+ * (公開=全員、非公開=作成者本人のみ、承認待ち・却下=本人+moderator以上)。
+ * 経由地もスポットの閲覧権限に合わせて「公開スポット、または自分が追加した
+ * スポット」の分だけ返す(他人の非公開スポットがルートに入っていても、
+ * その点は座標ごと見えない)
  */
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -44,7 +48,8 @@ export async function GET(request: Request) {
   if (resolved.error) return resolved.error;
 
   const { rows } = await query<SpotRoute>(
-    `select r.id, r.spot_type_id, r.name, r.series, r.created_at,
+    `select r.id, r.spot_type_id, r.name, r.series, r.description,
+       r.status, r.created_by, r.created_at,
        coalesce(
          (select json_agg(json_build_object(
              'spot_id', p.spot_id, 'seq', p.seq,
@@ -58,8 +63,15 @@ export async function GET(request: Request) {
        ) as points
      from spot_routes r
      where r.spot_type_id = $1
+       and (r.status = 'published'
+            or r.created_by = $2
+            or (r.status in ('pending', 'rejected') and $3))
      order by r.created_at, r.name`,
-    [resolved.spotType.id, user.id]
+    [
+      resolved.spotType.id,
+      user.id,
+      MODERATION_ROLES.includes(user.role),
+    ]
   );
   return NextResponse.json({ data: rows });
 }
@@ -68,6 +80,10 @@ interface RouteInput {
   name: string;
   /** このルートが属するシリーズ。省略・nullなら既定色のルートになる */
   series?: string | null;
+  /** ルートの説明文。省略・nullなら説明なし */
+  description?: string | null;
+  /** spotsと同じ公開状態。ALLOWED_STATUS_BY_ROLEの範囲で指定でき、省略時はpending */
+  status?: string;
   spot_ids: string[];
 }
 
@@ -90,11 +106,15 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const routes: RouteInput[] = Array.isArray(body?.routes) ? body.routes : [];
+  // statusの扱いはスポットの新規登録と同じ(role別の許可リスト、未指定はpending。
+  // このAPI自体がspot_admin/admin限定のため、実質publishedも選べる)
+  const allowedStatuses = ALLOWED_STATUS_BY_ROLE[user.role];
   for (const route of routes) {
     if (
       typeof route?.name !== "string" ||
       !route.name.trim() ||
       (route.series != null && typeof route.series !== "string") ||
+      (route.description != null && typeof route.description !== "string") ||
       !Array.isArray(route.spot_ids) ||
       route.spot_ids.length < 2 ||
       !route.spot_ids.every((id) => typeof id === "string")
@@ -102,6 +122,15 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "各ルートには name と2件以上の spot_ids が必要です。" },
         { status: 400 }
+      );
+    }
+    if (
+      route.status != null &&
+      !(allowedStatuses as string[]).includes(route.status)
+    ) {
+      return NextResponse.json(
+        { error: `この権限では状態「${route.status}」を選べません。` },
+        { status: 403 }
       );
     }
   }
@@ -128,11 +157,18 @@ export async function POST(request: Request) {
     for (const route of routes) {
       const name = route.name.trim();
       const series = route.series?.trim() || null;
+      const description = route.description?.trim() || null;
+      const status = route.status ?? "pending";
+      // 既存ルートの上書き時、created_byは最初の作成者のまま維持する
       const { rows } = await client.query<{ id: string }>(
-        `insert into spot_routes (spot_type_id, name, series) values ($1, $2, $3)
-         on conflict (spot_type_id, name) do update set series = excluded.series
+        `insert into spot_routes (spot_type_id, name, series, description, status, created_by)
+         values ($1, $2, $3, $4, $5, $6)
+         on conflict (spot_type_id, name)
+           do update set series = excluded.series,
+                         description = excluded.description,
+                         status = excluded.status
          returning id`,
-        [spotTypeId, name, series]
+        [spotTypeId, name, series, description, status, user.id]
       );
       const routeId = rows[0].id;
       await client.query("delete from spot_route_points where route_id = $1", [
