@@ -1060,6 +1060,22 @@ export default function MapView({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchMarkerRef = useRef<maplibregl.Marker | null>(null);
+  // 検索フォーム+候補リストを囲む白い箱。候補の「外側タップで閉じる」判定に使う
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+
+  // 検索候補の表示中に、検索ボックスの外(地図など)をタップしたら候補を閉じる。
+  // 地図はMapLibreのcanvasでReactのクリックイベントが届かないため、documentの
+  // pointerdown(capture)で拾う。検索ボックス内のタップ(入力欄の編集・再検索・
+  // 候補の選択)は閉じない
+  useEffect(() => {
+    if (searchResults.length === 0) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (searchBoxRef.current?.contains(e.target as Node)) return;
+      setSearchResults([]);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [searchResults.length]);
 
   // 初期表示の決定に使う状態。hadSavedView=この種別の表示位置を復元したか、
   // geolocateTriggered/autoFit系=初回表示の調整を一度だけ行うためのフラグ
@@ -1658,7 +1674,7 @@ export default function MapView({
 
       {/* 検索バー・絞り込みボタン(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
       <div className="absolute left-0 right-14 top-0 z-10 space-y-2 p-2">
-        <div className="rounded-xl bg-white/95 p-2 shadow">
+        <div ref={searchBoxRef} className="rounded-xl bg-white/95 p-2 shadow">
           <div className="flex gap-2">
             <form onSubmit={handleSearch} className="flex min-w-0 flex-1 gap-2">
               <input
