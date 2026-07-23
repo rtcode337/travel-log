@@ -16,8 +16,9 @@ export interface SpotFilters {
   /** 空配列 = 訪問状況による絞り込みなし(「すべて」選択中、全件表示) */
   visited: VisitedValue[];
   /**
-   * 訪問日(`YYYY-MM-DD`のローカル日付)。その日に訪問したスポットだけを表示する。
-   * null = 訪問日による絞り込みなし。選べるのは自分の訪問記録がある日のみ
+   * 訪問順の経路を描く対象日(`YYYY-MM-DD`のローカル日付)。絞り込みではなく、
+   * 地図でその日に訪問したスポットを訪問順に矢印で結ぶための対象日。
+   * null = 経路を表示しない。既定はその日(今日)。地図専用(一覧では使わない)。
    */
   visitedDate: string | null;
   /**
@@ -60,15 +61,14 @@ export function formatVisitDate(dateKey: string): string {
 
 /**
  * フィルタを通過するか判定する(地図・リスト共通ロジック)。
- * `visitedDates`はそのスポットを訪問した日(`toVisitDateKey`のローカル日付。
- * 日時不明の訪問は含めない)で、訪問日の絞り込みを使う場合のみ渡す。
+ * `visitedDate`は絞り込みではなく地図の「訪問順の経路」表示専用になったため、
+ * ここでは扱わない(シリーズ・カテゴリ・訪問状況の3つだけを見る)。
  */
 export function passesFilters(
   filters: SpotFilters,
   series: Series | null,
   categories: Category[],
-  isVisited: boolean,
-  visitedDates: string[] = []
+  isVisited: boolean
 ): boolean {
   if (filters.series.length > 0) {
     if (series === null || !filters.series.includes(series)) return false;
@@ -81,25 +81,19 @@ export function passesFilters(
     const value: VisitedValue = isVisited ? "visited" : "unvisited";
     if (!filters.visited.includes(value)) return false;
   }
-  // 訪問日で絞り込むときは、その日の訪問が1件でもあるスポットだけを通す
-  // (=訪問日時が不明な訪問しかないスポット・未訪問のスポットは外れる)
-  if (filters.visitedDate) {
-    if (!visitedDates.includes(filters.visitedDate)) return false;
-  }
   return true;
 }
 
 /**
  * 何らかの絞り込みが掛かっているか(リセットボタンと地図の絞り込みボタンの
- * 見た目の条件)。`showRoutes`は表示の切り替えであって絞り込みではないため
- * 含めない(リセットの対象にもしない)
+ * 見た目の条件)。`showRoutes`は表示の切り替え、`visitedDate`は訪問順の経路の
+ * 対象日(絞り込みではない)であって、どちらも絞り込みではないため含めない。
  */
 export function hasActiveFilters(filters: SpotFilters): boolean {
   return (
     filters.series.length > 0 ||
     filters.categories.length > 0 ||
-    filters.visited.length > 0 ||
-    filters.visitedDate !== null
+    filters.visited.length > 0
   );
 }
 
@@ -183,7 +177,6 @@ export default function FilterBar({
   onChange,
   seriesStyles,
   categories,
-  visitDates,
   showReset = true,
   showRouteToggle = false,
 }: {
@@ -191,11 +184,6 @@ export default function FilterBar({
   spots: Spot[];
   filters: SpotFilters;
   onChange: (filters: SpotFilters) => void;
-  /**
-   * 訪問日の選択肢(`YYYY-MM-DD`のローカル日付、新しい順)。呼び出し側が
-   * 自分の訪問記録から作る。空なら訪問日の欄自体を出さない
-   */
-  visitDates: string[];
   /** このスポット種別のシリーズ設定(lib/useSeriesStyles.ts参照) */
   seriesStyles: SeriesStyleDefinition[];
   /** このスポット種別のカテゴリ設定(並び順に使う。lib/useCategories.ts参照) */
@@ -217,15 +205,6 @@ export default function FilterBar({
   );
   // 選択肢は実データに存在する値から作り、種別のカテゴリ設定の並び順に揃える
   // (設定に無い値はdistinctValuesの五十音順のまま末尾に出す)
-  // 選択中の日が選択肢に無い場合(訪問記録を消した後など、保存済みの絞り込み条件を
-  // 復元したとき)も、選択中の日を残して「指定なし」に戻せるようにする
-  const visitDateOptions = useMemo(
-    () =>
-      filters.visitedDate && !visitDates.includes(filters.visitedDate)
-        ? [filters.visitedDate, ...visitDates].sort((a, b) => b.localeCompare(a))
-        : visitDates,
-    [visitDates, filters.visitedDate]
-  );
   const availableCategories = useMemo(
     () =>
       distinctValues(spots.flatMap((s) => s.categories)).sort(
@@ -335,38 +314,6 @@ export default function FilterBar({
         </div>
       )}
 
-      {visitDateOptions.length > 0 && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-gray-500">
-            訪問日
-          </span>
-          <select
-            aria-label="訪問日"
-            value={filters.visitedDate ?? ""}
-            onChange={(e) =>
-              onChange({ ...filters, visitedDate: e.target.value || null })
-            }
-            className={`w-full rounded-lg border bg-white px-2 py-1.5 ${
-              // 絞り込み中は枠だけ青く・太くする(地図の絞り込みボタンと同じ合図。
-              // 背景まで青くすると選択中の日付が読みにくいため枠のみ)。
-              // border-widthではなくringで太らせるのは、幅の変化で高さがずれないようにするため
-              filters.visitedDate
-                ? "border-blue-600 ring-1 ring-blue-600"
-                : "border-gray-300"
-            }`}
-          >
-            <option value="">指定なし</option>
-            {visitDateOptions.map((date) => (
-              <option key={date} value={date}>
-                {formatVisitDate(date)}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-gray-500">
-            日を選ぶと、その日に訪問したスポットだけを表示し、地図では訪問した順に矢印で結びます。
-          </p>
-        </div>
-      )}
     </div>
   );
 }

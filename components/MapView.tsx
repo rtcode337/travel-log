@@ -16,6 +16,7 @@ import {
 } from "@/lib/mapStyle";
 import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
+import { getSpotTypeSetting } from "@/lib/types";
 import type { Role, Spot, SpotRoute, SpotType, Visit } from "@/lib/types";
 import { expandSpot, readSpotCacheDb } from "@/lib/spotCacheDb";
 import { autoTextColor, type SeriesStyleDefinition } from "@/lib/seriesStyle";
@@ -32,6 +33,7 @@ import { useCategories } from "@/lib/useCategories";
 import FilterBar, {
   DEFAULT_FILTERS,
   FilterResetButton,
+  formatVisitDate,
   hasActiveFilters,
   passesFilters,
   toVisitDateKey,
@@ -90,8 +92,11 @@ function hasFeatureAt(
 /** ルートにシリーズが設定されていない(または種別の一覧に無い)ときの矢印色 */
 const DEFAULT_ROUTE_COLOR = "#2563eb";
 
-/** 訪問日で絞り込み中に描く「訪問順」の線・矢印の色(ルートCSVの線と区別できる色) */
-const VISIT_PATH_COLOR = "#9333ea";
+/**
+ * 訪問順の経路(選んだ日に訪問した順)の線・矢印の色。訪問済みスポットのピン
+ * (`lib/pinIcon.ts`の`visited`時の塗り)と同じ緑にして「訪問済み」を連想させる。
+ */
+const VISIT_PATH_COLOR = "#16a34a";
 
 /**
  * ルートの進行方向を示す右向き矢印(白フチ付き)の画像を色ごとに生成して登録する。
@@ -457,7 +462,8 @@ function routeOwnPoints(route: SpotRoute, spotById: Map<string, Spot>): Spot[] {
 }
 
 /**
- * 訪問日で絞り込んでいるとき、その日の訪問を訪問時刻の昇順に並べた経路を返す。
+ * 訪問順の経路の対象日(`filters.visitedDate`。null=表示しない)が選ばれているとき、
+ * その日の訪問を訪問時刻の昇順に並べた経路を返す。
  * この種別に無いスポット(他の種別の訪問記録)は除く。
  * 同じスポットへの再訪はそのまま複数回現れる(行って戻る線になる)が、
  * 連続する同じスポットへの訪問(同じ場所で複数回記録した場合)はまとめる
@@ -706,44 +712,61 @@ const lastViews = new Map<string, { center: [number, number]; zoom: number }>();
  */
 const FILTERS_STORAGE_PREFIX = "travel-log:map-filters:";
 
-/** 保存済みの絞り込み条件を読む。未保存・不正値はDEFAULT_FILTERS(参照も同じ)を返す */
+/** 今日のローカル日付(`YYYY-MM-DD`)。訪問順の経路の既定対象日に使う */
+function todayKey(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** 訪問順の経路の対象日を既定(今日)にした絞り込み条件 */
+function defaultMapFilters(): SpotFilters {
+  return { ...DEFAULT_FILTERS, visitedDate: todayKey() };
+}
+
+/**
+ * 保存済みの絞り込み条件を読む。未保存・不正値は既定(訪問順の経路=今日)を返す。
+ * `visitedDate`は絞り込みではなく訪問順の経路の対象日で、既定は今日。「表示しない」は
+ * 保存時に文字列`"none"`で書く(下記`saveFilters`)ため、`"none"`のときだけnull=表示
+ * しないにする。旧仕様の保存値(絞り込みだった頃のnull・日付、キー欠落)は「明示的な
+ * 表示しない」ではないので今日に倒す(既存ユーザーも初回から今日の経路が出る)。
+ */
 function loadSavedFilters(typeKey: string): SpotFilters {
-  if (typeof localStorage === "undefined") return DEFAULT_FILTERS;
+  if (typeof localStorage === "undefined") return defaultMapFilters();
   try {
     const raw = localStorage.getItem(FILTERS_STORAGE_PREFIX + typeKey);
-    if (!raw) return DEFAULT_FILTERS;
+    if (!raw) return defaultMapFilters();
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return DEFAULT_FILTERS;
+    if (typeof parsed !== "object" || parsed === null) return defaultMapFilters();
     const obj = parsed as Record<string, unknown>;
     const strings = (v: unknown): string[] =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-    // 訪問日は`YYYY-MM-DD`のみ受け付ける(input[type=date]が扱える形)
+    // 訪問日は`YYYY-MM-DD`のみ受け付ける
     const date = (v: unknown): string | null =>
       typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
-    const filters: SpotFilters = {
+    return {
       series: strings(obj.series),
       categories: strings(obj.categories),
       visited: strings(obj.visited).filter(
         (v): v is VisitedValue => v === "visited" || v === "unvisited"
       ),
-      visitedDate: date(obj.visitedDate),
+      // "none"=表示しない、日付=その日、それ以外(旧null・キー欠落など)=今日
+      visitedDate:
+        obj.visitedDate === "none" ? null : date(obj.visitedDate) ?? todayKey(),
       // キー自体が無い保存データ(この設定の追加前に保存されたもの)は既定のオン扱い
       showRoutes: typeof obj.showRoutes === "boolean" ? obj.showRoutes : true,
     };
-    // 全項目が既定どおりなら参照もDEFAULT_FILTERSに揃える。showRoutesは
-    // hasActiveFiltersに含まれない(絞り込みではない)ため別途比較する
-    if (!hasActiveFilters(filters) && filters.showRoutes === DEFAULT_FILTERS.showRoutes) {
-      return DEFAULT_FILTERS;
-    }
-    return filters;
   } catch {
-    return DEFAULT_FILTERS;
+    return defaultMapFilters();
   }
 }
 
 function saveFilters(typeKey: string, filters: SpotFilters) {
   try {
-    localStorage.setItem(FILTERS_STORAGE_PREFIX + typeKey, JSON.stringify(filters));
+    // 「表示しない」(null)は旧仕様の「絞り込みなしのnull」と区別するため"none"で保存する
+    // (でないと既存ユーザーの旧nullも「表示しない」に見えてしまう。loadSavedFilters参照)
+    const stored = { ...filters, visitedDate: filters.visitedDate ?? "none" };
+    localStorage.setItem(FILTERS_STORAGE_PREFIX + typeKey, JSON.stringify(stored));
   } catch {
     // プライベートブラウズ等で保存できなくても絞り込み自体は動かす
   }
@@ -798,8 +821,9 @@ export default function MapView({
   // 元の種別のキーがfromに入る。左下に「元の地図に戻る」リンクを出すのに使う
   // (戻り先の表示位置は種別ごとのlastViewsが復元するため、キーだけあればよい)
   const returnTypeKey = searchParams.get("from");
-  // /map?filter=1 で開かれたら絞り込みモーダルを最初から開く(重ね表示元の地図の
-  // 「「◯◯」の地図で絞り込みを編集」リンクから遷移してきたとき)
+  // /map?filter=1 で開かれたら絞り込みモーダルを最初から開く(直リンク用に残す。
+  // 重ね表示側の絞り込みは種別を切り替えず現在の地図の上のモーダルで編集するため、
+  // アプリ内からこのパラメータ付きで遷移する箇所は現在はない)
   const openFilterParam = searchParams.get("filter");
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -851,26 +875,14 @@ export default function MapView({
     () => new Set(visits.map((v) => v.spot_id)),
     [visits]
   );
-  /** spot_id → そのスポットを訪問した日(ローカル日付。日時不明の訪問は含めない) */
-  const visitedDatesBySpot = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const v of visits) {
-      const date = toVisitDateKey(v.visited_on);
-      if (!date) continue;
-      const list = m.get(v.spot_id);
-      if (list) list.push(date);
-      else m.set(v.spot_id, [date]);
-    }
-    return m;
-  }, [visits]);
   const spotById = useMemo(() => {
     const m = new Map<string, Spot>();
     for (const s of spots) m.set(s.id, s);
     return m;
   }, [spots]);
   /**
-   * 訪問日ドロップダウンの選択肢(新しい順)。この種別のスポットへの訪問だけを
-   * 対象にする(他の種別の訪問記録しかない日を選んでも0件になるため)
+   * 訪問順の経路の対象日を選ぶドロップダウン用に、この種別のスポットへ訪問した
+   * 日の一覧(新しい順)。他の種別の訪問しかない日は経路が0件になるため除く。
    */
   const visitDates = useMemo(() => {
     const set = new Set<string>();
@@ -884,6 +896,21 @@ export default function MapView({
   // SSR・hydration時は常に既定(サーバーはlocalStorageを読めないため、初期値で
   // 読むとhydration不一致になる)。保存済み条件の復元はマウント後のuseEffectで行う
   const [filters, setFiltersState] = useState<SpotFilters>(DEFAULT_FILTERS);
+  /**
+   * 訪問順の経路の対象日セレクトの選択肢。先頭は常に「今日」、その次に「表示しない」、
+   * 続けて訪問のある他の日(新しい順)。選択中の日が一覧に無い場合(その日の訪問を
+   * 消した後など)も、選択を保てるよう残す。
+   */
+  const visitDateOptions = useMemo(() => {
+    const today = todayKey();
+    const others = visitDates.filter((d) => d !== today);
+    const selected = filters.visitedDate;
+    if (selected && selected !== today && !others.includes(selected)) {
+      others.push(selected);
+      others.sort((a, b) => b.localeCompare(a));
+    }
+    return { today, others };
+  }, [visitDates, filters.visitedDate]);
   // 変更のたびにlocalStorageへも書き込む(次に地図を開いたときの復元用)
   const setFilters = useCallback(
     (next: SpotFilters) => {
@@ -891,6 +918,40 @@ export default function MapView({
       setFiltersState(next);
     },
     [spotTypeKey]
+  );
+  // 訪問日セレクトで日を選んだとき。対象日をセットしたうえで、その日の訪問順の経路
+  // 全体が画面に収まるよう地図を移動する(「表示しない」やその日の訪問が無い場合は
+  // 対象日を変えるだけで地図は動かさない)。ユーザーが明示的に選んだときだけ動かすため、
+  // マウント時の既定(今日)の復元では走らせず、この選択ハンドラでのみ行う
+  const handleSelectVisitDate = useCallback(
+    (value: string) => {
+      const visitedDate = value || null;
+      setFilters({ ...filters, visitedDate });
+      const map = mapRef.current;
+      if (!visitedDate || !map) return;
+      const path = buildVisitPath(visits, { ...filters, visitedDate }, spotById);
+      if (path.length === 0) return;
+      let minLat = Infinity;
+      let maxLat = -Infinity;
+      let minLng = Infinity;
+      let maxLng = -Infinity;
+      for (const s of path) {
+        if (s.lat < minLat) minLat = s.lat;
+        if (s.lat > maxLat) maxLat = s.lat;
+        if (s.lng < minLng) minLng = s.lng;
+        if (s.lng > maxLng) maxLng = s.lng;
+      }
+      map.fitBounds(
+        [
+          [minLng, minLat],
+          [maxLng, maxLat],
+        ],
+        // 1地点だけの日はmaxZoomまで寄る。モーダルを開いたまま選ぶ想定だが、
+        // 地図は全画面なので閉じたときに経路全体が中央に収まる
+        { padding: 60, maxZoom: 15, animate: true }
+      );
+    },
+    [filters, setFilters, visits, spotById]
   );
   // マウント時と、マウント中に種別が切り替わった場合に、その種別の保存済み条件を読む
   useEffect(() => {
@@ -910,8 +971,12 @@ export default function MapView({
   const [overlayRoutes, setOverlayRoutes] = useState<SpotRoute[]>([]);
   const [overlayFilters, setOverlayFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [overlayMessage, setOverlayMessage] = useState<string | null>(null);
+  // 重ね表示する種別の絞り込みを、種別を切り替えずこの地図の上のモーダルで編集する
+  const [showOverlayFilterModal, setShowOverlayFilterModal] = useState(false);
   // 重ね表示の選択肢(全種別の一覧。/api/spot-typesは閲覧可能な種別のみ返す)
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
+  // 左下の種別チップをタップして開く「別の種別へ切り替え」メニューの開閉
+  const [showTypeMenu, setShowTypeMenu] = useState(false);
   const [overlayDetailSpotId, setOverlayDetailSpotId] = useState<string | null>(null);
   const [overlayDetailRouteId, setOverlayDetailRouteId] = useState<string | null>(null);
   // 未ダウンロードの種別を選んだときの「ダウンロードしますか?」確認(値は対象の種別キー)
@@ -930,6 +995,16 @@ export default function MapView({
   const overlayPromptOnMissingRef = useRef(false);
   // 重ね表示が無効の間は使われない(現在種別の値を返すだけ)
   const overlaySeriesStyles = useSeriesStyles(overlayTypeKey ?? spotTypeKey);
+  const overlayCategories = useCategories(overlayTypeKey ?? spotTypeKey);
+  // 重ね表示の絞り込み変更をその種別のlocalStorageへ保存しつつstateへ反映する
+  // (overlayFiltersが変わると重ね表示の描画effectが再実行され、地図に即反映される)
+  const setOverlayFiltersAndSave = useCallback(
+    (next: SpotFilters) => {
+      if (overlayTypeKey) saveFilters(overlayTypeKey, next);
+      setOverlayFilters(next);
+    },
+    [overlayTypeKey]
+  );
 
   const setOverlayTypeKey = useCallback(
     (next: string | null) => {
@@ -1411,33 +1486,35 @@ export default function MapView({
     if (!map) return;
     let cancelled = false;
 
-    // 表示対象のルート(と訪問順の経路)の経由地は、スポット自体のシリーズ・
-    // カテゴリが絞り込みで外れていてもピンを表示する(別のシリーズ・カテゴリに
-    // 属する経由地の上を、線だけ通ってピンが無い状態になるのを防ぐ)。
-    // 免除するのはルートの表示条件と同じシリーズ・カテゴリのみで、
-    // 訪問状況・訪問日の絞り込みは通常どおり適用する
-    const routeMemberIds = new Set([
-      ...filterVisibleRoutes(routes, filters, seriesStyles, spotById).flatMap((route) =>
+    // 表示対象のルートの経由地は、スポット自体のシリーズ・カテゴリが絞り込みで
+    // 外れていてもピンを表示する(別のシリーズ・カテゴリに属する経由地の上を、
+    // 線だけ通ってピンが無い状態になるのを防ぐ)。免除するのはルートの表示条件と
+    // 同じシリーズ・カテゴリのみで、訪問状況の絞り込みは通常どおり適用する。
+    const routeMemberIds = new Set(
+      filterVisibleRoutes(routes, filters, seriesStyles, spotById).flatMap((route) =>
         route.points.map((p) => p.spot_id)
-      ),
-      ...buildVisitPath(visits, filters, spotById).map((s) => s.id),
-    ]);
+      )
+    );
+    // 選んだ日に訪問したスポット(訪問順の経路の経由地)は、絞り込みで外れていても
+    // 必ず表示する(絞り込みではなくその日の訪問を辿るための表示のため、全条件を免除)
+    const visitPathIds = new Set(
+      buildVisitPath(visits, filters, spotById).map((s) => s.id)
+    );
     const filteredSpots = spots.filter(
       (spot) =>
+        visitPathIds.has(spot.id) ||
         passesFilters(
           filters,
           spot.series,
           spot.categories,
-          visitedIds.has(spot.id),
-          visitedDatesBySpot.get(spot.id)
+          visitedIds.has(spot.id)
         ) ||
         (routeMemberIds.has(spot.id) &&
           passesFilters(
             { ...filters, series: [], categories: [] },
             spot.series,
             spot.categories,
-            visitedIds.has(spot.id),
-            visitedDatesBySpot.get(spot.id)
+            visitedIds.has(spot.id)
           ))
     );
 
@@ -1476,7 +1553,6 @@ export default function MapView({
     spotById,
     visits,
     visitedIds,
-    visitedDatesBySpot,
     filters,
     runWhenMapReady,
     seriesStyles,
@@ -1505,7 +1581,7 @@ export default function MapView({
   }, [routes, filters, seriesStyles, runWhenMapReady, visits, spotById]);
 
   // 別種別の重ね表示の描画。絞り込み・経由地ピンの免除は本体と同じロジックを、
-  // その種別の保存済み設定・シリーズ設定で適用する(訪問順の経路(紫)は
+  // その種別の保存済み設定・シリーズ設定で適用する(訪問順の経路(緑)は
   // 表示中の種別の訪問だけが対象のため、重ね表示側では描かない)
   useEffect(() => {
     const map = mapRef.current;
@@ -1539,16 +1615,14 @@ export default function MapView({
             overlayFilters,
             spot.series,
             spot.categories,
-            visitedIds.has(spot.id),
-            visitedDatesBySpot.get(spot.id)
+            visitedIds.has(spot.id)
           ) ||
           (routeMemberIds.has(spot.id) &&
             passesFilters(
               { ...overlayFilters, series: [], categories: [] },
               spot.series,
               spot.categories,
-              visitedIds.has(spot.id),
-              visitedDatesBySpot.get(spot.id)
+              visitedIds.has(spot.id)
             ))
       );
 
@@ -1595,7 +1669,6 @@ export default function MapView({
     overlayFilters,
     overlaySeriesStyles,
     visitedIds,
-    visitedDatesBySpot,
     runWhenMapReady,
   ]);
 
@@ -1642,6 +1715,9 @@ export default function MapView({
   // (先にキーの生文字列を出すと表示名への切り替わりがちらつくため)
   const currentTypeLabel =
     spotTypes.find((t) => t.key === spotTypeKey)?.label ?? null;
+  // 左下の種別チップのタップで切り替えられる他の種別(現在の種別を除く)。
+  // public_visible=falseの種別はAPI側でadmin/spot_admin以外には返らない
+  const otherTypes = spotTypes.filter((t) => t.key !== spotTypeKey);
   // 「◯◯」の地図で開くで種別を切り替えて来たときの戻り先(?from=)。spotTypesに
   // 見つかる種別だけリンク化する(不正なキー・閲覧できない種別はここで弾かれる)
   const returnType =
@@ -1654,8 +1730,8 @@ export default function MapView({
       <div ref={containerRef} className="h-full w-full" />
 
       {/* 今表示中のスポット種別と「元の地図に戻る」リンク(左下に小さく表示。
-          attributionは右下なので重ならない)。種別チップは表示だけの要素なので、
-          地図操作を吸わないようpointer-events-noneにする */}
+          attributionは右下なので重ならない)。種別チップはタップで
+          「別の種別へ切り替え」メニュー(other種別への遷移)を開くボタンにしている */}
       <div className="absolute bottom-2 left-2 z-10 flex flex-col items-start gap-1.5">
         {returnType && (
           <Link
@@ -1666,8 +1742,48 @@ export default function MapView({
           </Link>
         )}
         {currentTypeLabel && (
-          <div className="pointer-events-none rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-gray-700 shadow">
-            {currentTypeLabel}
+          <div className="relative">
+            {/* メニューを開いている間の画面全体の当たり判定(外側タップで閉じる) */}
+            {showTypeMenu && (
+              <button
+                type="button"
+                aria-label="メニューを閉じる"
+                onClick={() => setShowTypeMenu(false)}
+                className="fixed inset-0 z-0 cursor-default"
+              />
+            )}
+            {showTypeMenu && otherTypes.length > 0 && (
+              <div className="absolute bottom-full left-0 z-10 mb-1.5 max-h-[50dvh] w-56 overflow-y-auto rounded-xl bg-white py-1 shadow-lg ring-1 ring-black/10">
+                {otherTypes.map((t) => (
+                  <Link
+                    key={t.id}
+                    href={`/${t.key}/map`}
+                    onClick={() => setShowTypeMenu(false)}
+                    className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <span>
+                      {t.label}
+                      {!getSpotTypeSetting(t, "public_visible") && (
+                        <span className="ml-1.5 text-xs text-gray-400">
+                          (管理者のみ)
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-gray-400">›</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowTypeMenu((v) => !v)}
+              className="relative z-10 flex items-center gap-1 rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-gray-700 shadow"
+            >
+              {currentTypeLabel}
+              {otherTypes.length > 0 && (
+                <span className="text-gray-400">{showTypeMenu ? "▾" : "▴"}</span>
+              )}
+            </button>
           </div>
         )}
       </div>
@@ -1739,7 +1855,36 @@ export default function MapView({
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-bold">絞り込み</h2>
               <div className="flex items-center gap-3">
-                <FilterResetButton filters={filters} onChange={setFilters} />
+                {(() => {
+                  // 地図のリセットは絞り込み(シリーズ・カテゴリ・訪問状況)に加え、
+                  // 訪問順の経路の対象日を今日に・重ね表示を「重ねない」に戻す。
+                  // showRoutesは表示切り替えのため対象外(現在の値を維持)
+                  const resettable =
+                    hasActiveFilters(filters) ||
+                    filters.visitedDate !== todayKey() ||
+                    overlayTypeKey !== null;
+                  return (
+                    <button
+                      type="button"
+                      disabled={!resettable}
+                      onClick={() => {
+                        setFilters({
+                          ...DEFAULT_FILTERS,
+                          showRoutes: filters.showRoutes,
+                          visitedDate: todayKey(),
+                        });
+                        setOverlayTypeKey(null);
+                      }}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                        resettable
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : "border-gray-300 bg-white text-gray-400"
+                      }`}
+                    >
+                      リセット
+                    </button>
+                  );
+                })()}
                 <button
                   type="button"
                   onClick={() => setShowFilterModal(false)}
@@ -1757,55 +1902,77 @@ export default function MapView({
               showReset={false}
               seriesStyles={seriesStyles}
               categories={categories}
-              visitDates={visitDates}
               showRouteToggle={routes.length > 0}
             />
 
-            {spotTypes.filter((t) => t.key !== spotTypeKey).length > 0 && (
-              <div className="border-t border-gray-100 pt-3">
-                <p className="mb-1 text-sm font-medium">別の種別を重ねて表示</p>
-                <select
-                  aria-label="重ねて表示する種別"
-                  value={overlayTypeKey ?? ""}
-                  onChange={(e) => setOverlayTypeKey(e.target.value || null)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
-                >
-                  <option value="">重ねない</option>
-                  {spotTypes
-                    .filter((t) => t.key !== spotTypeKey)
-                    .map((t) => (
-                      <option key={t.key} value={t.key}>
-                        {t.label}
-                      </option>
-                    ))}
-                </select>
-                {overlayMessage && (
-                  <p className="mt-1 text-xs text-red-600">{overlayMessage}</p>
-                )}
-                <p className="mt-1 text-xs text-gray-500">
-                  選んだ種別の公開スポットとルートを半透明で重ねて表示します(未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは、その種別の地図で自分が設定した内容に従います。
-                </p>
-                {overlayTypeKey &&
-                  (() => {
-                    // ?filter=1で遷移先の絞り込みモーダルを最初から開き、?from=で
-                    // 「元の地図に戻る」リンクを出す(編集後はそこから戻ってくる。
-                    // 戻ると重ね表示の絞り込みも保存済み設定から読み直される)
-                    const overlayType = spotTypes.find(
-                      (t) => t.key === overlayTypeKey
-                    );
-                    return overlayType ? (
-                      <Link
-                        href={`/${overlayType.key}/map?filter=1&from=${encodeURIComponent(
-                          spotTypeKey
-                        )}`}
-                        className="mt-1.5 inline-block text-sm text-blue-600 underline"
-                      >
-                        「{overlayType.label}」の地図で絞り込みを編集
-                      </Link>
-                    ) : null;
-                  })()}
-              </div>
-            )}
+            {/* 訪問順の経路の対象日(絞り込みではなく、その日に訪問したスポットを
+                訪問順に緑の矢印で結ぶ。重ね表示セクションと同じ区切り線を上に置く) */}
+            <div className="border-t border-gray-100 pt-3">
+              <p className="mb-1 text-sm font-medium">訪問日</p>
+              <select
+                aria-label="訪問順の経路の対象日"
+                value={filters.visitedDate ?? ""}
+                onChange={(e) => handleSelectVisitDate(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
+              >
+                <option value={visitDateOptions.today}>今日</option>
+                <option value="">表示しない</option>
+                {visitDateOptions.others.map((date) => (
+                  <option key={date} value={date}>
+                    {formatVisitDate(date)}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                選んだ日に訪問したスポットを、訪問した順に矢印(緑)で結んで地図に表示します。その日に訪問したスポットは、絞り込みで外れていても表示されます。
+              </p>
+            </div>
+
+            {spotTypes.filter((t) => t.key !== spotTypeKey).length > 0 &&
+              (() => {
+                const overlayType = spotTypes.find(
+                  (t) => t.key === overlayTypeKey
+                );
+                return (
+                  <div className="border-t border-gray-100 pt-3">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">別の種別を重ねて表示</p>
+                      {/* 種別を切り替えず、この地図の上のモーダルで重ね表示側の絞り込みを
+                          編集する(変更はその種別のlocalStorageへ保存され、描画にも即反映) */}
+                      {overlayTypeKey && overlaySpots && overlayType && (
+                        <button
+                          type="button"
+                          onClick={() => setShowOverlayFilterModal(true)}
+                          className="shrink-0 text-sm text-blue-600 underline"
+                        >
+                          絞り込みを編集
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      aria-label="重ねて表示する種別"
+                      value={overlayTypeKey ?? ""}
+                      onChange={(e) => setOverlayTypeKey(e.target.value || null)}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
+                    >
+                      <option value="">重ねない</option>
+                      {spotTypes
+                        .filter((t) => t.key !== spotTypeKey)
+                        .map((t) => (
+                          <option key={t.key} value={t.key}>
+                            {t.label}
+                          </option>
+                        ))}
+                    </select>
+                    {overlayMessage && (
+                      <p className="mt-1 text-xs text-red-600">{overlayMessage}</p>
+                    )}
+                    <p className="mt-1 text-xs text-gray-500">
+                      選んだ種別の公開スポットとルートを半透明で重ねて表示します(未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは、その種別の地図で自分が設定した内容に従います。
+                    </p>
+                  </div>
+                );
+              })()}
 
             <div className="border-t border-gray-100 pt-3">
               <p className="mb-1 text-sm font-medium">公開スポットのダウンロード</p>
@@ -1853,6 +2020,59 @@ export default function MapView({
           </div>
         </div>
       )}
+
+      {/* 重ね表示する種別の絞り込みを、種別を切り替えずこの地図の上で編集するモーダル。
+          変更はその種別のlocalStorageへ保存し、重ね表示の描画にも即反映される */}
+      {showOverlayFilterModal &&
+        overlayTypeKey &&
+        overlaySpots &&
+        (() => {
+          const overlayType = spotTypes.find((t) => t.key === overlayTypeKey);
+          return (
+            <div
+              className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center"
+              onClick={() => setShowOverlayFilterModal(false)}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="font-bold">
+                    「{overlayType?.label ?? overlayTypeKey}」の絞り込み
+                  </h2>
+                  <div className="flex items-center gap-3">
+                    <FilterResetButton
+                      filters={overlayFilters}
+                      onChange={setOverlayFiltersAndSave}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowOverlayFilterModal(false)}
+                      aria-label="閉じる"
+                      className="text-xl leading-none text-gray-400"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">
+                  重ねて表示している「{overlayType?.label ?? overlayTypeKey}」の
+                  絞り込み・ルート表示です。ここでの変更はこの種別の地図にも保存されます。
+                </p>
+                <FilterBar
+                  spots={overlaySpots}
+                  filters={overlayFilters}
+                  onChange={setOverlayFiltersAndSave}
+                  showReset={false}
+                  seriesStyles={overlaySeriesStyles}
+                  categories={overlayCategories}
+                  showRouteToggle={overlayRoutes.length > 0}
+                />
+              </div>
+            </div>
+          );
+        })()}
 
       {loading && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60">
