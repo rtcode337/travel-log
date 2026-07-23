@@ -11,6 +11,7 @@ import type {
   SpotTypeSettingKey,
   Visit,
   VisitPlan,
+  VisitPlanList,
 } from "@/lib/types";
 
 interface Result<T> {
@@ -277,6 +278,30 @@ export const api = {
       }),
     delete: (spotId: string) =>
       request<{ ok: boolean }>(`/api/visit-plans/${spotId}`, {
+        method: "DELETE",
+      }),
+  },
+  visitPlanLists: {
+    list: (typeKey: string) =>
+      request<VisitPlanList[]>(
+        `/api/visit-plan-lists?type=${encodeURIComponent(typeKey)}`
+      ),
+    get: (id: string) =>
+      request<VisitPlanList>(`/api/visit-plan-lists/${id}`),
+    create: (input: {
+      type: string;
+      title: string;
+      description: string | null;
+      start_date: string;
+      end_date: string;
+      spot_ids: string[];
+    }) =>
+      request<VisitPlanList>("/api/visit-plan-lists", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/api/visit-plan-lists/${id}`, {
         method: "DELETE",
       }),
   },

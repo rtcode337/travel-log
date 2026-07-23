@@ -260,6 +260,36 @@ create table visit_plans (
 create index visit_plans_user_id_idx on visit_plans (user_id);
 create index visit_plans_spot_id_idx on visit_plans (spot_id);
 
+-- 訪問予定リスト(旅程)。複数スポットを順序付きでまとめる。種別ごとに紐づき、
+-- 1スポットごとの visit_plans とは独立(詳細は migrations/006)。
+create table visit_plan_lists (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references users (id) on delete cascade,
+  spot_type_id  uuid not null references spot_types (id) on delete cascade,
+  title         text not null,
+  description   text,
+  start_date    date not null,
+  end_date      date not null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index visit_plan_lists_user_id_idx on visit_plan_lists (user_id);
+create index visit_plan_lists_spot_type_id_idx on visit_plan_lists (spot_type_id);
+
+create table visit_plan_list_items (
+  id          uuid primary key default gen_random_uuid(),
+  list_id     uuid not null references visit_plan_lists (id) on delete cascade,
+  spot_id     uuid not null references spots (id) on delete cascade,
+  seq         int not null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (list_id, spot_id)
+);
+
+create index visit_plan_list_items_list_id_idx on visit_plan_list_items (list_id);
+create index visit_plan_list_items_spot_id_idx on visit_plan_list_items (spot_id);
+
 -- =============================================================
 -- reviews: 口コミ。投稿するたびに増える掲示板方式(1ユーザーが同じスポットに何件でも書ける)。
 -- スポット種別ごとにspot_type_settingsの'reviews_enabled'で機能そのもののON/OFFを切り替えられる。
@@ -318,6 +348,14 @@ create trigger visits_set_updated_at
 
 create trigger visit_plans_set_updated_at
   before update on visit_plans
+  for each row execute function set_updated_at();
+
+create trigger visit_plan_lists_set_updated_at
+  before update on visit_plan_lists
+  for each row execute function set_updated_at();
+
+create trigger visit_plan_list_items_set_updated_at
+  before update on visit_plan_list_items
   for each row execute function set_updated_at();
 
 create trigger reviews_set_updated_at
