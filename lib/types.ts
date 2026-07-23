@@ -101,6 +101,9 @@ export interface SpotRoute {
   series: string | null;
   /** ルートの説明文(地図のルート詳細に表示。未指定ならnull) */
   description: string | null;
+  /** spotsと同じ公開状態(公開=全員、非公開=作成者のみ、承認待ち・却下=本人+moderator以上) */
+  status: SpotStatus;
+  created_by: string | null;
   created_at: string;
   points: SpotRoutePoint[];
 }

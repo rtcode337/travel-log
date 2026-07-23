@@ -164,13 +164,14 @@ export const api = {
   routes: {
     list: (type: string) =>
       request<SpotRoute[]>(`/api/routes?type=${encodeURIComponent(type)}`),
-    // ルート名ごとにシリーズ・説明・経由地を丸ごと置き換えるupsert(ルートCSVインポート用)
+    // ルート名ごとにシリーズ・説明・状態・経由地を丸ごと置き換えるupsert(ルートCSVインポート用)
     replace: (
       type: string,
       routes: {
         name: string;
         series: string | null;
         description: string | null;
+        status: string;
         spot_ids: string[];
       }[]
     ) =>

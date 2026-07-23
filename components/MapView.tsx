@@ -816,8 +816,12 @@ export default function MapView({
   // (日本=現在地へズーム、それ以外=スポット全体にフィット)に使う
   const regionScope = useRegionScope(spotTypeKey);
   const [privateSpots, setPrivateSpots] = useState<Spot[]>([]);
-  // この種別のルート(スポットを巡った順の矢印)。管理画面のルートCSVインポートで作られる
-  const [routes, setRoutes] = useState<SpotRoute[]>([]);
+  // この種別の公開ルート(スポットを巡った順の矢印)。管理画面のルートCSVインポートで
+  // 作られ、公開スポットのダウンロード時に一緒にキャッシュへ保存されたものを使う
+  const routes = useMemo(
+    () => spotCache.publicRoutes ?? [],
+    [spotCache.publicRoutes]
+  );
   const spots = useMemo(
     () => [...(spotCache.publicSpots ?? []), ...privateSpots],
     [spotCache.publicSpots, privateSpots]
@@ -915,8 +919,8 @@ export default function MapView({
     api.spotTypes.list().then(({ data }) => setSpotTypes(data ?? []));
   }, []);
 
-  // 重ね表示のデータ読み込み。スポットはその種別のダウンロード済みキャッシュから、
-  // ルートはAPIから読む(ルートはダウンロード対象に含まれていないため)
+  // 重ね表示のデータ読み込み。スポットもルートも、その種別のダウンロード済み
+  // キャッシュ(公開スポットのダウンロード時に公開ルートも一緒に保存される)から読む
   useEffect(() => {
     if (!overlayTypeKey) {
       setOverlaySpots(null);
@@ -939,8 +943,7 @@ export default function MapView({
         return;
       }
       setOverlaySpots(stored.spots.map(expandSpot));
-      const { data } = await api.routes.list(overlayTypeKey);
-      if (!cancelled) setOverlayRoutes(data ?? []);
+      setOverlayRoutes(stored.routes ?? []);
     })();
     return () => {
       cancelled = true;
@@ -1248,16 +1251,10 @@ export default function MapView({
     setPrivateSpots(data ?? []);
   }, [spotTypeKey]);
 
-  const loadRoutes = useCallback(async () => {
-    const { data } = await api.routes.list(spotTypeKey);
-    setRoutes(data ?? []);
-  }, [spotTypeKey]);
-
-  // データ取得
+  // データ取得(公開スポット・公開ルートはspotCacheが読み込む)
   useEffect(() => {
-    setRoutes([]); // 種別切り替え時に前の種別のルートを描かないよう先に空へ戻す
     (async () => {
-      await Promise.all([loadPrivateSpots(), loadVisits(), loadRoutes()]);
+      await Promise.all([loadPrivateSpots(), loadVisits()]);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

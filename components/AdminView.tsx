@@ -30,6 +30,7 @@ import {
   SPOT_ADMIN_ROLES,
   SPOT_TYPE_SETTING_KEYS,
   SPOT_TYPE_SETTING_LABELS,
+  STATUS_LABELS,
   type AppUser,
   type Role,
   type Spot,
@@ -1091,13 +1092,16 @@ export default function AdminView({
       }
 
       // 差分更新: 既存ルートとシリーズ・説明・経由地の並びが完全一致するものはスキップし、
-      // 変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと置き換え)
+      // 変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと置き換え)。
+      // スポットのCSVインポートと同じく常にstatus: 'published'を明示するため、
+      // 公開以外の既存ルートは内容が同一でも公開に倒す(スキップしない)
       const existingByName = new Map(
         routes.map((r) => [
           r.name,
           {
             series: r.series,
             description: r.description,
+            status: r.status,
             spotIds: r.points.map((p) => p.spot_id).join("|"),
           },
         ])
@@ -1106,6 +1110,7 @@ export default function AdminView({
         name: string;
         series: string | null;
         description: string | null;
+        status: "published";
         spot_ids: string[];
       }[] = [];
       let unchangedCount = 0;
@@ -1117,12 +1122,19 @@ export default function AdminView({
         if (
           existing?.spotIds === spotIds.join("|") &&
           existing.series === series &&
-          existing.description === description
+          existing.description === description &&
+          existing.status === "published"
         ) {
           unchangedCount++;
           continue;
         }
-        changed.push({ name: route, series, description, spot_ids: spotIds });
+        changed.push({
+          name: route,
+          series,
+          description,
+          status: "published",
+          spot_ids: spotIds,
+        });
       }
       if (changed.length === 0) {
         setRouteMessage(
@@ -1630,6 +1642,11 @@ export default function AdminView({
                   {routes.map((r) => (
                     <li key={r.id} className="flex items-center gap-3 px-3 py-2">
                       <span className="flex-1 truncate text-sm">{r.name}</span>
+                      {r.status !== "published" && (
+                        <span className="shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">
+                          {STATUS_LABELS[r.status]}
+                        </span>
+                      )}
                       <span className="shrink-0 text-xs text-gray-500">
                         経由地{r.points.length}件
                       </span>
