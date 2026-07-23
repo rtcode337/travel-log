@@ -89,14 +89,17 @@ export function passesFilters(
   return true;
 }
 
-/** 既定から変わっている条件があるか(リセットボタンの表示条件) */
+/**
+ * 何らかの絞り込みが掛かっているか(リセットボタンと地図の絞り込みボタンの
+ * 見た目の条件)。`showRoutes`は表示の切り替えであって絞り込みではないため
+ * 含めない(リセットの対象にもしない)
+ */
 export function hasActiveFilters(filters: SpotFilters): boolean {
   return (
     filters.series.length > 0 ||
     filters.categories.length > 0 ||
     filters.visited.length > 0 ||
-    filters.visitedDate !== null ||
-    filters.showRoutes !== DEFAULT_FILTERS.showRoutes
+    filters.visitedDate !== null
   );
 }
 
@@ -119,7 +122,8 @@ export function FilterResetButton({
     <button
       type="button"
       disabled={!active}
-      onClick={() => onChange(DEFAULT_FILTERS)}
+      // showRoutesは絞り込みではないためリセットの対象外(現在の値を維持する)
+      onClick={() => onChange({ ...DEFAULT_FILTERS, showRoutes: filters.showRoutes })}
       className={`rounded-full border px-3 py-1 text-xs font-medium ${
         active ? ALL_CHIP_ACTIVE_CLASS : "border-gray-300 bg-white text-gray-400"
       }`}

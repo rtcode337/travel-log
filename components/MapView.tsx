@@ -462,7 +462,11 @@ function loadSavedFilters(typeKey: string): SpotFilters {
       // キー自体が無い保存データ(この設定の追加前に保存されたもの)は既定のオン扱い
       showRoutes: typeof obj.showRoutes === "boolean" ? obj.showRoutes : true,
     };
-    if (!hasActiveFilters(filters)) return DEFAULT_FILTERS;
+    // 全項目が既定どおりなら参照もDEFAULT_FILTERSに揃える。showRoutesは
+    // hasActiveFiltersに含まれない(絞り込みではない)ため別途比較する
+    if (!hasActiveFilters(filters) && filters.showRoutes === DEFAULT_FILTERS.showRoutes) {
+      return DEFAULT_FILTERS;
+    }
     return filters;
   } catch {
     return DEFAULT_FILTERS;
@@ -587,7 +591,7 @@ export default function MapView({
   useEffect(() => {
     setFiltersState(loadSavedFilters(spotTypeKey));
   }, [spotTypeKey]);
-  // 絞り込み条件が既定から変わっているか(ルート表示のオンを含む。絞り込みボタンの見た目に使う)
+  // 何らかの絞り込みが掛かっているか(絞り込みボタンの見た目に使う。ルート表示のオン/オフは含めない)
   const filtersActive = hasActiveFilters(filters);
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
