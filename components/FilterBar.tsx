@@ -209,17 +209,22 @@ export default function FilterBar({
     // シリーズ未設定(=マイスポット)のスポットが1件でもあれば選択肢に加える
     // (自分が追加した非公開のマイスポットもシリーズ絞り込みで選べるようにする)
     const hasMySpot = spots.some((s) => !s.series);
-    return hasMySpot ? [...known, MY_SPOT_SERIES] : known;
-  }, [spots, seriesStyles]);
+    const base = hasMySpot ? [...known, MY_SPOT_SERIES] : known;
+    // 選択中だが実データに無いシリーズ(唯一のマイスポットを削除した後など)も、
+    // 「すべて」に戻せるよう選択肢として残す(でないとチップごと消えて外せなくなる)
+    const orphaned = filters.series.filter((s) => !base.includes(s));
+    return [...base, ...orphaned];
+  }, [spots, seriesStyles, filters.series]);
   // 選択肢は実データに存在する値から作り、種別のカテゴリ設定の並び順に揃える
-  // (設定に無い値はdistinctValuesの五十音順のまま末尾に出す)
-  const availableCategories = useMemo(
-    () =>
-      distinctValues(spots.flatMap((s) => s.categories)).sort(
-        (a, b) => getCategoryOrder(a, categories) - getCategoryOrder(b, categories)
-      ),
-    [spots, categories]
-  );
+  // (設定に無い値はdistinctValuesの五十音順のまま末尾に出す)。シリーズと同様、
+  // 選択中だが実データに無いカテゴリも外せるよう選択肢として残す
+  const availableCategories = useMemo(() => {
+    const known = distinctValues(spots.flatMap((s) => s.categories)).sort(
+      (a, b) => getCategoryOrder(a, categories) - getCategoryOrder(b, categories)
+    );
+    const orphaned = filters.categories.filter((c) => !known.includes(c));
+    return [...known, ...orphaned];
+  }, [spots, categories, filters.categories]);
 
   return (
     <div className="space-y-3 text-sm">
@@ -229,7 +234,7 @@ export default function FilterBar({
         </div>
       )}
 
-      {availableSeries.length > 1 && (
+      {(availableSeries.length > 1 || filters.series.length > 0) && (
         <div>
           <span className="mb-1 block text-xs font-medium text-gray-500">
             シリーズ
@@ -243,7 +248,7 @@ export default function FilterBar({
         </div>
       )}
 
-      {availableCategories.length > 1 && (
+      {(availableCategories.length > 1 || filters.categories.length > 0) && (
         <div>
           <span className="mb-1 block text-xs font-medium text-gray-500">
             カテゴリ
