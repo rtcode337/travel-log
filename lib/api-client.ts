@@ -256,6 +256,12 @@ export const api = {
       request<Visit[]>(`/api/visits${spotId ? `?spot_id=${spotId}` : ""}`),
     create: (visit: unknown) =>
       request<Visit>("/api/visits", { method: "POST", body: JSON.stringify(visit) }),
+    // 写真は「既存の相対パス(残す写真)」と「data URL(追加する写真)」の混在で送る
+    update: (id: string, visit: unknown) =>
+      request<Visit>(`/api/visits/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(visit),
+      }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/visits/${id}`, { method: "DELETE" }),
   },
