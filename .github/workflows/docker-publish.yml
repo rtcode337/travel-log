@@ -3,6 +3,13 @@
 #   ghcr.io/rtcode337/travel-log          … アプリ本体(Dockerfileのprodステージ、appサービス)
 #   ghcr.io/rtcode337/travel-log-db-init  … DBの準備とマイグレーション適用
 #                                           (db/Dockerfile、db-init/db-migrateサービス)
+#
+# アプリ本体は amd64/arm64 を「それぞれのアーキのネイティブランナー」で並列ビルドし、
+# ダイジェストで push したものを最後の merge ジョブでマニフェストにまとめる。
+# 以前は amd64 ランナー上で arm64 を QEMU エミュレーションしていたが、arm64 の
+# `npm ci`(や next build)が極端に遅く、まれにハングしてビルドが 40 分以上
+# 進まないことがあったため、ネイティブランナー方式に変えた(publicリポジトリは
+# ubuntu-24.04-arm ランナーを無料で使える)。
 name: docker-publish
 
 on:
@@ -14,20 +21,36 @@ permissions:
   contents: read
   packages: write
 
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
 jobs:
-  build-and-push:
+  # 管理画面に表示するビルド番号(JSTの日時 + 短縮コミットハッシュ)を1回だけ決めて、
+  # 両アーキのビルドで同じ値を焼き込む(アーキごとに別値にならないように)
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      build_number: ${{ steps.build_number.outputs.value }}
     steps:
       - uses: actions/checkout@v4
-
-      # 管理画面に表示するビルド番号(JSTの日時 + 短縮コミットハッシュ)。
-      # 本番で動いているイメージがいつのどのコミットのものかを画面から確認できるようにする
       - id: build_number
         run: |
           echo "value=$(TZ=Asia/Tokyo date +'%Y%m%d-%H%M')-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      # arm64イメージをamd64ランナー上でビルドするためのQEMUエミュレーション
-      - uses: docker/setup-qemu-action@v3
+  # アーキごとにネイティブランナーでビルドし、タグを付けずダイジェストで push する
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
@@ -40,31 +63,80 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: prod
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_NUMBER=${{ needs.prepare.outputs.build_number }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # タグではなくダイジェストで push する(マニフェストは merge ジョブで作る)
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=app-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=app-${{ matrix.platform }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-app-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # 各アーキのダイジェストを1つのマニフェスト(latest / sha-xxxxxxx タグ)にまとめて push する
+  merge:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-app-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
           # latest(既定ブランチのみ)+ コミットSHA(sha-xxxxxxx)の2タグ。
           # 障害時はSHAタグを指定してpullすれば任意の時点に戻せる
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: prod
-          push: true
-          # 本番ホスト(arm64)とローカル検証用(amd64)のマルチアーキビルド。
-          # arm64側はQEMUエミュレーションのためビルド時間が長い
-          platforms: linux/amd64,linux/arm64
-          build-args: |
-            BUILD_NUMBER=${{ steps.build_number.outputs.value }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect
+        run: docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
 
   # DBの準備・マイグレーション適用用イメージ(db/Dockerfile)。マイグレーションSQLを
   # 焼き込むため、db/migrations/ を足したときもこのイメージのpullだけで本番に反映される。
-  # アプリ本体とは独立してビルドできるので並列に走らせる
+  # 小さいイメージ(Alpine + SQLコピー)でハングの実績も無いため、こちらは従来どおり
+  # QEMUマルチアーキビルドのまま(アプリ本体とは独立して並列に走る)
   build-and-push-db-init:
     runs-on: ubuntu-latest
     steps:
@@ -96,5 +168,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=db-init
+          cache-to: type=gha,mode=max,scope=db-init
