@@ -16,7 +16,11 @@ import {
 import { DEFAULT_REGION_SCOPE, regionFieldLabel } from "@/lib/region";
 import { useRegionScope } from "@/lib/useRegionScope";
 import { useCategories } from "@/lib/useCategories";
+import { useSeriesStyles } from "@/lib/useSeriesStyles";
+import { MY_SPOT_SERIES } from "@/lib/seriesStyle";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
+import { toDateTimeLocalValue } from "@/lib/visitPhoto";
+import VisitFields from "@/components/VisitFields";
 
 export default function AddSpotModal({
   lat,
@@ -25,6 +29,7 @@ export default function AddSpotModal({
   spot,
   spots,
   role,
+  withVisit = false,
   onClose,
   onSaved,
   onDeleted,
@@ -41,6 +46,9 @@ export default function AddSpotModal({
   spots: Spot[];
   /** 選べるstatusの選択肢を決める(新規作成時のみ使用。nullなら非公開のみ扱う) */
   role: Role | null;
+  /** trueにすると「探訪スポットを追加」モード:名前とよみがなの間に訪問記録
+   * (訪問日時・写真・メモ)の入力欄を出し、スポット作成と同時に訪問を1件記録する */
+  withVisit?: boolean;
   onClose: () => void;
   onSaved: (spot: Spot) => void;
   onDeleted?: () => void;
@@ -74,6 +82,29 @@ export default function AddSpotModal({
   const [error, setError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
 
+  // 探訪スポット追加(withVisit)のときだけ使う、同時に付ける訪問記録の入力値
+  const [visitedOn, setVisitedOn] = useState(() =>
+    toDateTimeLocalValue(new Date())
+  );
+  const [visitMemo, setVisitMemo] = useState("");
+  const [visitPhotos, setVisitPhotos] = useState<string[]>([]);
+  const [processingPhotos, setProcessingPhotos] = useState(false);
+
+  // 実際に適用されるstatus(編集は既存のまま、新規は選択中のstatus)。
+  // 非公開スポット以外はシリーズ必須(非公開・シリーズ未設定はマイスポット扱い)
+  const effectiveStatus: SpotStatus = isEdit ? spot!.status : status;
+  const seriesRequired = effectiveStatus !== "private";
+
+  // シリーズはこの種別のJSON設定(series_styles)から選ぶ(自由入力を廃止)。
+  // 編集中スポットの既存シリーズが設定一覧に無い場合は、選択を保てるよう末尾に足す
+  const seriesStyles = useSeriesStyles(typeKey);
+  const seriesOptions = useMemo(() => {
+    const configured = seriesStyles.map((s) => s.series);
+    return series && !configured.includes(series)
+      ? [...configured, series]
+      : configured;
+  }, [seriesStyles, series]);
+
   // 新規追加時のみ、置いた座標から地域(都道府県/州・県/国)を自動入力する
   // (手で上書き可能)。地域の解決方法がスコープに依存するため、スコープの取得完了を待つ
   useEffect(() => {
@@ -94,10 +125,6 @@ export default function AddSpotModal({
     });
   }, [isEdit, lat, lng, regionScope]);
 
-  const availableSeries = useMemo(
-    () => distinctValues(spots.map((s) => s.series)),
-    [spots]
-  );
   // 'jp'以外のスコープでは地域は自由入力のため、既存スポットの地域をサジェストする
   const availableRegions = useMemo(
     () => distinctValues(spots.map((s) => s.region)),
@@ -133,6 +160,11 @@ export default function AddSpotModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // 非公開スポット以外はシリーズ必須(非公開でシリーズ未設定はマイスポット扱い)
+    if (seriesRequired && !series.trim()) {
+      setError("公開・承認待ちのスポットはシリーズを選択してください。");
+      return;
+    }
     setSaving(true);
     setError(null);
     const payload = {
@@ -148,11 +180,29 @@ export default function AddSpotModal({
     const { data, error } = isEdit
       ? await api.spots.update(spot!.id, payload)
       : await api.spots.create({ ...payload, status }, spotTypeKey!);
-    setSaving(false);
     if (error || !data) {
+      setSaving(false);
       setError("送信に失敗しました: " + (error?.message ?? "unknown error"));
       return;
     }
+    // 探訪スポット追加のときは、作成したスポットに訪問記録を1件つける(口コミは無し)
+    if (withVisit && !isEdit) {
+      const { error: visitError } = await api.visits.create({
+        spot_id: data.id,
+        visited_on: visitedOn ? new Date(visitedOn).toISOString() : null,
+        memo: visitMemo.trim() || null,
+        photos: visitPhotos,
+      });
+      if (visitError) {
+        setSaving(false);
+        setError(
+          "スポットは追加しましたが、訪問の記録に失敗しました: " +
+            visitError.message
+        );
+        return;
+      }
+    }
+    setSaving(false);
     onSaved(data);
   };
 
@@ -181,7 +231,11 @@ export default function AddSpotModal({
         className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
       >
         <h2 className="font-bold">
-          {isEdit ? "スポットを編集" : "この場所にスポットを追加"}
+          {isEdit
+            ? "スポットを編集"
+            : withVisit
+              ? "この場所に探訪スポットを追加"
+              : "この場所にスポットを追加"}
         </h2>
         {!isEdit && lat != null && lng != null && (
           <p className="text-xs text-gray-500">
@@ -235,6 +289,21 @@ export default function AddSpotModal({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </div>
+        {/* 探訪スポット追加: 名前とよみがなの間に訪問記録の入力欄を出す */}
+        {withVisit && !isEdit && (
+          <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+            <p className="text-sm font-medium text-blue-800">訪問を記録</p>
+            <VisitFields
+              visitedOn={visitedOn}
+              onVisitedOnChange={setVisitedOn}
+              memo={visitMemo}
+              onMemoChange={setVisitMemo}
+              photos={visitPhotos}
+              onPhotosChange={setVisitPhotos}
+              onProcessingChange={setProcessingPhotos}
+            />
+          </div>
+        )}
         <div>
           <label className="mb-1 block text-sm font-medium">よみがな</label>
           <input
@@ -310,18 +379,30 @@ export default function AddSpotModal({
           )}
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium">シリーズ</label>
-          <input
+          <label className="mb-1 block text-sm font-medium">
+            シリーズ {seriesRequired && "*"}
+          </label>
+          <select
+            required={seriesRequired}
             value={series}
             onChange={(e) => setSeries(e.target.value as Series)}
-            list="add-spot-series-suggestions"
             className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-          />
-          <datalist id="add-spot-series-suggestions">
-            {availableSeries.map((r) => (
-              <option key={r} value={r} />
+          >
+            {/* 非公開はシリーズ未設定=マイスポット扱い可。公開・承認待ちは必須 */}
+            <option value="">
+              {seriesRequired ? "選択してください" : `未設定(${MY_SPOT_SERIES})`}
+            </option>
+            {seriesOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
-          </datalist>
+          </select>
+          {!seriesRequired && (
+            <p className="mt-1 text-xs text-gray-500">
+              非公開スポットでシリーズを選ばない場合は「{MY_SPOT_SERIES}」(赤ピンに白丸)として表示されます。
+            </p>
+          )}
         </div>
         {/* カテゴリは1スポットに複数付けられるため、選択チップ(トグル)で選ぶ。
             一覧に無いものは下の入力欄から足す(足した値もチップとして並ぶ) */}
@@ -394,7 +475,7 @@ export default function AddSpotModal({
           </button>
           <button
             type="submit"
-            disabled={saving || deleting}
+            disabled={saving || deleting || processingPhotos}
             className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {saving

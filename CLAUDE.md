@@ -128,6 +128,8 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 ラベルは文字列または`{ image: base64 dataURL }`のどちらか(`isImageLabel`で判定)。`textColor`は省略可で、省略時は`autoTextColor`が背景色の明度から白/濃色を自動選択する。地図ピン(`lib/pinIcon.ts`の`ensurePinImage`、画像ラベル読み込みのため非同期)・バッジ(`components/SeriesBadge.tsx`、Tailwindの動的クラスはJITに拾われないため常にinline styleで色を当てる)・ミニマップ(`components/MiniMap.tsx`)・絞り込みチップ(`components/FilterBar.tsx`)はいずれも`useSeriesStyles(typeKey)`フック(`/api/spot-types`の結果から解決、GETキャッシュにより同一ページでの重複リクエストなし)経由でこの配列を受け取って描画する。非公開スポット(`status='private'`)は縁取り線の色はそのまま破線にするだけで、色・大きさ・ラベルはシリーズと同じにする(公開スポットの縁取りも常に実線で描く。旧実装は非公開のときしか縁取り自体を描いていなかった点の修正でもある)。
 
+**シリーズ未設定(null/空)のスポットは「マイスポット」という仮想シリーズとして描画する**(`lib/seriesStyle.ts`の`MY_SPOT_SERIES`/`findSeriesStyle`)。見た目は「赤ピンの中に白丸」(fill `#dc2626`)で、大きさはAランクと同じ(size 26。地名検索の赤マーカーと色が被るが意図した見た目)。DBには保存せず(seriesはnullのまま)、`findSeriesStyle`が`null`/空文字を受けたときにこのスタイルを返すことで実現する。`SeriesBadge`もnullシリーズをマイスポットのバッジで表示する。スポット追加フォーム(`AddSpotModal`)では**シリーズは自由入力ではなくこの種別の`series_styles`から選ぶセレクト**にし、**非公開スポット以外(公開・承認待ち)はシリーズを必須**にした(`seriesRequired = 実効status !== 'private'`)。非公開はシリーズ未選択=マイスポット扱いを許す。
+
 `app/api/spot-types/[id]/route.ts`のPATCHの`settings`は文字列値(`series_styles`)も受け付けるよう`boolean | string`に拡張し、保存前に`parseSeriesStyles`で妥当性を検証する。管理画面からのスポット種別JSON作成(`SpotTypeDefinitionFile`)の`series`フィールドもこの形式で、省略時・手入力フォームでの追加時はDEFAULT_SERIES_STYLESのままになる。
 
 ### カテゴリ(`categories`)
@@ -187,6 +189,10 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 ### スポットの新規登録フロー
 
 地図上での右クリック追加、`/[type]/admin`の追加フォーム、CSVインポート(`lib/csv.ts`+`/[type]/admin`)いずれも`app/api/spots/route.ts`の同じ挿入ロジックを通る。status未指定時の既定はroleにより`user`は`private`、それ以外(moderator/spot_admin/admin)は`pending`(`ALLOWED_STATUS_BY_ROLE`が許す範囲でstatusを明示すれば`published`等も選べる)。CSVインポートは`/[type]/admin`(spot_admin/admin専用)からのみ行える経路のため、`AdminView`側で常に`status: 'published'`を明示し、承認待ちを経由せず即座に公開する。それ以外の経路(右クリック追加・追加フォームでの既定)は引き続き承認待ちを通り、承認・却下は`/[type]/admin`側の別ステップで行う。
+
+地図の長押し/右クリックメニューには「ここにスポットを追加」に加えて**「探訪スポットを追加」**がある(`MapView`の`visitSpotAt`)。後者は`AddSpotModal`を`withVisit`で開き、名前とよみがなの間に訪問記録の入力欄(訪問日時・写真・メモ。口コミは無し)を出し、**スポット作成後にそのスポットへ訪問記録を1件(`api.visits.create`)つける**。訪問記録欄は`VisitFormModal`と共通の`VisitFields`コンポーネント(写真の縮小・Exif撮影日時取得は`lib/visitPhoto.ts`/`lib/exif.ts`)で、スポットの状態(公開範囲)は通常のスポット追加と同じ選択肢。
+
+**非公開スポットは`SpotDetailModal`の「位置を修正」から座標をドラッグで直せる**(`SpotRepositionModal`)。ドラッグできる赤マーカーの付いた地図を出し、保存でPATCHする(座標以外は既存値をそのまま送る — PATCHは`name/lat/lng/region/series/description`を無条件に上書きするため、送らないとnullで消える)。公開スポットは編集フォームの緯度経度欄で直す(この機能は非公開のみ)。
 
 CSVのヘッダーに`CSV_COLUMNS`(ルートCSVは`ROUTE_CSV_COLUMNS`)に無い列があるときは、`unknownCsvColumns`が検出してインポートを中止する。知らない列は読み飛ばされるだけなので、綴り違いや旧フォーマットのCSV(シリーズ改名前の`rank`/`category`など)を取り込んでもエラーが出ず、該当の値だけが欠けた状態で登録されてしまうため(実際に郵便局データ2.4万件が`series`なしで入り、地図が白いピンになった)。必須列(`name`/`lat`/`lng`/`region`)の存在チェックとは別。
 

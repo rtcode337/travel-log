@@ -24,6 +24,7 @@ import { formatCategoriesForDisplay, resolveCategories } from "@/lib/category";
 import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
+import SpotRepositionModal from "@/components/SpotRepositionModal";
 
 /** Wikipediaの公式ロゴマーク(Simple Icons、CC0) */
 function WikipediaIcon({ className }: { className?: string }) {
@@ -105,6 +106,8 @@ export default function SpotDetailModal({
   const [reviewsPage, setReviewsPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  // 非公開スポットの位置修正(ドラッグ)モーダルの表示
+  const [showReposition, setShowReposition] = useState(false);
   // 編集対象の訪問記録(訪問履歴の「編集」から開く。VisitFormModalの編集モード)
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -374,6 +377,16 @@ export default function SpotDetailModal({
                   >
                     編集
                   </button>
+                  {/* 非公開スポットはドラッグで位置を修正できる(座標だけを直せる) */}
+                  {spot.status === "private" && (
+                    <button
+                      type="button"
+                      onClick={() => setShowReposition(true)}
+                      className="text-xs font-normal text-blue-600 underline"
+                    >
+                      位置を修正
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleDeleteSpot}
@@ -696,6 +709,18 @@ export default function SpotDetailModal({
             setShowEditForm(false);
             onSpotDeleted?.(spot.id);
             onClose();
+          }}
+        />
+      )}
+
+      {showReposition && spot && (
+        <SpotRepositionModal
+          spot={spot}
+          onClose={() => setShowReposition(false)}
+          onSaved={(updated) => {
+            setShowReposition(false);
+            setSpot(updated);
+            onSpotChange?.(updated);
           }}
         />
       )}
