@@ -197,8 +197,8 @@ name,name_kana,lat,lng,region,series,categories,description,key
   いくファイル)をそのまま貼る想定で、該当が無いキーはエラーにせず読み飛ばす
 
 観光地(`tourist`)データの`description`はWikipedia記事冒頭文の引用(CC BY-SA 4.0)、
-`name`/`lat`/`lng`の一部はOpenStreetMap由来(ODbL)のため、それぞれの出典表示は
-travel-log-data側で行っている(本リポジトリのMITライセンスはアプリのコードにのみ適用)。
+`lat`/`lng`はWikipedia記事座標(CC BY-SA 4.0)またはWikidata `P625`(CC0)由来のため、
+それぞれの出典表示はtravel-log-data側で行っている(本リポジトリのMITライセンスはアプリのコードにのみ適用)。
 シリーズの決め方などデータの詳細はtravel-log-data/README.mdを参照。
 
 ## スポット種別のカスタマイズ
