@@ -1738,15 +1738,17 @@ export default function MapView({
         />
       )}
 
-      {/* ルート詳細モーダル(ルートの線・矢印のタップで開く。重ね表示のルートも共用) */}
+      {/* ルート詳細モーダル(ルートの線・矢印のタップで開く。重ね表示のルートも共用)。
+          他のモーダルと違い常に中央表示にする(角丸画面のスマホで下端に寄せると
+          端が見切れるため。中身が経由地一覧だけの小さなモーダルなので中央でも邪魔にならない) */}
       {detailRoute && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onClick={closeRouteDetail}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+            className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
           >
             <div className="flex items-start justify-between gap-2">
               <h2 className="font-bold">{detailRoute.name}</h2>
@@ -1765,35 +1767,45 @@ export default function MapView({
               </p>
             )}
             {detailRoute.points.length > 0 && (
-              <div className="space-y-1.5 border-t border-gray-100 pt-3 text-sm">
-                {[
-                  { label: "始点", point: detailRoute.points[0] },
-                  {
-                    label: "終点",
-                    point: detailRoute.points[detailRoute.points.length - 1],
-                  },
-                ].map(({ label, point }) => (
-                  <div key={label} className="flex items-baseline gap-2">
-                    <span className="w-8 shrink-0 text-xs font-medium text-gray-500">
-                      {label}
-                    </span>
-                    {/* スポット名のタップでその位置へ飛ぶ(モーダルは閉じる) */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        closeRouteDetail();
-                        mapRef.current?.flyTo({
-                          center: [point.lng, point.lat],
-                          zoom: 16,
-                        });
-                      }}
-                      className="min-w-0 truncate text-left font-medium text-blue-600 underline"
-                    >
-                      {point.spot_name}
-                    </button>
-                  </div>
-                ))}
-                <p className="pt-1 text-xs text-gray-500">
+              <div className="border-t border-gray-100 pt-3 text-sm">
+                {/* 全経由地を巡った順に並べ、2点の間にその区間の説明(移動手段など)を挟む */}
+                <ol className="space-y-0.5">
+                  {detailRoute.points.map((point, i) => (
+                    <li key={`${point.spot_id}-${point.seq}`}>
+                      <div className="flex items-baseline gap-2">
+                        <span className="w-6 shrink-0 text-right text-xs font-medium tabular-nums text-gray-500">
+                          {i + 1}
+                        </span>
+                        {/* スポット名のタップでその位置へ飛ぶ(モーダルは閉じる) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            closeRouteDetail();
+                            mapRef.current?.flyTo({
+                              center: [point.lng, point.lat],
+                              zoom: 16,
+                            });
+                          }}
+                          className="min-w-0 truncate text-left font-medium text-blue-600 underline"
+                        >
+                          {point.spot_name}
+                        </button>
+                      </div>
+                      {/* 区間の説明は次の経由地との間に表示(最終地点には次の区間が無い) */}
+                      {i < detailRoute.points.length - 1 && (
+                        <div className="flex items-baseline gap-2 py-0.5 text-xs text-gray-500">
+                          <span className="w-6 shrink-0 text-right">↓</span>
+                          {point.description && (
+                            <span className="min-w-0 whitespace-pre-wrap">
+                              {point.description}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                <p className="pt-2 text-xs text-gray-500">
                   経由地{detailRoute.points.length}件。スポット名をタップすると、その位置に地図を移動します。
                 </p>
               </div>
