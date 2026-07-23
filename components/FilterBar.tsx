@@ -21,9 +21,9 @@ export interface SpotFilters {
    */
   visitedDate: string | null;
   /**
-   * ルート(巡った順の矢印)を地図に表示するか。オンならシリーズ・カテゴリの
-   * 絞り込みが無くても全ルートを表示し、絞り込み中はそれに連動して絞られる
-   * (`MapView`の`filterVisibleRoutes`)。地図専用の設定だがスポット一覧と
+   * ルート(巡った順の矢印)を地図に表示するか(既定オン)。オンならシリーズ・
+   * カテゴリの絞り込みが無くても全ルートを表示し、絞り込み中はそれに連動して
+   * 絞られる(`MapView`の`filterVisibleRoutes`)。地図専用の設定だがスポット一覧と
    * 型を共用しているため、一覧側では単に使われないだけ
    */
   showRoutes: boolean;
@@ -34,7 +34,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   categories: [],
   visited: [],
   visitedDate: null,
-  showRoutes: false,
+  showRoutes: true,
 };
 
 /**
@@ -96,7 +96,7 @@ export function hasActiveFilters(filters: SpotFilters): boolean {
     filters.categories.length > 0 ||
     filters.visited.length > 0 ||
     filters.visitedDate !== null ||
-    filters.showRoutes
+    filters.showRoutes !== DEFAULT_FILTERS.showRoutes
   );
 }
 

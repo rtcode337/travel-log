@@ -459,7 +459,8 @@ function loadSavedFilters(typeKey: string): SpotFilters {
         (v): v is VisitedValue => v === "visited" || v === "unvisited"
       ),
       visitedDate: date(obj.visitedDate),
-      showRoutes: obj.showRoutes === true,
+      // キー自体が無い保存データ(この設定の追加前に保存されたもの)は既定のオン扱い
+      showRoutes: typeof obj.showRoutes === "boolean" ? obj.showRoutes : true,
     };
     if (!hasActiveFilters(filters)) return DEFAULT_FILTERS;
     return filters;
