@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { getSpotTypeSetting, ROLE_LABELS, type Role, type SpotType } from "@/lib/types";
+import { ROLE_LABELS, type Role, type SpotType } from "@/lib/types";
 
 export default function AccountView({ typeKey }: { typeKey: string }) {
   const router = useRouter();
@@ -21,10 +20,7 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
     api.spotTypes.list().then(({ data }) => setSpotTypes(data ?? []));
   }, []);
 
-  // public_visible=false(非公開)の種別はAPI側でadmin/spot_admin以外には返らない。
-  // 管理者には非公開の種別もリンクを出す
   const currentType = spotTypes.find((t) => t.key === typeKey) ?? null;
-  const otherTypes = spotTypes.filter((t) => t.key !== typeKey);
 
   const handleLogout = async () => {
     await api.auth.logout();
@@ -53,32 +49,6 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
           🚪 ログアウト
         </button>
       </section>
-
-      {otherTypes.length > 0 && (
-        <section className="rounded-xl border border-gray-200 bg-white p-4">
-          <h2 className="mb-2 text-sm font-bold">別のスポットを見る</h2>
-          <ul className="divide-y divide-gray-100">
-            {otherTypes.map((t) => (
-              <li key={t.id}>
-                <Link
-                  href={`/${t.key}/map`}
-                  className="flex items-center justify-between py-2 text-sm text-blue-600"
-                >
-                  <span>
-                    {t.label}
-                    {!getSpotTypeSetting(t, "public_visible") && (
-                      <span className="ml-1.5 text-xs text-gray-400">
-                        (管理者のみ)
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-gray-400">›</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </main>
   );
 }
