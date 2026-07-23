@@ -18,7 +18,7 @@ import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
 import type { Role, Spot, SpotRoute, SpotType, Visit } from "@/lib/types";
 import { expandSpot, readSpotCacheDb } from "@/lib/spotCacheDb";
-import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
+import { autoTextColor, type SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import { formatBytes, formatDownloadedAt, useSpotCache } from "@/lib/useSpotCache";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
@@ -275,6 +275,8 @@ function ensureOverlayLayers(
     source: OVERLAY_SOURCE_ID,
     filter: ["has", "point_count"],
     paint: {
+      // circle-colorは初期値。描画時に重ね先の種別の先頭シリーズの色で上書きされる
+      // (対応するtext-colorの上書きも同様)
       "circle-color": "#2563eb",
       "circle-opacity": OVERLAY_OPACITY * 0.85,
       "circle-stroke-width": 2,
@@ -1445,6 +1447,15 @@ export default function MapView({
 
       const render = async () => {
         ensureOverlayLayers(map, setOverlayDetailSpotId, setOverlayDetailRouteId);
+        // クラスタは重ね先の種別の先頭シリーズの色で塗り、本体の青いクラスタと
+        // 見分けられるようにする(シリーズ設定が空の種別は未知シリーズのピンと同系のグレー)
+        const clusterColor = overlaySeriesStyles[0]?.color ?? "#9ca3af";
+        map.setPaintProperty(OVERLAY_CLUSTER_LAYER_ID, "circle-color", clusterColor);
+        map.setPaintProperty(
+          OVERLAY_CLUSTER_COUNT_LAYER_ID,
+          "text-color",
+          autoTextColor(clusterColor)
+        );
         // キャッシュには公開スポットしか入らないため、非公開(破線)のピンは不要
         await Promise.all(
           filtered.map((spot) =>
