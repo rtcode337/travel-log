@@ -1861,8 +1861,25 @@ export default function AdminView({
                 </p>
               )}
 
+              <div className="mb-3">
+                <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                  {importingRoutes ? "インポート中…" : "ルートCSVインポート"}
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    disabled={importingRoutes}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleRouteCsvFile(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+
               {routes.length > 0 && (
-                <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                <ul className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
                   {routes.map((r) => (
                     <li key={r.id} className="flex items-center gap-3 px-3 py-2">
                       <span className="flex-1 truncate text-sm">{r.name}</span>
@@ -1885,21 +1902,6 @@ export default function AdminView({
                   ))}
                 </ul>
               )}
-
-              <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
-                {importingRoutes ? "インポート中…" : "ルートCSVインポート"}
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  disabled={importingRoutes}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleRouteCsvFile(file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
             </section>
 
           {isAdmin && (
