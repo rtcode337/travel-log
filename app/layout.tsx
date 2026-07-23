@@ -17,6 +17,12 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // ページ自体のピンチズーム・入力フォーカス時の自動ズームを無効化する。
+  // 自動ズームで下のタブバーが画面外に隠れるうえ、地図表示中はピンチ操作が
+  // 地図の拡大縮小に取られてページのズームを元に戻す手段が無くなるため。
+  // (地図自体の拡大縮小はMapLibreのジェスチャなので影響しない)
+  maximumScale: 1,
+  userScalable: false,
   themeColor: "#f9fafb",
 };
 
