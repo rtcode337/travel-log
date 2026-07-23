@@ -85,6 +85,11 @@ export interface SpotRoutePoint {
   lat: number;
   lng: number;
   spot_name: string;
+  /**
+   * この経由地から次の経由地への区間の説明(移動手段など。未指定ならnull)。
+   * 最終地点には次の区間が無いため常にnull。ルート全体の説明はSpotRoute.description
+   */
+  description: string | null;
 }
 
 /**
@@ -99,7 +104,7 @@ export interface SpotRoute {
   name: string;
   /** このルートが属するシリーズ(spots.seriesと同じ値空間。未指定ならnull) */
   series: string | null;
-  /** ルートの説明文(地図のルート詳細に表示。未指定ならnull) */
+  /** ルート全体の説明文(地図のルート詳細に表示。未指定ならnull。区間ごとの説明はpoints側) */
   description: string | null;
   /** spotsと同じ公開状態(公開=全員、非公開=作成者のみ、承認待ち・却下=本人+moderator以上) */
   status: SpotStatus;

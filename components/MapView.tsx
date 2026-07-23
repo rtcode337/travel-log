@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -783,6 +784,10 @@ export default function MapView({
 }) {
   const searchParams = useSearchParams();
   const focusSpotId = searchParams.get("spot");
+  // 「◯◯」の地図で開くリンク(重ね表示のスポット詳細)で種別を切り替えて来たとき、
+  // 元の種別のキーがfromに入る。左下に「元の地図に戻る」リンクを出すのに使う
+  // (戻り先の表示位置は種別ごとのlastViewsが復元するため、キーだけあればよい)
+  const returnTypeKey = searchParams.get("from");
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -1278,9 +1283,16 @@ export default function MapView({
     // 一度処理したらURLから消す(戻る操作やスポット再取得のたびに再発火しないように)。
     // next/navigationのrouter.replaceだとuseSearchParams経由でSuspense境界が
     // 再評価され、MapView自体が再マウントされてspotsが空に戻ってしまうことが
-    // あったため、ブラウザ標準のHistory APIで直接URLだけ書き換える
-    window.history.replaceState(null, "", `/${spotTypeKey}/map`);
-  }, [focusSpotId, spots, spotTypeKey, runWhenMapReady]);
+    // あったため、ブラウザ標準のHistory APIで直接URLだけ書き換える。
+    // fromは「元の地図に戻る」リンクをこの地図にいる間は出し続けたいので消さずに残す
+    window.history.replaceState(
+      null,
+      "",
+      returnTypeKey
+        ? `/${spotTypeKey}/map?from=${encodeURIComponent(returnTypeKey)}`
+        : `/${spotTypeKey}/map`
+    );
+  }, [focusSpotId, spots, spotTypeKey, returnTypeKey, runWhenMapReady]);
 
   // マーカーの生成・フィルタ反映。
   // 公開スポットも自分の非公開スポットも同じWebGLクラスタ表示で描画する
@@ -1507,9 +1519,40 @@ export default function MapView({
     setOverlayDetailRouteId(null);
   };
 
+  // 今表示中のスポット種別の表示名(左下のチップに出す)。spotTypesは重ね表示
+  // セレクト用に取得済みのものを使い回す。取得完了までは何も出さない
+  // (先にキーの生文字列を出すと表示名への切り替わりがちらつくため)
+  const currentTypeLabel =
+    spotTypes.find((t) => t.key === spotTypeKey)?.label ?? null;
+  // 「◯◯」の地図で開くで種別を切り替えて来たときの戻り先(?from=)。spotTypesに
+  // 見つかる種別だけリンク化する(不正なキー・閲覧できない種別はここで弾かれる)
+  const returnType =
+    returnTypeKey && returnTypeKey !== spotTypeKey
+      ? spotTypes.find((t) => t.key === returnTypeKey) ?? null
+      : null;
+
   return (
     <div className="relative h-[calc(100dvh-4rem)]">
       <div ref={containerRef} className="h-full w-full" />
+
+      {/* 今表示中のスポット種別と「元の地図に戻る」リンク(左下に小さく表示。
+          attributionは右下なので重ならない)。種別チップは表示だけの要素なので、
+          地図操作を吸わないようpointer-events-noneにする */}
+      <div className="absolute bottom-2 left-2 z-10 flex flex-col items-start gap-1.5">
+        {returnType && (
+          <Link
+            href={`/${returnType.key}/map`}
+            className="rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-blue-600 underline shadow"
+          >
+            ← 「{returnType.label}」の地図に戻る
+          </Link>
+        )}
+        {currentTypeLabel && (
+          <div className="pointer-events-none rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-gray-700 shadow">
+            {currentTypeLabel}
+          </div>
+        )}
+      </div>
 
       {/* 検索バー・絞り込みボタン(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
       <div className="absolute left-0 right-14 top-0 z-10 space-y-2 p-2">
@@ -1738,15 +1781,17 @@ export default function MapView({
         />
       )}
 
-      {/* ルート詳細モーダル(ルートの線・矢印のタップで開く。重ね表示のルートも共用) */}
+      {/* ルート詳細モーダル(ルートの線・矢印のタップで開く。重ね表示のルートも共用)。
+          他のモーダルと違い常に中央表示にする(角丸画面のスマホで下端に寄せると
+          端が見切れるため。中身が経由地一覧だけの小さなモーダルなので中央でも邪魔にならない) */}
       {detailRoute && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onClick={closeRouteDetail}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+            className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
           >
             <div className="flex items-start justify-between gap-2">
               <h2 className="font-bold">{detailRoute.name}</h2>
@@ -1765,35 +1810,45 @@ export default function MapView({
               </p>
             )}
             {detailRoute.points.length > 0 && (
-              <div className="space-y-1.5 border-t border-gray-100 pt-3 text-sm">
-                {[
-                  { label: "始点", point: detailRoute.points[0] },
-                  {
-                    label: "終点",
-                    point: detailRoute.points[detailRoute.points.length - 1],
-                  },
-                ].map(({ label, point }) => (
-                  <div key={label} className="flex items-baseline gap-2">
-                    <span className="w-8 shrink-0 text-xs font-medium text-gray-500">
-                      {label}
-                    </span>
-                    {/* スポット名のタップでその位置へ飛ぶ(モーダルは閉じる) */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        closeRouteDetail();
-                        mapRef.current?.flyTo({
-                          center: [point.lng, point.lat],
-                          zoom: 16,
-                        });
-                      }}
-                      className="min-w-0 truncate text-left font-medium text-blue-600 underline"
-                    >
-                      {point.spot_name}
-                    </button>
-                  </div>
-                ))}
-                <p className="pt-1 text-xs text-gray-500">
+              <div className="border-t border-gray-100 pt-3 text-sm">
+                {/* 全経由地を巡った順に並べ、2点の間にその区間の説明(移動手段など)を挟む */}
+                <ol className="space-y-0.5">
+                  {detailRoute.points.map((point, i) => (
+                    <li key={`${point.spot_id}-${point.seq}`}>
+                      <div className="flex items-baseline gap-2">
+                        <span className="w-6 shrink-0 text-right text-xs font-medium tabular-nums text-gray-500">
+                          {i + 1}
+                        </span>
+                        {/* スポット名のタップでその位置へ飛ぶ(モーダルは閉じる) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            closeRouteDetail();
+                            mapRef.current?.flyTo({
+                              center: [point.lng, point.lat],
+                              zoom: 16,
+                            });
+                          }}
+                          className="min-w-0 truncate text-left font-medium text-blue-600 underline"
+                        >
+                          {point.spot_name}
+                        </button>
+                      </div>
+                      {/* 区間の説明は次の経由地との間に表示(最終地点には次の区間が無い) */}
+                      {i < detailRoute.points.length - 1 && (
+                        <div className="flex items-baseline gap-2 py-0.5 text-xs text-gray-500">
+                          <span className="w-6 shrink-0 text-right">↓</span>
+                          {point.description && (
+                            <span className="min-w-0 whitespace-pre-wrap">
+                              {point.description}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                <p className="pt-2 text-xs text-gray-500">
                   経由地{detailRoute.points.length}件。スポット名をタップすると、その位置に地図を移動します。
                 </p>
               </div>

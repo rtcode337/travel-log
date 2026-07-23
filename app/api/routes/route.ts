@@ -53,7 +53,8 @@ export async function GET(request: Request) {
        coalesce(
          (select json_agg(json_build_object(
              'spot_id', p.spot_id, 'seq', p.seq,
-             'lat', s.lat, 'lng', s.lng, 'spot_name', s.name
+             'lat', s.lat, 'lng', s.lng, 'spot_name', s.name,
+             'description', p.description
            ) order by p.seq)
           from spot_route_points p
           join spots s on s.id = p.spot_id
@@ -80,11 +81,12 @@ interface RouteInput {
   name: string;
   /** このルートが属するシリーズ。省略・nullなら既定色のルートになる */
   series?: string | null;
-  /** ルートの説明文。省略・nullなら説明なし */
+  /** ルート全体の説明文。省略・nullなら説明なし */
   description?: string | null;
   /** spotsと同じ公開状態。ALLOWED_STATUS_BY_ROLEの範囲で指定でき、省略時はpending */
   status?: string;
-  spot_ids: string[];
+  /** 経由地(巡る順)。descriptionはその経由地から次の経由地への区間の説明 */
+  points: { spot_id: string; description?: string | null }[];
 }
 
 /**
@@ -115,12 +117,16 @@ export async function POST(request: Request) {
       !route.name.trim() ||
       (route.series != null && typeof route.series !== "string") ||
       (route.description != null && typeof route.description !== "string") ||
-      !Array.isArray(route.spot_ids) ||
-      route.spot_ids.length < 2 ||
-      !route.spot_ids.every((id) => typeof id === "string")
+      !Array.isArray(route.points) ||
+      route.points.length < 2 ||
+      !route.points.every(
+        (p) =>
+          typeof p?.spot_id === "string" &&
+          (p.description == null || typeof p.description === "string")
+      )
     ) {
       return NextResponse.json(
-        { error: "各ルートには name と2件以上の spot_ids が必要です。" },
+        { error: "各ルートには name と2件以上の points が必要です。" },
         { status: 400 }
       );
     }
@@ -139,7 +145,9 @@ export async function POST(request: Request) {
   }
 
   // 経由地が全てこの種別のスポットであることを確認する(他種別への紐付けを防ぐ)
-  const allSpotIds = Array.from(new Set(routes.flatMap((r) => r.spot_ids)));
+  const allSpotIds = Array.from(
+    new Set(routes.flatMap((r) => r.points.map((p) => p.spot_id)))
+  );
   const { rows: validRows } = await query<{ id: string }>(
     "select id from spots where spot_type_id = $1 and id = any($2::uuid[])",
     [spotTypeId, allSpotIds]
@@ -175,10 +183,14 @@ export async function POST(request: Request) {
         routeId,
       ]);
       await client.query(
-        `insert into spot_route_points (route_id, seq, spot_id)
-         select $1, u.ord, u.spot_id
-         from unnest($2::uuid[]) with ordinality as u(spot_id, ord)`,
-        [routeId, route.spot_ids]
+        `insert into spot_route_points (route_id, seq, spot_id, description)
+         select $1, u.ord, u.spot_id, u.description
+         from unnest($2::uuid[], $3::text[]) with ordinality as u(spot_id, description, ord)`,
+        [
+          routeId,
+          route.points.map((p) => p.spot_id),
+          route.points.map((p) => p.description?.trim() || null),
+        ]
       );
     }
     await client.query("commit");
