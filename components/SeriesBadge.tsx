@@ -3,6 +3,7 @@ import {
   autoTextColor,
   findSeriesStyle,
   isImageLabel,
+  MY_SPOT_SERIES,
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
 
@@ -19,8 +20,10 @@ export default function SeriesBadge({
   /** 非公開スポットは縁取り線が破線になる(色・大きさ・ラベルはシリーズと同じ) */
   isPrivate?: boolean;
 }) {
-  if (series === null) return null;
+  // シリーズ未設定(null/空)は「マイスポット」として扱い、バッジも出す
   const style = findSeriesStyle(series, seriesStyles);
+  // 表示名・title用の実効シリーズ名(未設定はマイスポット)
+  const effectiveSeries = series && series.length > 0 ? series : MY_SPOT_SERIES;
   const textColor = style.textColor ?? autoTextColor(style.color);
 
   return (
@@ -33,13 +36,13 @@ export default function SeriesBadge({
         color: textColor,
         border: `1.5px ${isPrivate ? "dashed" : "solid"} ${style.borderColor}`,
       }}
-      title={series}
+      title={effectiveSeries}
     >
       {isImageLabel(style.label) ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={style.label.image}
-          alt={series}
+          alt={effectiveSeries}
           className="h-full w-full object-contain"
         />
       ) : (
