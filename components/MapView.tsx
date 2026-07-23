@@ -1507,9 +1507,23 @@ export default function MapView({
     setOverlayDetailRouteId(null);
   };
 
+  // 今表示中のスポット種別の表示名(左下のチップに出す)。spotTypesは重ね表示
+  // セレクト用に取得済みのものを使い回す。取得完了までは何も出さない
+  // (先にキーの生文字列を出すと表示名への切り替わりがちらつくため)
+  const currentTypeLabel =
+    spotTypes.find((t) => t.key === spotTypeKey)?.label ?? null;
+
   return (
     <div className="relative h-[calc(100dvh-4rem)]">
       <div ref={containerRef} className="h-full w-full" />
+
+      {/* 今表示中のスポット種別(左下に小さく表示。attributionは右下なので重ならない)。
+          表示だけの要素なので、地図操作を吸わないようpointer-events-noneにする */}
+      {currentTypeLabel && (
+        <div className="pointer-events-none absolute bottom-2 left-2 z-10 rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-gray-700 shadow">
+          {currentTypeLabel}
+        </div>
+      )}
 
       {/* 検索バー・絞り込みボタン(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
       <div className="absolute left-0 right-14 top-0 z-10 space-y-2 p-2">
