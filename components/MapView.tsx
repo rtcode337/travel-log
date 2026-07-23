@@ -798,6 +798,9 @@ export default function MapView({
   // 元の種別のキーがfromに入る。左下に「元の地図に戻る」リンクを出すのに使う
   // (戻り先の表示位置は種別ごとのlastViewsが復元するため、キーだけあればよい)
   const returnTypeKey = searchParams.get("from");
+  // /map?filter=1 で開かれたら絞り込みモーダルを最初から開く(重ね表示元の地図の
+  // 「「◯◯」の地図で絞り込みを編集」リンクから遷移してきたとき)
+  const openFilterParam = searchParams.get("filter");
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -1370,6 +1373,20 @@ export default function MapView({
     );
   }, [focusSpotId, spots, spotTypeKey, returnTypeKey, runWhenMapReady]);
 
+  // /map?filter=1 の処理。絞り込みモーダルを開き、?spot=と同様に一度処理したら
+  // URLから消す(fromは「元の地図に戻る」リンクのため残す)
+  useEffect(() => {
+    if (!openFilterParam) return;
+    setShowFilterModal(true);
+    window.history.replaceState(
+      null,
+      "",
+      returnTypeKey
+        ? `/${spotTypeKey}/map?from=${encodeURIComponent(returnTypeKey)}`
+        : `/${spotTypeKey}/map`
+    );
+  }, [openFilterParam, spotTypeKey, returnTypeKey]);
+
   // マーカーの生成・フィルタ反映。
   // 公開スポットも自分の非公開スポットも同じWebGLクラスタ表示で描画する
   // (非公開はピン画像を破線縁取りにして見分ける)。
@@ -1752,6 +1769,25 @@ export default function MapView({
                 <p className="mt-1 text-xs text-gray-500">
                   選んだ種別の公開スポットとルートを半透明で重ねて表示します(未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは、その種別の地図で自分が設定した内容に従います。
                 </p>
+                {overlayTypeKey &&
+                  (() => {
+                    // ?filter=1で遷移先の絞り込みモーダルを最初から開き、?from=で
+                    // 「元の地図に戻る」リンクを出す(編集後はそこから戻ってくる。
+                    // 戻ると重ね表示の絞り込みも保存済み設定から読み直される)
+                    const overlayType = spotTypes.find(
+                      (t) => t.key === overlayTypeKey
+                    );
+                    return overlayType ? (
+                      <Link
+                        href={`/${overlayType.key}/map?filter=1&from=${encodeURIComponent(
+                          spotTypeKey
+                        )}`}
+                        className="mt-1.5 inline-block text-sm text-blue-600 underline"
+                      >
+                        「{overlayType.label}」の地図で絞り込みを編集
+                      </Link>
+                    ) : null;
+                  })()}
               </div>
             )}
 
