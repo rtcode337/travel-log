@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
@@ -83,6 +83,41 @@ function unknownCsvColumns(
   return header.filter((h) => h !== "" && !columns.includes(h));
 }
 
+/**
+ * 見出しの横に置く「?」ボタン。押すと説明文を吹き出し(チップ)で表示する。
+ * 各セクションの長い説明書きを畳んで見出しをすっきりさせるためのもの。
+ * 開いている間は画面全体に透明な当たり判定を敷き、外側タップで閉じる。
+ */
+function HelpTip({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex align-middle">
+      <button
+        type="button"
+        aria-label="説明を表示"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-4 w-4 items-center justify-center rounded-full border border-gray-300 text-[10px] font-bold leading-none text-gray-500 hover:bg-gray-50"
+      >
+        ?
+      </button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="説明を閉じる"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-10 cursor-default"
+          />
+          <span className="absolute left-0 top-full z-20 mt-1 block w-72 max-w-[80vw] rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal leading-relaxed text-gray-600 shadow-lg">
+            {children}
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
 export default function AdminView({
   typeKey,
   buildNumber,
@@ -123,7 +158,10 @@ export default function AdminView({
   const [purgeConfirmText, setPurgeConfirmText] = useState("");
 
   // キー一覧を貼り付けての一括削除(travel-log-data側のexclude.txtを想定)
-  const [deleteKeysText, setDeleteKeysText] = useState("");
+  const [deleteKeys, setDeleteKeys] = useState<string[]>([]);
+  const [deleteKeysFileName, setDeleteKeysFileName] = useState<string | null>(
+    null
+  );
   const [deleteKeysPreview, setDeleteKeysPreview] = useState<{
     matchedCount: number;
     notFoundKeys: string[];
@@ -296,8 +334,8 @@ export default function AdminView({
   };
 
   /**
-   * 貼り付けたテキストからキーの一覧を作る。1行1キーを基本とし、空行と
-   * `#`で始まる行(除外リストのコメント)は無視する。
+   * アップロードした exclude.txt 等のテキストからキーの一覧を作る。1行1キーを
+   * 基本とし、空行と`#`で始まる行(除外リストのコメント)は無視する。
    */
   const parseDeleteKeys = (text: string) =>
     [
@@ -309,12 +347,21 @@ export default function AdminView({
       ),
     ];
 
-  const handleCheckDeleteKeys = async () => {
-    const keys = parseDeleteKeys(deleteKeysText);
+  const handleDeleteKeysFile = async (file: File) => {
     setDeleteKeysPreview(null);
     setDeleteKeysMessage(null);
+    setDeleteKeysFileName(file.name);
+    let keys: string[];
+    try {
+      keys = parseDeleteKeys(await file.text());
+    } catch {
+      setDeleteKeys([]);
+      setDeleteKeysMessage("ファイルの読み込みに失敗しました。");
+      return;
+    }
+    setDeleteKeys(keys);
     if (keys.length === 0) {
-      setDeleteKeysMessage("キーが1件も入力されていません。");
+      setDeleteKeysMessage("ファイルにキーが1件もありません。");
       return;
     }
     setDeleteKeysChecking(true);
@@ -331,7 +378,7 @@ export default function AdminView({
   };
 
   const handleApplyDeleteKeys = async () => {
-    const keys = parseDeleteKeys(deleteKeysText);
+    const keys = deleteKeys;
     if (keys.length === 0 || !deleteKeysPreview) return;
     if (deleteKeysPreview.matchedCount === 0) return;
     if (
@@ -358,6 +405,8 @@ export default function AdminView({
             : "。")
       );
       setDeleteKeysPreview(null);
+      setDeleteKeys([]);
+      setDeleteKeysFileName(null);
       load();
     } finally {
       setDeleteKeysApplying(false);
@@ -1418,12 +1467,14 @@ export default function AdminView({
                   onSubmit={handleSaveRegionSettings}
                   className="mt-3 border-t border-gray-100 pt-3"
                 >
-                  <p className="mb-1 text-sm font-medium">対象地域とWikipedia言語</p>
-                  <p className="mb-2 text-xs text-gray-500">
-                    対象地域は、地図の地名検索の対象国と、スポットの「地域」欄の扱い
-                    (日本=都道府県、国を指定=その国の州・県、世界=国ごと)を決める。
-                    Wikipedia言語は、スポット詳細から開くWikipedia検索の言語版
-                    (ja・enなどのサブドメイン)。
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                    対象地域とWikipedia言語
+                    <HelpTip>
+                      対象地域は、地図の地名検索の対象国と、スポットの「地域」欄の扱い
+                      (日本=都道府県、国を指定=その国の州・県、世界=国ごと)を決める。
+                      Wikipedia言語は、スポット詳細から開くWikipedia検索の言語版
+                      (ja・enなどのサブドメイン)。
+                    </HelpTip>
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <select
@@ -1480,14 +1531,16 @@ export default function AdminView({
                   onSubmit={handleSaveCategories}
                   className="mt-3 border-t border-gray-100 pt-3"
                 >
-                  <p className="mb-1 text-sm font-medium">カテゴリ</p>
-                  <p className="mb-2 text-xs text-gray-500">
-                    この種別で使うカテゴリの一覧(カンマまたは読点区切り。並び順が
-                    そのまま絞り込みチップ・スポット追加時のサジェストの並びになる)。
-                    空で保存するとカテゴリ未定義になり、既存スポットに入っている値
-                    だけが絞り込み・サジェストに出る。未保存の種別は観光地の
-                    カテゴリが既定。カテゴリ自体は自由入力のため、一覧に無い値の
-                    スポットもそのまま動く(並びは一覧の後ろになる)。
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                    カテゴリ
+                    <HelpTip>
+                      この種別で使うカテゴリの一覧(カンマまたは読点区切り。並び順が
+                      そのまま絞り込みチップ・スポット追加時のサジェストの並びになる)。
+                      空で保存するとカテゴリ未定義になり、既存スポットに入っている値
+                      だけが絞り込み・サジェストに出る。未保存の種別は観光地の
+                      カテゴリが既定。カテゴリ自体は自由入力のため、一覧に無い値の
+                      スポットもそのまま動く(並びは一覧の後ろになる)。
+                    </HelpTip>
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <input
@@ -1508,18 +1561,18 @@ export default function AdminView({
                 </form>
 
                 <div className="mt-3 border-t border-gray-100 pt-3">
-                  <p className="mb-1 text-sm font-medium">
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
                     JSONファイルから設定を反映
-                  </p>
-                  <p className="mb-2 text-xs text-gray-500">
-                    種別追加時と同じ形式(
-                    <code>{"{ key, label, settings?, series?, categories? }"}</code>
-                    )のJSONファイルをアップロードすると、label・settings・series・
-                    categoriesをまとめてこの種別に反映できる(JSON側で省略した
-                    JSONキーの内容は変更しない)。ただしkeyの変更は影響が大きいため、
-                    JSONのkeyが現在のkey(
-                    <span className="font-mono">{typeKey}</span>
-                    )と一致しない場合はエラーにして何も反映しない。
+                    <HelpTip>
+                      種別追加時と同じ形式(
+                      <code>{"{ key, label, settings?, series?, categories? }"}</code>
+                      )のJSONファイルをアップロードすると、label・settings・series・
+                      categoriesをまとめてこの種別に反映できる(JSON側で省略した
+                      JSONキーの内容は変更しない)。ただしkeyの変更は影響が大きいため、
+                      JSONのkeyが現在のkey(
+                      <span className="font-mono">{typeKey}</span>
+                      )と一致しない場合はエラーにして何も反映しない。
+                    </HelpTip>
                   </p>
                   <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
                     {applyingTypeJson ? "反映中…" : "JSONファイルから反映"}
@@ -1539,17 +1592,21 @@ export default function AdminView({
               </section>
             )}
 
+            <h2 className="text-base font-bold">スポットの管理</h2>
+
             <section className="rounded-xl border border-gray-200 bg-white p-3">
-              <h3 className="mb-2 text-base font-bold">CSVインポート</h3>
-              <p className="mb-3 text-xs text-gray-500">
-                個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
-                ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは最初から公開される)。
-                差分更新: 既存スポットとの同一判定はkey一致を最優先し、keyで見つからなければ
-                name+lat+lngの完全一致で行う。一致した既存行は内容が異なればCSVの内容で
-                上書きし(keyが同じなら改名・座標修正も反映される)、同一ならスキップ、
-                どちらにも一致しなければ新規追加するため、同じCSVを何度アップロードしても
-                重複登録されない(公開以外のスポットに一致した行だけは上書きしない)。
-              </p>
+              <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+                CSVインポート
+                <HelpTip>
+                  個別のスポット追加・編集・削除・承認/却下は、各スポットの詳細画面から行う。
+                  ここでは大量データのCSV一括取り込みのみ扱う(取り込んだスポットは最初から公開される)。
+                  差分更新: 既存スポットとの同一判定はkey一致を最優先し、keyで見つからなければ
+                  name+lat+lngの完全一致で行う。一致した既存行は内容が異なればCSVの内容で
+                  上書きし(keyが同じなら改名・座標修正も反映される)、同一ならスキップ、
+                  どちらにも一致しなければ新規追加するため、同じCSVを何度アップロードしても
+                  重複登録されない(公開以外のスポットに一致した行だけは上書きしない)。
+                </HelpTip>
+              </h3>
 
               {message && (
                 <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
@@ -1611,17 +1668,17 @@ export default function AdminView({
             </section>
 
             <section className="rounded-xl border border-gray-200 bg-white p-3">
-              <h3 className="mb-2 text-base font-bold">
+              <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
                 travel-log-dataへの還元用エクスポート
+                <HelpTip>
+                  画面から手動追加された公開スポット(スポットCSVへの収録候補)と、
+                  画面から個別削除されたCSV由来の公開スポット(exclude.txtへの追記候補)を
+                  1つのMarkdownファイルにまとめてダウンロードする。還元作業で
+                  Claude Code等に渡す前提の形式で、そのまま再インポートはできない。
+                  還元後にkeyを付けたCSVを再インポートすると、一致したスポットは
+                  CSV由来(還元済み)の扱いに変わり、次回のエクスポートから外れる。
+                </HelpTip>
               </h3>
-              <p className="mb-3 text-xs text-gray-500">
-                画面から手動追加された公開スポット(スポットCSVへの収録候補)と、
-                画面から個別削除されたCSV由来の公開スポット(exclude.txtへの追記候補)を
-                1つのMarkdownファイルにまとめてダウンロードする。還元作業で
-                Claude Code等に渡す前提の形式で、そのまま再インポートはできない。
-                還元後にkeyを付けたCSVを再インポートすると、一致したスポットは
-                CSV由来(還元済み)の扱いに変わり、次回のエクスポートから外れる。
-              </p>
 
               {manualExportMessage && (
                 <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
@@ -1639,90 +1696,18 @@ export default function AdminView({
               </button>
             </section>
 
-            <section className="rounded-xl border border-gray-200 bg-white p-3">
-              <h3 className="mb-2 text-base font-bold">
-                ルート(巡った順の矢印)のインポート
-              </h3>
-              <p className="mb-3 text-xs text-gray-500">
-                スポットを巡った順に矢印で繋ぐルートをCSVで取り込み、地図に表示する。
-                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(series・description・
-                leg_descriptionは省略可)。
-                routeはルート名、seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、
-                spot_keyはスポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
-                矢印がそのシリーズの縁取り色で描かれ、地図のシリーズ絞り込みにも
-                連動する(表示中のルートの経由地は、スポット自体のシリーズが
-                絞り込みで外れていてもピンが表示される)。descriptionはルート全体の説明文で、
-                地図でルートの線をタップすると出る詳細の先頭に表示される。
-                series・descriptionはルート単位の値なので、同じrouteの行には
-                すべて同じ値を書く(空欄なら既定色・説明なし)。
-                leg_descriptionは行単位の値で、その行のスポットから次のスポットへの
-                区間の説明(移動手段など)。ルート詳細の経由地一覧で2点の間に表示される
-                (次の区間が無い最終地点の行は空欄にする)。
-                差分更新: 既存と同名のルートは
-                シリーズ・説明・経由地を丸ごと置き換え、CSVに無いルートには触らない。
-                取り込みの前に、spot_keyが指すスポットをスポットCSVでインポートして
-                おくこと(key未設定のスポットは参照できない)。
-              </p>
-
-              {routeMessage && (
-                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                  {routeMessage}
-                </p>
-              )}
-
-              {routes.length > 0 && (
-                <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-                  {routes.map((r) => (
-                    <li key={r.id} className="flex items-center gap-3 px-3 py-2">
-                      <span className="flex-1 truncate text-sm">{r.name}</span>
-                      {r.status !== "published" && (
-                        <span className="shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">
-                          {STATUS_LABELS[r.status]}
-                        </span>
-                      )}
-                      <span className="shrink-0 text-xs text-gray-500">
-                        経由地{r.points.length}件
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteRoute(r)}
-                        className="shrink-0 text-xs font-medium text-red-500 underline"
-                      >
-                        削除
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
-                {importingRoutes ? "インポート中…" : "ルートCSVインポート"}
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  disabled={importingRoutes}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleRouteCsvFile(file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-            </section>
-
           {isAdmin && (
             <section className="rounded-xl border border-red-200 bg-white p-3">
-              <h3 className="mb-2 text-base font-bold text-red-700">
+              <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold text-red-700">
                 キー一覧を指定して削除
+                <HelpTip>
+                  スポットのキー(CSVの「key」列)を1行に1つ書いたファイル(travel-log-data
+                  側の「exclude.txt」をそのままアップロードする想定。空行と「#」で始まる行は
+                  無視され、該当が無いキーはエラーにせず読み飛ばす)を選ぶと、一致する公開
+                  スポットを削除する。紐づく訪問記録・訪問予定・口コミ・写真は全ユーザー分
+                  まとめて削除され、元に戻せない。CSVから外したスポットをDB側からも消すための機能。
+                </HelpTip>
               </h3>
-              <p className="mb-3 text-xs text-gray-500">
-                スポットのキー(CSVの「key」列)を1行に1つ貼り付けると、一致する公開
-                スポットを削除する(travel-log-data側の「exclude.txt」をそのまま貼る想定。
-                空行と「#」で始まる行は無視され、該当が無いキーはエラーにせず読み飛ばす)。紐づく訪問記録・
-                訪問予定・口コミ・写真は全ユーザー分まとめて削除され、元に戻せない。
-                CSVから外したスポットをDB側からも消すための機能。
-              </p>
 
               {deleteKeysMessage && (
                 <p className="mb-3 whitespace-pre-wrap rounded-lg bg-red-50 p-2 text-sm text-red-800">
@@ -1730,26 +1715,26 @@ export default function AdminView({
                 </p>
               )}
 
-              <textarea
-                value={deleteKeysText}
-                onChange={(e) => {
-                  setDeleteKeysText(e.target.value);
-                  setDeleteKeysPreview(null);
-                }}
-                rows={6}
-                spellCheck={false}
-                placeholder={"鶴見区 (横浜市)\n大阪湾\n江戸川"}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs"
-              />
-
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button
-                  onClick={handleCheckDeleteKeys}
-                  disabled={deleteKeysChecking || !deleteKeysText.trim()}
-                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {deleteKeysChecking ? "確認中…" : "対象を確認"}
-                </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                  {deleteKeysChecking ? "確認中…" : "ファイルを選択"}
+                  <input
+                    type="file"
+                    accept=".txt,text/plain"
+                    className="hidden"
+                    disabled={deleteKeysChecking || deleteKeysApplying}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleDeleteKeysFile(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {deleteKeysFileName && (
+                  <span className="font-mono text-xs text-gray-500">
+                    {deleteKeysFileName}({deleteKeys.length}件)
+                  </span>
+                )}
                 {deleteKeysPreview && deleteKeysPreview.matchedCount > 0 && (
                   <button
                     onClick={handleApplyDeleteKeys}
@@ -1766,7 +1751,7 @@ export default function AdminView({
               {deleteKeysPreview && (
                 <div className="mt-3 text-sm text-gray-600">
                   <p>
-                    入力{parseDeleteKeys(deleteKeysText).length}件のうち、
+                    ファイル{deleteKeys.length}件のうち、
                     削除対象 {deleteKeysPreview.matchedCount}件
                     {deleteKeysPreview.notFoundKeys.length > 0 &&
                       `(${deleteKeysPreview.notFoundKeys.length}件は該当なし)`}
@@ -1786,16 +1771,16 @@ export default function AdminView({
 
           {isAdmin && (
             <section className="rounded-xl border border-red-200 bg-white p-3">
-              <h3 className="mb-2 text-base font-bold text-red-700">
+              <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold text-red-700">
                 公開スポットの全削除
+                <HelpTip>
+                  「{currentTypeLabel}」({typeKey})の公開スポットを全件削除する
+                  (承認待ち・却下・非公開のスポットは残る)。削除される公開スポットに
+                  紐づく訪問記録・訪問予定・口コミ・写真は全ユーザー分まとめて削除され、
+                  元に戻せない(ルートも全て削除される)。CSVインポート用データを外部で
+                  作り直した際などに、一度空にしてから入れ直す用途を想定。
+                </HelpTip>
               </h3>
-              <p className="mb-3 text-xs text-gray-500">
-                「{currentTypeLabel}」({typeKey})の公開スポットを全件削除する
-                (承認待ち・却下・非公開のスポットは残る)。削除される公開スポットに
-                紐づく訪問記録・訪問予定・口コミ・写真は全ユーザー分まとめて削除され、
-                元に戻せない(ルートも全て削除される)。CSVインポート用データを外部で
-                作り直した際などに、一度空にしてから入れ直す用途を想定。
-              </p>
 
               {purgeMessage && (
                 <p className="mb-3 whitespace-pre-wrap rounded-lg bg-red-50 p-2 text-sm text-red-800">
@@ -1845,16 +1830,90 @@ export default function AdminView({
             </section>
           )}
 
+            <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+                ルート(巡った順の矢印)のインポート
+                <HelpTip>
+                  スポットを巡った順に矢印で繋ぐルートをCSVで取り込み、地図に表示する。
+                  CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(series・description・
+                  leg_descriptionは省略可)。
+                  routeはルート名、seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、
+                  spot_keyはスポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
+                  矢印がそのシリーズの縁取り色で描かれ、地図のシリーズ絞り込みにも
+                  連動する(表示中のルートの経由地は、スポット自体のシリーズが
+                  絞り込みで外れていてもピンが表示される)。descriptionはルート全体の説明文で、
+                  地図でルートの線をタップすると出る詳細の先頭に表示される。
+                  series・descriptionはルート単位の値なので、同じrouteの行には
+                  すべて同じ値を書く(空欄なら既定色・説明なし)。
+                  leg_descriptionは行単位の値で、その行のスポットから次のスポットへの
+                  区間の説明(移動手段など)。ルート詳細の経由地一覧で2点の間に表示される
+                  (次の区間が無い最終地点の行は空欄にする)。
+                  差分更新: 既存と同名のルートは
+                  シリーズ・説明・経由地を丸ごと置き換え、CSVに無いルートには触らない。
+                  取り込みの前に、spot_keyが指すスポットをスポットCSVでインポートして
+                  おくこと(key未設定のスポットは参照できない)。
+                </HelpTip>
+              </h3>
+
+              {routeMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                  {routeMessage}
+                </p>
+              )}
+
+              {routes.length > 0 && (
+                <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                  {routes.map((r) => (
+                    <li key={r.id} className="flex items-center gap-3 px-3 py-2">
+                      <span className="flex-1 truncate text-sm">{r.name}</span>
+                      {r.status !== "published" && (
+                        <span className="shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">
+                          {STATUS_LABELS[r.status]}
+                        </span>
+                      )}
+                      <span className="shrink-0 text-xs text-gray-500">
+                        経由地{r.points.length}件
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRoute(r)}
+                        className="shrink-0 text-xs font-medium text-red-500 underline"
+                      >
+                        削除
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                {importingRoutes ? "インポート中…" : "ルートCSVインポート"}
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  disabled={importingRoutes}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleRouteCsvFile(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </section>
+
           {isAdmin && (
             <div>
-              <h2 className="mb-2 text-base font-bold">別のスポット種別の管理</h2>
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
-                <p className="mb-3 text-xs text-gray-500">
+              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+                別のスポット種別の管理
+                <HelpTip>
                   スポット種別の一覧。種別名をクリックするとそのページに移動する
                   (公開/非公開の切り替えは、移動先の「スポット種別の設定」から行う)。
                   削除は非公開の種別のみ行える
                   (スポットが残っていれば全件削除してから種別自体を削除する)。
-                </p>
+                </HelpTip>
+              </h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
                 {typeMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
                     {typeMessage}
@@ -1969,14 +2028,14 @@ export default function AdminView({
 
           {isAdmin && (
             <div>
-              <h2 className="mb-2 text-base font-bold">
+              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
                 ログイン後に自動で開く種別
-              </h2>
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
-                <p className="mb-3 text-xs text-gray-500">
+                <HelpTip>
                   ログイン後・ルート(/)アクセス時に自動で開く地図/リストの既定(全ユーザー共通)。
                   ここでの選択は既定を切り替えるだけで、他の種別を非表示にするものではない。
-                </p>
+                </HelpTip>
+              </h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
                 {defaultTypeMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
                     {defaultTypeMessage}
