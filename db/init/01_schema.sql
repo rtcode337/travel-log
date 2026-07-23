@@ -181,7 +181,9 @@ create index spot_deletions_spot_type_id_idx on spot_deletions (spot_type_id);
 -- 同じ値空間)で、指定するとその色で矢印が描かれ、シリーズ絞り込みにも連動する。
 -- 表示名とシリーズは別物のため列を分けてある(同じシリーズに複数のルートを
 -- 持たせられる)。未指定(null)のルートは既定色で描かれる。
--- descriptionはルートの説明文(地図でルートの線をタップすると出る詳細に表示)
+-- descriptionはルートの説明文(地図でルートの線をタップすると出る詳細に表示)。
+-- status・created_byはspotsと同じ公開状態の仕組み(公開ルートは全員に見え、
+-- 非公開は作成者本人のみ、承認待ち・却下は本人+moderator以上)
 -- =============================================================
 create table spot_routes (
   id           uuid primary key default gen_random_uuid(),
@@ -189,6 +191,10 @@ create table spot_routes (
   name         text not null,
   series       text,
   description  text,
+  status       text not null default 'published' check (
+    status in ('published', 'pending', 'rejected', 'private')
+  ),
+  created_by   uuid references users (id) on delete set null,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   unique (spot_type_id, name)

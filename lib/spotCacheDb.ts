@@ -1,6 +1,6 @@
 "use client";
 
-import type { Spot } from "@/lib/types";
+import type { Spot, SpotRoute } from "@/lib/types";
 
 /**
  * 公開スポットのキャッシュに保存するのは、地図のピン・一覧・絞り込み・重複チェックが
@@ -26,6 +26,12 @@ export type CachedSpot = Pick<
 export interface StoredSpotCache {
   downloadedAt: string; // ISO
   spots: CachedSpot[];
+  /**
+   * 公開(published)ルート。公開スポットのダウンロードと同時に取得して一緒に保存する
+   * (地図のルート表示・別種別の重ね表示がAPIに戻らず使えるように)。件数が少なく
+   * 経由地込みでも小さいため、スポットのような間引きはしない
+   */
+  routes: SpotRoute[];
 }
 
 /** アプリ内のSpotから、キャッシュに保存する分だけを抜き出す */
@@ -72,7 +78,10 @@ const DB_NAME = "travel-log";
 // 旧形式のまま残っているエントリを読ませないようupgrade時にストアごと作り直す。
 // 5も同じくCachedSpotの形が変わったため(rank → series、category → categories。
 // 特にcategoriesは配列前提で読むため、旧形式が残ると絞り込みで落ちる)。
-const DB_VERSION = 5;
+// 6はエントリにroutes(公開ルート)が加わったため(旧エントリのままだと
+// 再ダウンロードするまでルートが表示されなくなるので、ストアごと作り直して
+// ダウンロードし直させる)。
+const DB_VERSION = 6;
 const STORE = "public-spots"; // 値のキーはtypeKey
 const TEMP_V2_STORE = "public-spots-v2"; // 上記の一時版が作ったストア(残っていれば削除)
 const LEGACY_PREFIX = "travel-log:public-spots:"; // 旧localStorage方式のキー接頭辞
