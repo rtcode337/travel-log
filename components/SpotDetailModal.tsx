@@ -105,6 +105,8 @@ export default function SpotDetailModal({
   const [reviewsPage, setReviewsPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  // 編集対象の訪問記録(訪問履歴の「編集」から開く。VisitFormModalの編集モード)
+  const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   // Wikipediaから取得したスポット情報(写真+概要)のモーダル表示
   const [showInfo, setShowInfo] = useState(false);
@@ -522,12 +524,20 @@ export default function SpotDetailModal({
                           )}
                         </div>
                         {!readOnly && (
-                          <button
-                            onClick={() => deleteVisit(visit.id)}
-                            className="shrink-0 text-xs text-gray-400 hover:text-red-500"
-                          >
-                            削除
-                          </button>
+                          <div className="flex shrink-0 gap-2">
+                            <button
+                              onClick={() => setEditingVisit(visit)}
+                              className="text-xs text-gray-400 hover:text-blue-600"
+                            >
+                              編集
+                            </button>
+                            <button
+                              onClick={() => deleteVisit(visit.id)}
+                              className="text-xs text-gray-400 hover:text-red-500"
+                            >
+                              削除
+                            </button>
+                          </div>
                         )}
                       </div>
                     </li>
@@ -616,6 +626,22 @@ export default function SpotDetailModal({
             // 訪問記録時、サーバー側で訪問予定からも自動的に外れる
             onVisitPlanChange?.();
             onReviewChange?.();
+          }}
+        />
+      )}
+
+      {editingVisit && spot && (
+        <VisitFormModal
+          spotId={spot.id}
+          spotName={spot.name}
+          reviewsEnabled={reviewsEnabled}
+          visit={editingVisit}
+          onClose={() => setEditingVisit(null)}
+          onSaved={() => {
+            setEditingVisit(null);
+            load();
+            // 訪問日時の変更は呼び出し元の訪問日絞り込み・訪問順の矢印にも影響する
+            onVisitChange?.();
           }}
         />
       )}
