@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import NavBar from "@/components/NavBar";
+import AppFrame from "@/components/AppFrame";
 
 export const metadata: Metadata = {
   title: "Travel Log — 観光地訪問記録",
@@ -34,8 +34,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className="flex min-h-dvh flex-col">
-        <div className="flex-1 pb-16">{children}</div>
-        <NavBar />
+        <AppFrame>{children}</AppFrame>
       </body>
     </html>
   );
