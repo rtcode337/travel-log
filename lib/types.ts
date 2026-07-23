@@ -51,9 +51,31 @@ export interface Spot {
   categories: Category[];
   description: string | null;
   status: SpotStatus;
+  /** 登録経路。csv=CSVインポート(travel-log-data由来)、manual=画面からの手動追加。
+   * 手動追加の公開スポットをtravel-log-dataへ還元するエクスポートの抽出条件に使う */
+  origin: SpotOrigin;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type SpotOrigin = "csv" | "manual";
+
+/**
+ * 画面から個別削除されたCSV由来の公開スポットの記録(削除の墓標)。
+ * travel-log-data側のexclude.txtへ追記する候補として還元用エクスポートに出す。
+ * created_atが削除日時
+ */
+export interface SpotDeletion {
+  id: string;
+  spot_type_id: string;
+  key: string | null;
+  name: string;
+  lat: number;
+  lng: number;
+  region: string;
+  deleted_by: string | null;
+  created_at: string;
 }
 
 /** ルートの経由地1点。seqの昇順が巡った順(lat/lng/spot_nameは表示用にJOINで付与) */

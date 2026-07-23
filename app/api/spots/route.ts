@@ -133,6 +133,8 @@ interface SpotInput {
   /** 0個以上。省略・nullは「カテゴリなし」(空配列)として扱う */
   categories?: string[] | null;
   description: string | null;
+  /** 登録経路。CSVインポート(AdminView)だけが'csv'を明示し、省略時は'manual' */
+  origin?: string;
 }
 
 // unnest()で複数行を1回のINSERTにまとめる(CSVインポート等、大量件数の
@@ -149,11 +151,11 @@ async function insertSpots(
   // 1件分を1つのJSON配列にまとめた jsonb[] として渡し、SQL側で text[] に開く
   const { rows } = await query<Spot>(
     `insert into spots
-      (spot_type_id, key, name, name_kana, lat, lng, region, series, categories, description, status, created_by)
+      (spot_type_id, key, name, name_kana, lat, lng, region, series, categories, description, status, origin, created_by)
      select $1, u.key, u.name, u.name_kana, u.lat, u.lng, u.region, u.series,
-            array(select jsonb_array_elements_text(u.categories)), u.description, u.status, $2
-     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::jsonb[], $11::text[], $12::text[])
-       with ordinality as u(key, name, name_kana, lat, lng, region, series, categories, description, status, ord)
+            array(select jsonb_array_elements_text(u.categories)), u.description, u.status, u.origin, $2
+     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::jsonb[], $11::text[], $12::text[], $13::text[])
+       with ordinality as u(key, name, name_kana, lat, lng, region, series, categories, description, status, origin, ord)
      order by u.ord
      returning *`,
     [
@@ -169,6 +171,7 @@ async function insertSpots(
       records.map((r) => JSON.stringify(r.categories ?? [])),
       records.map((r) => r.description),
       statuses,
+      records.map((r) => r.origin ?? "manual"),
     ]
   );
   return rows;
@@ -215,6 +218,21 @@ export async function POST(request: Request) {
   if (invalid) {
     return NextResponse.json(
       { error: `この権限では状態「${invalid}」を選べません。` },
+      { status: 403 }
+    );
+  }
+
+  // originはCSVインポート(spot_admin/admin限定の経路)だけが'csv'を明示できる。
+  // それ以外は省略='manual'(手動追加)として記録する
+  const invalidOrigin = records.find(
+    (r) =>
+      r.origin != null &&
+      (r.origin !== "manual" &&
+        (r.origin !== "csv" || !SPOT_ADMIN_ROLES.includes(user.role)))
+  );
+  if (invalidOrigin) {
+    return NextResponse.json(
+      { error: `origin「${invalidOrigin.origin}」は指定できません。` },
       { status: 403 }
     );
   }

@@ -164,6 +164,14 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 - `dryRun: true`で件数・該当なしキー・対象名のサンプル20件だけを返す(UIの「対象を確認」)。UIは確認を通してからでないと削除ボタンを出さない
 - 全削除(purge)と同様、他ユーザーの訪問記録・写真を巻き込むためadmin専用(spot_adminは不可)。写真ファイルもvisitsがカスケードで消える前に集めて削除する
 
+### 登録経路(`spots.origin`)とtravel-log-dataへの還元用エクスポート
+
+アプリ利用中に抜け漏れに気づいて画面から手動追加したスポットを、travel-log-data側のCSVへ還元(逆輸入)するための仕組み。`spots.origin`(`'csv'`/`'manual'`、既定`'manual'`)が登録経路を記録し、CSVインポート(`AdminView`)だけがPOST/PATCHで`'csv'`を明示する(APIは`'csv'`の指定をspot_admin/adminに限定)。`spots.key`の有無で代用しない — keyはルート参照用で、手動スポットにkeyを振る将来の機能と両立しないため。既存データはマイグレーション`003_spot_origin_and_deletions.sql`が「key有り=csv」で一度だけ近似した。
+
+あわせて`spot_deletions`(削除の墓標)テーブルに、**DELETE `/api/spots/[id]`(個別削除)で消されたCSV由来(`origin='csv'`)の公開スポット**のkey・name・座標・region・削除者を記録する(行そのものが消えるため値をコピーして残す。`created_at`が削除日時)。purge・キー一覧を指定しての削除・種別削除はtravel-log-data側発の操作のため記録しない。手動追加(`manual`)の削除も、travel-log-data側に元の行が無いため記録しない。
+
+`/[type]/admin`の「travel-log-dataへの還元用エクスポート」(spot_admin/admin)が、①`origin='manual'`の公開スポット(スポットCSVへの収録候補。key列なし=収録時にtravel-log-data側の規則で振る)と、②削除の墓標(exclude.txtへの追記候補、GET `/api/spot-deletions?type=`)を1つのMarkdownにまとめてダウンロードする。**還元作業はClaude Code等が読む前提のため、意図的に機械取り込み可能な形式にしていない**。還元後にkeyを付けたCSVを再インポートすると、一致した行は内容が同一でも`origin='csv'`にPATCHされ(インポートの同一判定が`origin !== 'csv'`を「変更あり」とみなす)、次回のエクスポートから自動的に外れる。
+
 ### 公開スポットの全削除・スポット種別の削除
 
 管理画面の`/[type]/admin`にはadmin専用の「公開スポットの全削除」(`app/api/spots/purge/route.ts`)と「スポット種別の削除」(`DELETE /api/spot-types/[id]`、同ファイルのPATCHと同居)がある。前者は`spot_types`の行自体は消さず、対象種別の公開(published)スポットのみを全件削除する(承認待ち・却下・非公開のスポットは残す。CSVで作り直す対象=CSVインポートが取り込む公開スポットに限定するため)。削除される公開スポットに紐づく`visits`/`visit_plans`/`reviews`(FKの`on delete cascade`)・写真ファイルと、対象種別のルート(`spot_routes`。status問わず丸ごと)も一括で消す。後者はstatus問わず対象種別の全スポットを削除(紐づくデータ・写真ファイルの扱いは前者と同じ)した上で`spot_types`の行自体も削除する(「別のスポット種別の管理」一覧には現在表示中の種別も含めて全種別を出すが、現在表示中の種別だけはリンク化・削除ボタンをUI側で出さないことで自分が今開いている種別を誤って消せないようにしている)。後者は`public_visible`がtrue(一般公開中)の種別、または対象種別が`app_settings.active_spot_type_id`(ルート`/`リダイレクトのフォールバック既定)の場合はAPIレベルで拒否する(既定の種別は常にpublic_visible=trueであるため後者は実質前者に含まれるが、防御的に両方チェックしている)。どちらもCSVでデータを作り直す前提の機能で、spot_adminには許可していない(ユーザー管理と同様、他ユーザーのデータを巻き込むため)。ルート`/`アクセス時に開く既定の種別(最後に開いていた種別のCookieが無い・開けないときのフォールバック)の変更は、この一括削除等の管理系操作とは別の独立したセレクトボックス(`app_settings.active_spot_type_id`を更新)として`/[type]/admin`に置いている。
