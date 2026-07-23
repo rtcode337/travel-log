@@ -65,6 +65,7 @@ function formatReviewDatetime(iso: string): string {
 export default function SpotDetailModal({
   spotId,
   spots,
+  readOnly = false,
   onClose,
   onVisitChange,
   onSpotChange,
@@ -75,6 +76,13 @@ export default function SpotDetailModal({
   spotId: string;
   /** 編集モーダルのシリーズ・カテゴリ入力サジェスト用(省略時はサジェストなし) */
   spots?: Spot[];
+  /**
+   * 読み取り専用表示(地図の「別の種別を重ねて表示」から開いた場合)。
+   * 更新系(編集・削除・承認/却下・訪問記録・訪問予定・訪問記録の削除)を
+   * すべて出さず、「地図で開く」の代わりに元のスポット種別の地図へのリンクを出す
+   * (このスポットは表示中の種別の地図では表示できないため)
+   */
+  readOnly?: boolean;
   onClose: () => void;
   /** 訪問記録の追加・削除があったときに呼ばれる(呼び出し元の一覧・バッジ更新用) */
   onVisitChange?: () => void;
@@ -164,13 +172,14 @@ export default function SpotDetailModal({
   const isSpotAdmin = !!myRole && SPOT_ADMIN_ROLES.includes(myRole);
 
   // 編集・削除できるのは、公開スポットはspot_admin/admin、それ以外(非公開・承認待ち・
-  // 却下)は追加した本人のみ(APIのcanEditOrDeleteと同じルール)
+  // 却下)は追加した本人のみ(APIのcanEditOrDeleteと同じルール)。読み取り専用時は常に不可
   const canManage =
+    !readOnly &&
     !!spot &&
     (spot.status === "published" ? isSpotAdmin : spot.created_by === myId);
 
   // 承認待ち→公開/却下の変更はspot_admin/adminのみ(投稿者本人かどうかは問わない)
-  const canModerate = !!spot && spot.status === "pending" && isSpotAdmin;
+  const canModerate = !readOnly && !!spot && spot.status === "pending" && isSpotAdmin;
 
   const currentSpotType = useMemo(
     () => spotTypes.find((t) => t.id === spot?.spot_type_id) ?? null,
@@ -375,12 +384,25 @@ export default function SpotDetailModal({
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <Link
-                href={`${typeKey ? `/${typeKey}` : ""}/map?spot=${spot.id}`}
-                className="inline-block text-sm text-blue-600 underline"
-              >
-                地図で開く
-              </Link>
+              {readOnly ? (
+                // 重ね表示から開いた別種別のスポットは、表示中の種別の地図では
+                // 表示できないため、元のスポット種別の地図へのリンクを出す
+                currentSpotType && (
+                  <Link
+                    href={`/${currentSpotType.key}/map?spot=${spot.id}`}
+                    className="inline-block text-sm text-blue-600 underline"
+                  >
+                    「{currentSpotType.label}」の地図で開く
+                  </Link>
+                )
+              ) : (
+                <Link
+                  href={`${typeKey ? `/${typeKey}` : ""}/map?spot=${spot.id}`}
+                  className="inline-block text-sm text-blue-600 underline"
+                >
+                  地図で開く
+                </Link>
+              )}
               {wikipediaEnabled && (
                 <button
                   type="button"
@@ -432,25 +454,27 @@ export default function SpotDetailModal({
                     </p>
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={toggleVisitPlan}
-                    disabled={planUpdating}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-                      planned
-                        ? "border border-gray-300 text-gray-600"
-                        : "border border-blue-600 text-blue-600"
-                    }`}
-                  >
-                    {planned ? "訪問予定をはずす" : "訪問予定にする"}
-                  </button>
-                  <button
-                    onClick={() => setShowForm(true)}
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
-                  >
-                    + 訪問を記録
-                  </button>
-                </div>
+                {!readOnly && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={toggleVisitPlan}
+                      disabled={planUpdating}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                        planned
+                          ? "border border-gray-300 text-gray-600"
+                          : "border border-blue-600 text-blue-600"
+                      }`}
+                    >
+                      {planned ? "訪問予定をはずす" : "訪問予定にする"}
+                    </button>
+                    <button
+                      onClick={() => setShowForm(true)}
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
+                    >
+                      + 訪問を記録
+                    </button>
+                  </div>
+                )}
               </div>
               {visits.length === 0 ? (
                 <p className="text-sm text-gray-500">
@@ -493,12 +517,14 @@ export default function SpotDetailModal({
                             </div>
                           )}
                         </div>
-                        <button
-                          onClick={() => deleteVisit(visit.id)}
-                          className="shrink-0 text-xs text-gray-400 hover:text-red-500"
-                        >
-                          削除
-                        </button>
+                        {!readOnly && (
+                          <button
+                            onClick={() => deleteVisit(visit.id)}
+                            className="shrink-0 text-xs text-gray-400 hover:text-red-500"
+                          >
+                            削除
+                          </button>
+                        )}
                       </div>
                     </li>
                   ))}
