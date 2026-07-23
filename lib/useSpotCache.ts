@@ -64,6 +64,88 @@ function toEntry(stored: StoredSpotCache): SpotCacheEntry {
   };
 }
 
+// gzip等の圧縮転送ではContent-Lengthは圧縮後サイズで、展開後バイト数とは
+// 比較できないため、その場合はサイズ不明(=事前確認できない)扱いにする
+function knownContentLength(response: Response): number | null {
+  const contentLength = Number(response.headers.get("content-length"));
+  return contentLength > 0 && !response.headers.get("content-encoding")
+    ? contentLength
+    : null;
+}
+
+/**
+ * レスポンスボディを、受信バイト数をonProgressへ通知しながら読み切ってSpot[]に
+ * パースする(フックのreadBodyと、別種別用downloadSpotCacheForの共通部品)。
+ * api-clientではなくfetchのReadableStreamを直接読む(レスポンスが大きく数MBに
+ * なりうるため)。失敗時はthrowする(中断によるthrowをエラー扱いにするかどうかは
+ * 呼び出し側がsignal.abortedで判断する)
+ */
+async function readSpotsBody(
+  response: Response,
+  onProgress: (p: DownloadProgress) => void
+): Promise<Spot[]> {
+  const totalBytes = knownContentLength(response);
+  onProgress({ loadedBytes: 0, totalBytes });
+  let text: string;
+  if (response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+    let loadedBytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      loadedBytes += value.byteLength;
+      chunks.push(decoder.decode(value, { stream: true }));
+      onProgress({ loadedBytes, totalBytes });
+    }
+    chunks.push(decoder.decode());
+    text = chunks.join("");
+  } else {
+    text = await response.text();
+  }
+  const data = (JSON.parse(text) as { data?: Spot[] }).data;
+  if (!data) throw new Error("取得に失敗しました");
+  return data;
+}
+
+/**
+ * 指定種別の公開スポット+公開ルートをダウンロードしてIndexedDBキャッシュへ保存する。
+ * useSpotCacheは表示中の種別に固定のため、地図の「別の種別を重ねて表示」のように
+ * 別の種別をその場でダウンロードしたい場合はこちらを使う(確認ダイアログ・進捗表示は
+ * 呼び出し側が持つ)。中断時はnull、失敗時はErrorをthrowする。
+ * 保存の失敗はエラーにしない(このセッションの表示は続けられる。キャッシュに
+ * 残らないため、次に開いたときまた未ダウンロード扱いになるだけ)
+ */
+export async function downloadSpotCacheFor(
+  typeKey: string,
+  controller: AbortController,
+  onProgress: (p: DownloadProgress) => void
+): Promise<SpotCacheEntry | null> {
+  let spots: Spot[];
+  try {
+    const qs = new URLSearchParams({ status: "published", type: typeKey });
+    const res = await fetch(`/api/spots?${qs.toString()}`, {
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error ?? res.statusText);
+    }
+    spots = await readSpotsBody(res, onProgress);
+  } catch (err) {
+    if (controller.signal.aborted) return null;
+    throw err;
+  }
+  // ルートは件数が少なくサイズ確認・進捗表示は不要。取得に失敗しても
+  // スポットのダウンロード自体は無駄にしない(ルート無しで続行する)
+  const { data } = await api.routes.list(typeKey);
+  const routes = (data ?? []).filter((r) => r.status === "published");
+  const stored = toStored(spots, routes);
+  await writeSpotCacheDb(typeKey, stored).catch(() => {});
+  return toEntry(stored);
+}
+
 /**
  * 公開スポットは頻繁に変わらないため、ページを開くたびにAPIから取り直すのではなく
  * スポット種別ごとにIndexedDBへ明示的にダウンロード・キャッシュする
@@ -168,52 +250,17 @@ export function useSpotCache(typeKey: string) {
     }
   }, [typeKey]);
 
-  // gzip等の圧縮転送ではContent-Lengthは圧縮後サイズで、展開後バイト数とは
-  // 比較できないため、その場合はサイズ不明(=事前確認できない)扱いにする
-  const knownContentLength = (response: Response): number | null => {
-    const contentLength = Number(response.headers.get("content-length"));
-    return contentLength > 0 && !response.headers.get("content-encoding")
-      ? contentLength
-      : null;
-  };
-
   /**
    * openFetchが返したレスポンスのボディを、進捗ダイアログに受信バイト数を出しながら
-   * 読み切ってSpot[]にパースする。api-clientではなくfetchのReadableStreamを直接読む
-   * (レスポンスが大きく数MBになりうるため)。キャンセル時はエラー扱いにせずnullを返す。
+   * 読み切ってSpot[]にパースする(本体はreadSpotsBody)。キャンセル時はエラー扱いに
+   * せずnullを返す。
    */
   const readBody = useCallback(
     async (response: Response, controller: AbortController): Promise<Spot[] | null> => {
       abortRef.current = controller;
-      const totalBytes = knownContentLength(response);
       setDownloading(true);
-      setProgress({ loadedBytes: 0, totalBytes });
       try {
-        let text: string;
-        if (response.body) {
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          const chunks: string[] = [];
-          let loadedBytes = 0;
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            loadedBytes += value.byteLength;
-            chunks.push(decoder.decode(value, { stream: true }));
-            setProgress({ loadedBytes, totalBytes });
-          }
-          chunks.push(decoder.decode());
-          text = chunks.join("");
-        } else {
-          text = await response.text();
-        }
-
-        const data = (JSON.parse(text) as { data?: Spot[] }).data;
-        if (!data) {
-          setError("取得に失敗しました");
-          return null;
-        }
-        return data;
+        return await readSpotsBody(response, setProgress);
       } catch (err) {
         if (!controller.signal.aborted) {
           setError(err instanceof Error ? err.message : "取得に失敗しました");
