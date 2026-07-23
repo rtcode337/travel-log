@@ -57,9 +57,18 @@ const CSV_COLUMNS = [
   "description",
 ] as const;
 
-// ルートCSV(スポットを巡った順に矢印で繋ぐ)の列。spot_keyはスポットCSVのkey列を指す
-// seriesは省略可(ルートを地図でどのシリーズの色に塗るか。同じrouteの全行に同じ値を書く)
-const ROUTE_CSV_COLUMNS = ["route", "series", "seq", "spot_key", "description"] as const;
+// ルートCSV(スポットを巡った順に矢印で繋ぐ)の列。spot_keyはスポットCSVのkey列を指す。
+// seriesは省略可(ルートを地図でどのシリーズの色に塗るか。同じrouteの全行に同じ値を書く)。
+// descriptionはルート全体の説明(同じrouteの全行に同じ値)、leg_descriptionはその行の
+// スポットから次のスポットへの区間の説明(行単位。最終地点の行は空欄)で、どちらも省略可
+const ROUTE_CSV_COLUMNS = [
+  "route",
+  "series",
+  "seq",
+  "spot_key",
+  "description",
+  "leg_description",
+] as const;
 
 /**
  * ヘッダーに定義外の列があれば、その一覧を返す(無ければ空配列)。
@@ -1039,9 +1048,13 @@ export default function AdminView({
         spots.filter((s) => s.key).map((s) => [s.key as string, s])
       );
       const errors: string[] = [];
-      const grouped = new Map<string, { seq: number; spotId: string }[]>();
+      const grouped = new Map<
+        string,
+        { seq: number; spotId: string; legDescription: string | null }[]
+      >();
       // series・descriptionはルート単位の値だが、CSVは行単位なので同じrouteの
       // 各行に同じ値が並ぶ。最初に現れた値を採り、同一route内で食い違う行はエラーにする
+      // (leg_descriptionだけは行単位の値=その行のスポットから次のスポットへの区間の説明)
       const seriesByRoute = new Map<string, string | null>();
       const descriptionByRoute = new Map<string, string | null>();
       const seenSeq = new Set<string>();
@@ -1051,6 +1064,7 @@ export default function AdminView({
         const route = get("route");
         const series = get("series") || null;
         const description = get("description") || null;
+        const legDescription = get("leg_description") || null;
         const seq = Number(get("seq"));
         const spotKey = get("spot_key");
         if (route && seriesByRoute.has(route) && seriesByRoute.get(route) !== series) {
@@ -1077,12 +1091,22 @@ export default function AdminView({
           if (!seriesByRoute.has(route)) seriesByRoute.set(route, series);
           if (!descriptionByRoute.has(route)) descriptionByRoute.set(route, description);
           const list = grouped.get(route) ?? [];
-          list.push({ seq, spotId: spotsByKey.get(spotKey)!.id });
+          list.push({ seq, spotId: spotsByKey.get(spotKey)!.id, legDescription });
           grouped.set(route, list);
         }
       }
       for (const [route, list] of grouped) {
         if (list.length < 2) errors.push(`route「${route}」の経由地が1件しかない`);
+        // leg_descriptionは「その行のスポットから次のスポットへの区間」の説明のため、
+        // 次の区間が無い最終地点に書かれていたら気づけるようエラーにする
+        // (1つ前の行に書くつもりの値のずれを黙って捨てない)
+        const last = [...list].sort((a, b) => a.seq - b.seq)[list.length - 1];
+        if (last?.legDescription) {
+          errors.push(
+            `route「${route}」の最終地点(seq ${last.seq})に leg_description があるが、` +
+              `最後の地点から先の区間は無い(区間の説明は出発側の行に書く)`
+          );
+        }
       }
       if (errors.length > 0) {
         setRouteMessage(
@@ -1091,10 +1115,13 @@ export default function AdminView({
         return;
       }
 
-      // 差分更新: 既存ルートとシリーズ・説明・経由地の並びが完全一致するものはスキップし、
-      // 変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと置き換え)。
-      // スポットのCSVインポートと同じく常にstatus: 'published'を明示するため、
+      // 差分更新: 既存ルートとシリーズ・説明・経由地(区間の説明含む)の並びが完全一致する
+      // ものはスキップし、変わったもの・新規のものだけを送る(送った分はルート単位で丸ごと
+      // 置き換え)。スポットのCSVインポートと同じく常にstatus: 'published'を明示するため、
       // 公開以外の既存ルートは内容が同一でも公開に倒す(スキップしない)
+      const pointsKey = (
+        points: { spot_id: string; description: string | null }[]
+      ) => JSON.stringify(points.map((p) => [p.spot_id, p.description ?? null]));
       const existingByName = new Map(
         routes.map((r) => [
           r.name,
@@ -1102,7 +1129,7 @@ export default function AdminView({
             series: r.series,
             description: r.description,
             status: r.status,
-            spotIds: r.points.map((p) => p.spot_id).join("|"),
+            pointsKey: pointsKey(r.points),
           },
         ])
       );
@@ -1111,16 +1138,18 @@ export default function AdminView({
         series: string | null;
         description: string | null;
         status: "published";
-        spot_ids: string[];
+        points: { spot_id: string; description: string | null }[];
       }[] = [];
       let unchangedCount = 0;
       for (const [route, list] of grouped) {
-        const spotIds = list.sort((a, b) => a.seq - b.seq).map((p) => p.spotId);
+        const points = list
+          .sort((a, b) => a.seq - b.seq)
+          .map((p) => ({ spot_id: p.spotId, description: p.legDescription }));
         const series = seriesByRoute.get(route) ?? null;
         const description = descriptionByRoute.get(route) ?? null;
         const existing = existingByName.get(route);
         if (
-          existing?.spotIds === spotIds.join("|") &&
+          existing?.pointsKey === pointsKey(points) &&
           existing.series === series &&
           existing.description === description &&
           existing.status === "published"
@@ -1133,7 +1162,7 @@ export default function AdminView({
           series,
           description,
           status: "published",
-          spot_ids: spotIds,
+          points,
         });
       }
       if (changed.length === 0) {
@@ -1616,15 +1645,19 @@ export default function AdminView({
               </h3>
               <p className="mb-3 text-xs text-gray-500">
                 スポットを巡った順に矢印で繋ぐルートをCSVで取り込み、地図に表示する。
-                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(seriesとdescriptionは省略可)。
+                CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(series・description・
+                leg_descriptionは省略可)。
                 routeはルート名、seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、
                 spot_keyはスポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
                 矢印がそのシリーズの縁取り色で描かれ、地図のシリーズ絞り込みにも
                 連動する(表示中のルートの経由地は、スポット自体のシリーズが
-                絞り込みで外れていてもピンが表示される)。descriptionはルートの説明文で、
-                地図でルートの線をタップすると出る詳細に表示される。
+                絞り込みで外れていてもピンが表示される)。descriptionはルート全体の説明文で、
+                地図でルートの線をタップすると出る詳細の先頭に表示される。
                 series・descriptionはルート単位の値なので、同じrouteの行には
                 すべて同じ値を書く(空欄なら既定色・説明なし)。
+                leg_descriptionは行単位の値で、その行のスポットから次のスポットへの
+                区間の説明(移動手段など)。ルート詳細の経由地一覧で2点の間に表示される
+                (次の区間が無い最終地点の行は空欄にする)。
                 差分更新: 既存と同名のルートは
                 シリーズ・説明・経由地を丸ごと置き換え、CSVに無いルートには触らない。
                 取り込みの前に、spot_keyが指すスポットをスポットCSVでインポートして
