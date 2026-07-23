@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -783,6 +784,10 @@ export default function MapView({
 }) {
   const searchParams = useSearchParams();
   const focusSpotId = searchParams.get("spot");
+  // 「◯◯」の地図で開くリンク(重ね表示のスポット詳細)で種別を切り替えて来たとき、
+  // 元の種別のキーがfromに入る。左下に「元の地図に戻る」リンクを出すのに使う
+  // (戻り先の表示位置は種別ごとのlastViewsが復元するため、キーだけあればよい)
+  const returnTypeKey = searchParams.get("from");
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -1278,9 +1283,16 @@ export default function MapView({
     // 一度処理したらURLから消す(戻る操作やスポット再取得のたびに再発火しないように)。
     // next/navigationのrouter.replaceだとuseSearchParams経由でSuspense境界が
     // 再評価され、MapView自体が再マウントされてspotsが空に戻ってしまうことが
-    // あったため、ブラウザ標準のHistory APIで直接URLだけ書き換える
-    window.history.replaceState(null, "", `/${spotTypeKey}/map`);
-  }, [focusSpotId, spots, spotTypeKey, runWhenMapReady]);
+    // あったため、ブラウザ標準のHistory APIで直接URLだけ書き換える。
+    // fromは「元の地図に戻る」リンクをこの地図にいる間は出し続けたいので消さずに残す
+    window.history.replaceState(
+      null,
+      "",
+      returnTypeKey
+        ? `/${spotTypeKey}/map?from=${encodeURIComponent(returnTypeKey)}`
+        : `/${spotTypeKey}/map`
+    );
+  }, [focusSpotId, spots, spotTypeKey, returnTypeKey, runWhenMapReady]);
 
   // マーカーの生成・フィルタ反映。
   // 公開スポットも自分の非公開スポットも同じWebGLクラスタ表示で描画する
@@ -1512,18 +1524,35 @@ export default function MapView({
   // (先にキーの生文字列を出すと表示名への切り替わりがちらつくため)
   const currentTypeLabel =
     spotTypes.find((t) => t.key === spotTypeKey)?.label ?? null;
+  // 「◯◯」の地図で開くで種別を切り替えて来たときの戻り先(?from=)。spotTypesに
+  // 見つかる種別だけリンク化する(不正なキー・閲覧できない種別はここで弾かれる)
+  const returnType =
+    returnTypeKey && returnTypeKey !== spotTypeKey
+      ? spotTypes.find((t) => t.key === returnTypeKey) ?? null
+      : null;
 
   return (
     <div className="relative h-[calc(100dvh-4rem)]">
       <div ref={containerRef} className="h-full w-full" />
 
-      {/* 今表示中のスポット種別(左下に小さく表示。attributionは右下なので重ならない)。
-          表示だけの要素なので、地図操作を吸わないようpointer-events-noneにする */}
-      {currentTypeLabel && (
-        <div className="pointer-events-none absolute bottom-2 left-2 z-10 rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-gray-700 shadow">
-          {currentTypeLabel}
-        </div>
-      )}
+      {/* 今表示中のスポット種別と「元の地図に戻る」リンク(左下に小さく表示。
+          attributionは右下なので重ならない)。種別チップは表示だけの要素なので、
+          地図操作を吸わないようpointer-events-noneにする */}
+      <div className="absolute bottom-2 left-2 z-10 flex flex-col items-start gap-1.5">
+        {returnType && (
+          <Link
+            href={`/${returnType.key}/map`}
+            className="rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-blue-600 underline shadow"
+          >
+            ← 「{returnType.label}」の地図に戻る
+          </Link>
+        )}
+        {currentTypeLabel && (
+          <div className="pointer-events-none rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-gray-700 shadow">
+            {currentTypeLabel}
+          </div>
+        )}
+      </div>
 
       {/* 検索バー・絞り込みボタン(右上のズーム/現在地ボタンと重ならないよう右側を開ける) */}
       <div className="absolute left-0 right-14 top-0 z-10 space-y-2 p-2">
