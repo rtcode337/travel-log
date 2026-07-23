@@ -75,13 +75,31 @@ export async function PATCH(
   // categoriesもkeyと同じ理由でボディに含まれるときだけ更新する(「カテゴリなし」は
   // 空配列を明示的に送る。省略との区別がつかないと部分的なボディで全消しになるため)
   const hasCategories = Object.prototype.hasOwnProperty.call(spot, "categories");
+  // origin(登録経路)もボディに含まれるときだけ更新する。CSVインポートの上書きが
+  // 一致した行を'csv'(還元済み)に倒すための項目で、変更はspot_admin/adminに限る
+  const hasOrigin = Object.prototype.hasOwnProperty.call(spot, "origin");
+  if (hasOrigin) {
+    if (spot.origin !== "csv" && spot.origin !== "manual") {
+      return NextResponse.json(
+        { error: `origin「${spot.origin}」は指定できません。` },
+        { status: 400 }
+      );
+    }
+    if (!SPOT_ADMIN_ROLES.includes(user.role)) {
+      return NextResponse.json(
+        { error: "originを変更する権限がありません。" },
+        { status: 403 }
+      );
+    }
+  }
   const { rows } = await query<Spot>(
     `update spots set
       name = $1, name_kana = $2, lat = $3, lng = $4, region = $5,
       series = $6, description = $7,
       categories = case when $8 then $9::text[] else categories end,
-      key = case when $10 then $11 else key end
-     where id = $12
+      key = case when $10 then $11 else key end,
+      origin = case when $12 then $13 else origin end
+     where id = $14
      returning *`,
     [
       spot.name,
@@ -95,6 +113,8 @@ export async function PATCH(
       hasCategories ? (spot.categories ?? []) : [],
       hasKey,
       hasKey ? spot.key : null,
+      hasOrigin,
+      hasOrigin ? spot.origin : null,
       id,
     ]
   );
@@ -121,6 +141,16 @@ export async function DELETE(
   const { rows: photoRows } = await query<{ photos: string[] }>(
     "select photos from visits where spot_id = $1",
     [id]
+  );
+  // CSV由来の公開スポットの個別削除は「削除の墓標」に記録し、travel-log-data側の
+  // exclude.txtへ追記する候補として還元用エクスポートに出す(手動追加(manual)は
+  // travel-log-data側に元の行が無いため記録不要。purge等の一括削除はこのAPIを
+  // 通らないため記録されない — travel-log-data側発の操作なのでそれで正しい)
+  await query(
+    `insert into spot_deletions (spot_type_id, key, name, lat, lng, region, deleted_by)
+     select spot_type_id, key, name, lat, lng, region, $2
+       from spots where id = $1 and status = 'published' and origin = 'csv'`,
+    [id, user.id]
   );
   await query("delete from spots where id = $1", [id]);
   await deleteVisitPhotos(photoRows.flatMap((r) => r.photos));

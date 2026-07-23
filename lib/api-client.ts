@@ -5,6 +5,7 @@ import type {
   Review,
   Role,
   Spot,
+  SpotDeletion,
   SpotRoute,
   SpotType,
   SpotTypeSettingKey,
@@ -155,13 +156,24 @@ export const api = {
         { method: "POST", body: JSON.stringify({ keys }) }
       ),
   },
+  spotDeletions: {
+    // 削除の墓標(画面から個別削除されたCSV由来の公開スポット)。還元用エクスポートで使う
+    list: (type: string) =>
+      request<SpotDeletion[]>(`/api/spot-deletions?type=${encodeURIComponent(type)}`),
+  },
   routes: {
     list: (type: string) =>
       request<SpotRoute[]>(`/api/routes?type=${encodeURIComponent(type)}`),
-    // ルート名ごとにシリーズ・経由地を丸ごと置き換えるupsert(ルートCSVインポート用)
+    // ルート名ごとにシリーズ・説明・状態・経由地を丸ごと置き換えるupsert(ルートCSVインポート用)
     replace: (
       type: string,
-      routes: { name: string; series: string | null; spot_ids: string[] }[]
+      routes: {
+        name: string;
+        series: string | null;
+        description: string | null;
+        status: string;
+        spot_ids: string[];
+      }[]
     ) =>
       request<{ updatedCount: number }>(
         `/api/routes?type=${encodeURIComponent(type)}`,

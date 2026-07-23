@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Spot } from "@/lib/types";
+import { api } from "@/lib/api-client";
+import type { Spot, SpotRoute } from "@/lib/types";
 import {
   readSpotCacheDb,
   writeSpotCacheDb,
@@ -15,6 +16,8 @@ import {
 export interface SpotCacheEntry {
   downloadedAt: string; // ISO
   spots: Spot[];
+  /** 公開ルート(公開スポットと同時にダウンロードして保存される) */
+  routes: SpotRoute[];
 }
 
 const SAVE_ERROR =
@@ -43,14 +46,22 @@ export function formatDownloadedAt(iso: string): string {
   });
 }
 
-/** ダウンロードした公開スポットをキャッシュ用に間引き、保存用エントリにまとめる */
-function toStored(spots: Spot[]): StoredSpotCache {
-  return { downloadedAt: new Date().toISOString(), spots: spots.map(trimSpot) };
+/** ダウンロードした公開スポット・公開ルートをキャッシュの保存用エントリにまとめる */
+function toStored(spots: Spot[], routes: SpotRoute[]): StoredSpotCache {
+  return {
+    downloadedAt: new Date().toISOString(),
+    spots: spots.map(trimSpot),
+    routes,
+  };
 }
 
 /** 保存用エントリをアプリ内表示用(Spot[])のエントリに戻す */
 function toEntry(stored: StoredSpotCache): SpotCacheEntry {
-  return { downloadedAt: stored.downloadedAt, spots: stored.spots.map(expandSpot) };
+  return {
+    downloadedAt: stored.downloadedAt,
+    spots: stored.spots.map(expandSpot),
+    routes: stored.routes ?? [],
+  };
 }
 
 /**
@@ -224,6 +235,16 @@ export function useSpotCache(typeKey: string) {
     return readBody(opened.response, opened.controller);
   }, [openFetch, readBody]);
 
+  /**
+   * 公開ルートを取得する(公開スポットのダウンロードと同時にキャッシュへ保存する)。
+   * ルートは件数が少なくサイズ確認・進捗表示は不要。取得に失敗しても
+   * スポットのダウンロード自体は無駄にしない(ルート無しで保存を続行する)
+   */
+  const fetchPublicRoutes = useCallback(async (): Promise<SpotRoute[]> => {
+    const { data } = await api.routes.list(typeKey);
+    return (data ?? []).filter((r) => r.status === "published");
+  }, [typeKey]);
+
   /** 進捗ダイアログの「キャンセル」ボタン: 進行中のダウンロードを打ち切る */
   const cancelDownload = useCallback(() => abortRef.current?.abort(), []);
 
@@ -249,10 +270,10 @@ export function useSpotCache(typeKey: string) {
 
     const data = await readBody(opened.response, opened.controller);
     if (!data) return;
-    const stored = toStored(data);
+    const stored = toStored(data, await fetchPublicRoutes());
     setEntry(toEntry(stored));
     persist(stored);
-  }, [openFetch, readBody, persist]);
+  }, [openFetch, readBody, persist, fetchPublicRoutes]);
 
   const confirmManualDownload = useCallback(async () => {
     const pending = pendingResponseRef.current;
@@ -261,10 +282,10 @@ export function useSpotCache(typeKey: string) {
     if (!pending) return;
     const data = await readBody(pending.response, pending.controller);
     if (!data) return;
-    const stored = toStored(data);
+    const stored = toStored(data, await fetchPublicRoutes());
     setEntry(toEntry(stored));
     persist(stored);
-  }, [readBody, persist]);
+  }, [readBody, persist, fetchPublicRoutes]);
 
   const cancelManualDownload = useCallback(() => {
     pendingResponseRef.current?.controller.abort();
@@ -281,10 +302,10 @@ export function useSpotCache(typeKey: string) {
       setShowMissingPrompt(true);
       return;
     }
-    const stored = toStored(data);
+    const stored = toStored(data, await fetchPublicRoutes());
     setEntry(toEntry(stored));
     persist(stored);
-  }, [fetchPublished, persist]);
+  }, [fetchPublished, persist, fetchPublicRoutes]);
 
   const dismissMissingPrompt = useCallback(() => setShowMissingPrompt(false), []);
 
@@ -321,7 +342,11 @@ export function useSpotCache(typeKey: string) {
               : [...prev.spots, spot]
             : prev.spots.filter((s) => s.id !== spot.id);
         const next = { ...prev, spots };
-        persist({ downloadedAt: next.downloadedAt, spots: next.spots.map(trimSpot) });
+        persist({
+          downloadedAt: next.downloadedAt,
+          spots: next.spots.map(trimSpot),
+          routes: next.routes,
+        });
         return next;
       });
     },
@@ -334,7 +359,11 @@ export function useSpotCache(typeKey: string) {
         if (!prev) return prev;
         if (!prev.spots.some((s) => s.id === spotId)) return prev;
         const next = { ...prev, spots: prev.spots.filter((s) => s.id !== spotId) };
-        persist({ downloadedAt: next.downloadedAt, spots: next.spots.map(trimSpot) });
+        persist({
+          downloadedAt: next.downloadedAt,
+          spots: next.spots.map(trimSpot),
+          routes: next.routes,
+        });
         return next;
       });
     },
@@ -343,6 +372,7 @@ export function useSpotCache(typeKey: string) {
 
   return {
     publicSpots: entry?.spots ?? null,
+    publicRoutes: entry?.routes ?? null,
     downloadedAt: entry?.downloadedAt ?? null,
     ready,
     checkingSize,

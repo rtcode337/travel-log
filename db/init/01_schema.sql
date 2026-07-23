@@ -133,6 +133,11 @@ create table spots (
   status        text not null default 'published' check (
     status in ('published', 'pending', 'rejected', 'private')
   ),
+  -- 登録経路。csv=管理画面のCSVインポート(travel-log-data由来)、manual=それ以外
+  -- (地図の右クリック追加・管理画面の追加フォーム)。手動追加された公開スポットを
+  -- travel-log-dataへ還元するためのエクスポート(/[type]/admin)の抽出条件に使う。
+  -- 還元してCSVを再インポートすると、一致した行はcsvに更新される(還元済みの印)
+  origin        text not null default 'manual' check (origin in ('csv', 'manual')),
   created_by    uuid references users (id) on delete set null,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
@@ -147,18 +152,49 @@ create unique index spots_spot_type_key_idx
   on spots (spot_type_id, key) where key is not null;
 
 -- =============================================================
+-- spot_deletions: 画面から個別削除された公開スポットの記録(削除の墓標)。
+-- CSV由来(origin='csv')の公開スポットをDELETE /api/spots/[id]で消したときだけ
+-- 記録し、travel-log-data側のexclude.txtへ追記する候補として還元用エクスポート
+-- (/[type]/admin)に出す。purge・キー一覧を指定しての削除・種別削除は
+-- travel-log-data側発の操作のため記録しない。行そのものは消えるため、
+-- 突き合わせに使うkey・name等の値をコピーして残す(created_atが削除日時)
+-- =============================================================
+create table spot_deletions (
+  id           uuid primary key default gen_random_uuid(),
+  spot_type_id uuid not null references spot_types (id) on delete cascade,
+  key          text,
+  name         text not null,
+  lat          double precision not null,
+  lng          double precision not null,
+  region       text not null,
+  deleted_by   uuid references users (id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index spot_deletions_spot_type_id_idx on spot_deletions (spot_type_id);
+
+-- =============================================================
 -- spot_routes: スポットを巡った順に繋ぐルート(1本の矢印列)。
 -- 「巡った順番」に意味があるスポット種別で、地図上に順路の矢印を描くために使う。
 -- nameはルートの表示名。seriesはこのルートが属するシリーズ(spots.seriesと
 -- 同じ値空間)で、指定するとその色で矢印が描かれ、シリーズ絞り込みにも連動する。
 -- 表示名とシリーズは別物のため列を分けてある(同じシリーズに複数のルートを
--- 持たせられる)。未指定(null)のルートは既定色で描かれる
+-- 持たせられる)。未指定(null)のルートは既定色で描かれる。
+-- descriptionはルートの説明文(地図でルートの線をタップすると出る詳細に表示)。
+-- status・created_byはspotsと同じ公開状態の仕組み(公開ルートは全員に見え、
+-- 非公開は作成者本人のみ、承認待ち・却下は本人+moderator以上)
 -- =============================================================
 create table spot_routes (
   id           uuid primary key default gen_random_uuid(),
   spot_type_id uuid not null references spot_types (id) on delete cascade,
   name         text not null,
   series       text,
+  description  text,
+  status       text not null default 'published' check (
+    status in ('published', 'pending', 'rejected', 'private')
+  ),
+  created_by   uuid references users (id) on delete set null,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   unique (spot_type_id, name)
@@ -258,6 +294,10 @@ create trigger users_set_updated_at
 
 create trigger spots_set_updated_at
   before update on spots
+  for each row execute function set_updated_at();
+
+create trigger spot_deletions_set_updated_at
+  before update on spot_deletions
   for each row execute function set_updated_at();
 
 create trigger spot_routes_set_updated_at
