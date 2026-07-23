@@ -10,6 +10,7 @@ import {
   type Spot,
   type Visit,
   type VisitPlan,
+  type VisitPlanList,
 } from "@/lib/types";
 import {
   compareRegions,
@@ -24,6 +25,9 @@ import FilterBar, {
 } from "@/components/FilterBar";
 import SeriesBadge from "@/components/SeriesBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
+import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
+import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
+import { formatPlanDateRange } from "@/lib/planListDraft";
 import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getSeriesOrder } from "@/lib/seriesStyle";
 import SeriesFilter from "@/components/SeriesFilter";
@@ -196,12 +200,16 @@ export default function SpotsView({
   );
   const [visits, setVisits] = useState<Visit[]>([]);
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
+  const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
   const [myReviews, setMyReviews] = useState<MyReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>("series");
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
+  // 訪問予定リストの新規作成モーダル、詳細表示中のリストID
+  const [showListForm, setShowListForm] = useState(false);
+  const [detailListId, setDetailListId] = useState<string | null>(null);
 
   const [browseMode, setBrowseMode] = useState<BrowseMode>("series");
   const [exporting, setExporting] = useState(false);
@@ -272,6 +280,11 @@ export default function SpotsView({
     setVisitPlans(data ?? []);
   }, []);
 
+  const loadPlanLists = useCallback(async () => {
+    const { data } = await api.visitPlanLists.list(spotTypeKey);
+    setPlanLists(data ?? []);
+  }, [spotTypeKey]);
+
   const loadMyReviews = useCallback(async () => {
     const { data } = await api.reviews.listMine(spotTypeKey);
     setMyReviews(data ?? []);
@@ -312,11 +325,19 @@ export default function SpotsView({
         loadPrivateSpots(),
         loadVisits(),
         loadVisitPlans(),
+        loadPlanLists(),
         loadMyReviews(),
       ]);
       setLoading(false);
     })();
-  }, [loadPrivateSpots, loadVisits, loadVisitPlans, loadMyReviews, spotTypeKey]);
+  }, [
+    loadPrivateSpots,
+    loadVisits,
+    loadVisitPlans,
+    loadPlanLists,
+    loadMyReviews,
+    spotTypeKey,
+  ]);
 
   const spotById = useMemo(() => {
     const m = new Map<string, Spot>();
@@ -477,6 +498,7 @@ export default function SpotsView({
       <main className="mx-auto max-w-4xl p-4">
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
           <section>
+            {/* 訪問予定(個別のブックマーク)。0件のときは出さない */}
             {plannedSpots.length > 0 && (
               <div className="mb-6">
                 <h1 className="mb-4 text-lg font-bold">訪問予定</h1>
@@ -517,6 +539,52 @@ export default function SpotsView({
                 />
               </div>
             )}
+
+            {/* 訪問予定リスト(旅程)。見出し+追加ボタンは0件でも常に出す */}
+            <div className="mb-6">
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <h1 className="text-lg font-bold">訪問予定リスト</h1>
+                <button
+                  type="button"
+                  onClick={() => setShowListForm(true)}
+                  className="shrink-0 rounded-lg border border-blue-600 bg-white px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                >
+                  + 訪問予定リストを追加
+                </button>
+              </div>
+              {planLists.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  訪問予定リストはまだありません。「+ 訪問予定リストを追加」で旅程を作れます。
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  {planLists.map((list) => (
+                    <li key={list.id}>
+                      <button
+                        onClick={() => setDetailListId(list.id)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                      >
+                        <span
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm"
+                          aria-hidden
+                        >
+                          📋
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{list.title}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatPlanDateRange(list.start_date, list.end_date)}
+                            {" ・ "}
+                            {list.spot_ids.length}スポット
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-gray-400">›</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <div className="mb-6">
               <div className="mb-4 flex items-center justify-between gap-2">
                 <h1 className="text-lg font-bold">最近の訪問場所</h1>
@@ -825,6 +893,30 @@ export default function SpotsView({
             onSpotDeleted={refreshAfterSpotDelete}
             onVisitPlanChange={loadVisitPlans}
             onReviewChange={loadMyReviews}
+          />
+        )}
+
+        {showListForm && (
+          <VisitPlanListFormModal
+            typeKey={spotTypeKey}
+            onClose={() => setShowListForm(false)}
+          />
+        )}
+
+        {detailListId && (
+          <VisitPlanListDetailModal
+            listId={detailListId}
+            spotsById={spotById}
+            seriesStyles={seriesStyles}
+            onClose={() => setDetailListId(null)}
+            onDeleted={() => {
+              setDetailListId(null);
+              loadPlanLists();
+            }}
+            onOpenSpot={(id) => {
+              setDetailListId(null);
+              setDetailSpotId(id);
+            }}
           />
         )}
       </main>

@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import PlanBuildPanel from "@/components/PlanBuildPanel";
+import { useNavVisibility } from "@/components/AppFrame";
+import {
+  clearPlanListDraft,
+  loadPlanListDraft,
+  savePlanListDraft,
+  type PlanListDraft,
+} from "@/lib/planListDraft";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { api } from "@/lib/api-client";
@@ -17,7 +25,14 @@ import {
 import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
 import { getSpotTypeSetting } from "@/lib/types";
-import type { Role, Spot, SpotRoute, SpotType, Visit } from "@/lib/types";
+import type {
+  Role,
+  Spot,
+  SpotRoute,
+  SpotType,
+  Visit,
+  VisitPlanList,
+} from "@/lib/types";
 import { expandSpot, readSpotCacheDb } from "@/lib/spotCacheDb";
 import { autoTextColor, type SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
@@ -97,6 +112,9 @@ const DEFAULT_ROUTE_COLOR = "#2563eb";
  * (`lib/pinIcon.ts`の`visited`時の塗り)と同じ緑にして「訪問済み」を連想させる。
  */
 const VISIT_PATH_COLOR = "#16a34a";
+
+/** 訪問予定リスト(旅程)の経路の線・矢印の色。訪問順の経路(緑)・ルートと区別する紫 */
+const PLAN_LIST_PATH_COLOR = "#9333ea";
 
 /**
  * ルートの進行方向を示す右向き矢印(白フチ付き)の画像を色ごとに生成して登録する。
@@ -491,36 +509,51 @@ function buildVisitPath(
 type RouteFeatureProps = { color: string; icon: string; routeId?: string };
 
 /**
- * ルート(と、訪問日で絞り込み中なら訪問順の経路)をGeoJSONのLineString群にする。
- * 矢印画像の登録もここで済ませる
+ * 選んだ訪問予定リスト(旅程)の経路。そのリストのスポットをリスト順に並べる
+ * (見えないスポット=未ダウンロード等は除いて残りを繋ぐ)。
+ */
+function buildPlanListPath(
+  planLists: VisitPlanList[],
+  filters: SpotFilters,
+  spotById: Map<string, Spot>
+): Spot[] {
+  if (!filters.planListId) return [];
+  const list = planLists.find((l) => l.id === filters.planListId);
+  if (!list) return [];
+  return list.spot_ids
+    .map((id) => spotById.get(id))
+    .filter((s): s is Spot => s !== undefined);
+}
+
+/**
+ * ルートと、地図に重ねる色付きの経路(訪問順の経路・訪問予定リストの経路)を
+ * GeoJSONのLineString群にする。矢印画像の登録もここで済ませる。
  */
 function buildRouteGeoJSON(
   map: maplibregl.Map,
   routes: SpotRoute[],
   seriesStyles: SeriesStyleDefinition[],
-  visitPath: Spot[]
+  extraPaths: { path: Spot[]; color: string }[]
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, RouteFeatureProps> {
-  const visitFeatures: GeoJSON.Feature<GeoJSON.LineString, RouteFeatureProps>[] =
-    visitPath.length >= 2
-      ? [
-          {
-            type: "Feature",
-            geometry: {
-              type: "LineString",
-              coordinates: visitPath.map((s) => [s.lng, s.lat]),
-            },
-            properties: {
-              color: VISIT_PATH_COLOR,
-              icon: ensureRouteArrowImage(map, VISIT_PATH_COLOR),
-            },
-          },
-        ]
-      : [];
+  const extraFeatures: GeoJSON.Feature<GeoJSON.LineString, RouteFeatureProps>[] =
+    extraPaths
+      .filter((p) => p.path.length >= 2)
+      .map((p) => ({
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: p.path.map((s) => [s.lng, s.lat]),
+        },
+        properties: {
+          color: p.color,
+          icon: ensureRouteArrowImage(map, p.color),
+        },
+      }));
 
   return {
     type: "FeatureCollection",
     features: [
-      ...visitFeatures,
+      ...extraFeatures,
       ...routes.map<GeoJSON.Feature<GeoJSON.LineString, RouteFeatureProps>>(
         (route) => {
           // ルートのシリーズが種別の一覧にあれば、そのシリーズの縁取り色
@@ -753,6 +786,8 @@ function loadSavedFilters(typeKey: string): SpotFilters {
       // "none"=表示しない、日付=その日、それ以外(旧null・キー欠落など)=今日
       visitedDate:
         obj.visitedDate === "none" ? null : date(obj.visitedDate) ?? todayKey(),
+      // 訪問予定リストの経路対象(そのリストが今も存在するかは描画側で解決する)
+      planListId: typeof obj.planListId === "string" ? obj.planListId : null,
       // キー自体が無い保存データ(この設定の追加前に保存されたもの)は既定のオン扱い
       showRoutes: typeof obj.showRoutes === "boolean" ? obj.showRoutes : true,
     };
@@ -815,8 +850,11 @@ export default function MapView({
   /** 表示対象のスポット種別キー(常に /[type]/map から渡される) */
   spotTypeKey: string;
 }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const focusSpotId = searchParams.get("spot");
+  // /map?buildList=1 で開かれたら、訪問予定リスト作成モードに入る(下書きをlocalStorageから読む)
+  const buildListParam = searchParams.get("buildList");
   // 「◯◯」の地図で開くリンク(重ね表示のスポット詳細)で種別を切り替えて来たとき、
   // 元の種別のキーがfromに入る。左下に「元の地図に戻る」リンクを出すのに使う
   // (戻り先の表示位置は種別ごとのlastViewsが復元するため、キーだけあればよい)
@@ -871,6 +909,8 @@ export default function MapView({
   // 自分の訪問記録(全種別分)。ピンの訪問済み表示のほか、訪問日での絞り込みと
   // 訪問順の矢印(buildVisitPath)に訪問日時が要るため、IDの集合ではなく全件を持つ
   const [visits, setVisits] = useState<Visit[]>([]);
+  // 訪問予定リスト(絞り込みモーダルの「訪問予定リスト」セレクトで経路表示に使う)
+  const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
   const visitedIds = useMemo(
     () => new Set(visits.map((v) => v.spot_id)),
     [visits]
@@ -923,35 +963,49 @@ export default function MapView({
   // 全体が画面に収まるよう地図を移動する(「表示しない」やその日の訪問が無い場合は
   // 対象日を変えるだけで地図は動かさない)。ユーザーが明示的に選んだときだけ動かすため、
   // マウント時の既定(今日)の復元では走らせず、この選択ハンドラでのみ行う
+  // 経路(スポット列)全体が画面に収まるよう地図を移動する。モーダルを開いたまま
+  // 選ぶ想定だが、地図は全画面なので閉じたときに経路全体が中央に収まる
+  const fitMapToSpots = useCallback((path: Spot[]) => {
+    const map = mapRef.current;
+    if (!map || path.length === 0) return;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+    for (const s of path) {
+      if (s.lat < minLat) minLat = s.lat;
+      if (s.lat > maxLat) maxLat = s.lat;
+      if (s.lng < minLng) minLng = s.lng;
+      if (s.lng > maxLng) maxLng = s.lng;
+    }
+    map.fitBounds(
+      [
+        [minLng, minLat],
+        [maxLng, maxLat],
+      ],
+      // 1地点だけのときはmaxZoomまで寄る
+      { padding: 60, maxZoom: 15, animate: true }
+    );
+  }, []);
   const handleSelectVisitDate = useCallback(
     (value: string) => {
       const visitedDate = value || null;
       setFilters({ ...filters, visitedDate });
-      const map = mapRef.current;
-      if (!visitedDate || !map) return;
-      const path = buildVisitPath(visits, { ...filters, visitedDate }, spotById);
-      if (path.length === 0) return;
-      let minLat = Infinity;
-      let maxLat = -Infinity;
-      let minLng = Infinity;
-      let maxLng = -Infinity;
-      for (const s of path) {
-        if (s.lat < minLat) minLat = s.lat;
-        if (s.lat > maxLat) maxLat = s.lat;
-        if (s.lng < minLng) minLng = s.lng;
-        if (s.lng > maxLng) maxLng = s.lng;
-      }
-      map.fitBounds(
-        [
-          [minLng, minLat],
-          [maxLng, maxLat],
-        ],
-        // 1地点だけの日はmaxZoomまで寄る。モーダルを開いたまま選ぶ想定だが、
-        // 地図は全画面なので閉じたときに経路全体が中央に収まる
-        { padding: 60, maxZoom: 15, animate: true }
-      );
+      if (!visitedDate) return;
+      fitMapToSpots(buildVisitPath(visits, { ...filters, visitedDate }, spotById));
     },
-    [filters, setFilters, visits, spotById]
+    [filters, setFilters, visits, spotById, fitMapToSpots]
+  );
+  // 訪問予定リストを選んだとき。そのリストのスポットをリスト順に経路表示し、
+  // 経路全体が画面に収まるよう地図を移動する(「表示しない」時は移動しない)
+  const handleSelectPlanList = useCallback(
+    (value: string) => {
+      const planListId = value || null;
+      setFilters({ ...filters, planListId });
+      if (!planListId) return;
+      fitMapToSpots(buildPlanListPath(planLists, { ...filters, planListId }, spotById));
+    },
+    [filters, setFilters, planLists, spotById, fitMapToSpots]
   );
   // マウント時と、マウント中に種別が切り替わった場合に、その種別の保存済み条件を読む
   useEffect(() => {
@@ -962,6 +1016,70 @@ export default function MapView({
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   // タップされたルート(ルート詳細モーダルの表示対象)
   const [detailRouteId, setDetailRouteId] = useState<string | null>(null);
+
+  // 訪問予定リスト作成モード。buildDraftがあるとき作成モード。addCandidateは
+  // ピンをタップして「リストに追加しますか?」を確認中のスポットID
+  const [buildDraft, setBuildDraft] = useState<PlanListDraft | null>(null);
+  const [addCandidate, setAddCandidate] = useState<string | null>(null);
+  const [savingList, setSavingList] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
+  // ピンのクリックハンドラ(レイヤー作成時に一度だけ束縛される)から現在の作成モードを
+  // 参照するためのref。作成モード中はピンタップを詳細表示でなくリスト追加に回す
+  const buildModeRef = useRef(false);
+  // 作成中は下タブ(NavBar)を隠して、別タブへ移動して入力中の内容を失うのを防ぐ
+  const { setHideNav } = useNavVisibility();
+  useEffect(() => {
+    buildModeRef.current = buildDraft !== null;
+    setHideNav(buildDraft !== null);
+    return () => setHideNav(false);
+  }, [buildDraft, setHideNav]);
+  // マウント時/種別切替時に ?buildList=1 なら下書きを読み込んで作成モードに入る
+  useEffect(() => {
+    if (buildListParam === "1") {
+      setBuildDraft(loadPlanListDraft(spotTypeKey));
+    }
+  }, [buildListParam, spotTypeKey]);
+
+  // ピンのタップ: 作成モード中は追加確認へ、それ以外は従来どおり詳細表示へ
+  const handleSpotSelect = useCallback((id: string) => {
+    if (buildModeRef.current) setAddCandidate(id);
+    else setDetailSpotId(id);
+  }, []);
+
+  const updateBuildDraft = useCallback(
+    (next: PlanListDraft) => {
+      setBuildDraft(next);
+      savePlanListDraft(spotTypeKey, next);
+    },
+    [spotTypeKey]
+  );
+  const completeBuild = useCallback(async () => {
+    if (!buildDraft) return;
+    setSavingList(true);
+    setBuildError(null);
+    const { error } = await api.visitPlanLists.create({
+      type: spotTypeKey,
+      title: buildDraft.title,
+      description: buildDraft.description,
+      start_date: buildDraft.start_date,
+      end_date: buildDraft.end_date,
+      spot_ids: buildDraft.spotIds,
+    });
+    setSavingList(false);
+    if (error) {
+      setBuildError("保存に失敗しました: " + error.message);
+      return;
+    }
+    clearPlanListDraft(spotTypeKey);
+    setBuildDraft(null);
+    router.push(`/${spotTypeKey}/spots`);
+  }, [buildDraft, spotTypeKey, router]);
+  const cancelBuild = useCallback(() => {
+    clearPlanListDraft(spotTypeKey);
+    setBuildDraft(null);
+    setAddCandidate(null);
+    router.push(`/${spotTypeKey}/spots`);
+  }, [spotTypeKey, router]);
 
   // 別種別の重ね表示。選択種別はこの種別の設定としてlocalStorageへ保存し、
   // スポットはその種別のダウンロード済みキャッシュ(IndexedDB)から読む。
@@ -1382,6 +1500,10 @@ export default function MapView({
     const { data } = await api.visits.list();
     setVisits(data ?? []);
   };
+  const loadPlanLists = async () => {
+    const { data } = await api.visitPlanLists.list(spotTypeKey);
+    setPlanLists(data ?? []);
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1434,7 +1556,7 @@ export default function MapView({
   // データ取得(公開スポット・公開ルートはspotCacheが読み込む)
   useEffect(() => {
     (async () => {
-      await Promise.all([loadPrivateSpots(), loadVisits()]);
+      await Promise.all([loadPrivateSpots(), loadVisits(), loadPlanLists()]);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1500,14 +1622,15 @@ export default function MapView({
         route.points.map((p) => p.spot_id)
       )
     );
-    // 選んだ日に訪問したスポット(訪問順の経路の経由地)は、絞り込みで外れていても
-    // 必ず表示する(絞り込みではなくその日の訪問を辿るための表示のため、全条件を免除)
-    const visitPathIds = new Set(
-      buildVisitPath(visits, filters, spotById).map((s) => s.id)
-    );
+    // 選んだ日に訪問したスポット(訪問順の経路)・選んだ訪問予定リストのスポットは、
+    // 絞り込みで外れていても必ず表示する(経路を辿るための表示のため全条件を免除)
+    const pathIds = new Set([
+      ...buildVisitPath(visits, filters, spotById).map((s) => s.id),
+      ...buildPlanListPath(planLists, filters, spotById).map((s) => s.id),
+    ]);
     const filteredSpots = spots.filter(
       (spot) =>
-        visitPathIds.has(spot.id) ||
+        pathIds.has(spot.id) ||
         passesFilters(
           filters,
           spot.series,
@@ -1524,7 +1647,7 @@ export default function MapView({
     );
 
     const renderSpots = async () => {
-      ensureClusterLayers(map, setDetailSpotId);
+      ensureClusterLayers(map, handleSpotSelect);
       showClusterLayers(map);
       // 使われるピン画像(シリーズ×訪問済み×非公開)を先に登録してからデータを流し込む
       // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
@@ -1557,6 +1680,7 @@ export default function MapView({
     spots,
     spotById,
     visits,
+    planLists,
     visitedIds,
     filters,
     runWhenMapReady,
@@ -1573,6 +1697,7 @@ export default function MapView({
 
     const visibleRoutes = filterVisibleRoutes(routes, filters, seriesStyles, spotById);
     const visitPath = buildVisitPath(visits, filters, spotById);
+    const planListPath = buildPlanListPath(planLists, filters, spotById);
 
     runWhenMapReady(() => {
       ensureRouteLayers(map, setDetailRouteId);
@@ -1580,10 +1705,13 @@ export default function MapView({
         | maplibregl.GeoJSONSource
         | undefined;
       source?.setData(
-        buildRouteGeoJSON(map, visibleRoutes, seriesStyles, visitPath)
+        buildRouteGeoJSON(map, visibleRoutes, seriesStyles, [
+          { path: visitPath, color: VISIT_PATH_COLOR },
+          { path: planListPath, color: PLAN_LIST_PATH_COLOR },
+        ])
       );
     });
-  }, [routes, filters, seriesStyles, runWhenMapReady, visits, spotById]);
+  }, [routes, filters, seriesStyles, runWhenMapReady, visits, planLists, spotById]);
 
   // 別種別の重ね表示の描画。絞り込み・経由地ピンの免除は本体と同じロジックを、
   // その種別の保存済み設定・シリーズ設定で適用する(訪問順の経路(緑)は
@@ -1731,7 +1859,11 @@ export default function MapView({
       : null;
 
   return (
-    <div className="relative h-[calc(100dvh-4rem)]">
+    <div
+      className={`relative ${
+        buildDraft ? "h-dvh" : "h-[calc(100dvh-4rem)]"
+      }`}
+    >
       <div ref={containerRef} className="h-full w-full" />
 
       {/* 今表示中のスポット種別と「元の地図に戻る」リンク(左下に小さく表示。
@@ -1867,6 +1999,7 @@ export default function MapView({
                   const resettable =
                     hasActiveFilters(filters) ||
                     filters.visitedDate !== todayKey() ||
+                    filters.planListId !== null ||
                     overlayTypeKey !== null;
                   return (
                     <button
@@ -1932,6 +2065,30 @@ export default function MapView({
                 選んだ日に訪問したスポットを、訪問した順に矢印(緑)で結んで地図に表示します。その日に訪問したスポットは、絞り込みで外れていても表示されます。
               </p>
             </div>
+
+            {/* 訪問予定リスト(旅程)の経路。訪問日と同様、リストのスポットを
+                リスト順に矢印(紫)で結び、選ぶと経路全体が画面に収まる */}
+            {planLists.length > 0 && (
+              <div className="border-t border-gray-100 pt-3">
+                <p className="mb-1 text-sm font-medium">訪問予定リスト</p>
+                <select
+                  aria-label="経路表示する訪問予定リスト"
+                  value={filters.planListId ?? ""}
+                  onChange={(e) => handleSelectPlanList(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
+                >
+                  <option value="">表示しない</option>
+                  {planLists.map((list) => (
+                    <option key={list.id} value={list.id}>
+                      {list.title}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  選んだリストのスポットを、リストの順に矢印(紫)で結んで地図に表示します。リストのスポットは、絞り込みで外れていても表示されます。
+                </p>
+              </div>
+            )}
 
             {spotTypes.filter((t) => t.key !== spotTypeKey).length > 0 &&
               (() => {
@@ -2082,6 +2239,85 @@ export default function MapView({
       {loading && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60">
           <p className="text-sm text-gray-600">読み込み中…</p>
+        </div>
+      )}
+
+      {/* 訪問予定リスト作成モード: 右側パネル(選択済みスポットの並び替え・削除・入力完了) */}
+      {buildDraft && (
+        <PlanBuildPanel
+          title={buildDraft.title}
+          spotIds={buildDraft.spotIds}
+          spotsById={spotById}
+          seriesStyles={seriesStyles}
+          saving={savingList}
+          onReorder={(spotIds) =>
+            updateBuildDraft({ ...buildDraft, spotIds })
+          }
+          onRemove={(spotId) =>
+            updateBuildDraft({
+              ...buildDraft,
+              spotIds: buildDraft.spotIds.filter((s) => s !== spotId),
+            })
+          }
+          onComplete={completeBuild}
+          onCancel={cancelBuild}
+        />
+      )}
+      {buildError && (
+        <div className="absolute left-1/2 top-2 z-30 -translate-x-1/2 rounded-lg bg-red-600 px-3 py-1.5 text-sm text-white shadow">
+          {buildError}
+        </div>
+      )}
+
+      {/* 作成モード中にピンをタップしたとき: リストへ追加するか確認するダイアログ */}
+      {addCandidate && buildDraft && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setAddCandidate(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xs space-y-3 rounded-2xl bg-white p-4"
+          >
+            {(() => {
+              const spot = spotById.get(addCandidate);
+              const already = buildDraft.spotIds.includes(addCandidate);
+              return (
+                <>
+                  <p className="text-sm">
+                    <span className="font-bold">{spot?.name ?? "このスポット"}</span>
+                    {already
+                      ? " はすでにリストに入っています。"
+                      : " を訪問予定リストに追加しますか?"}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAddCandidate(null)}
+                      className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+                    >
+                      {already ? "閉じる" : "キャンセル"}
+                    </button>
+                    {!already && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateBuildDraft({
+                            ...buildDraft,
+                            spotIds: [...buildDraft.spotIds, addCandidate],
+                          });
+                          setAddCandidate(null);
+                        }}
+                        className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
+                      >
+                        追加する
+                      </button>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         </div>
       )}
 

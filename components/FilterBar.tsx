@@ -26,6 +26,12 @@ export interface SpotFilters {
    */
   visitedDate: string | null;
   /**
+   * 訪問予定リスト(旅程)の経路を描く対象リストのID。絞り込みではなく、
+   * 訪問日と同様に、そのリストのスポットをリスト順に矢印で結ぶための対象。
+   * null = 表示しない。地図専用(一覧では使わない)。
+   */
+  planListId: string | null;
+  /**
    * ルート(巡った順の矢印)を地図に表示するか(既定オン)。オンならシリーズ・
    * カテゴリの絞り込みが無くても全ルートを表示し、絞り込み中はそれに連動して
    * 絞られる(`MapView`の`filterVisibleRoutes`)。地図専用の設定だがスポット一覧と
@@ -39,6 +45,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   categories: [],
   visited: [],
   visitedDate: null,
+  planListId: null,
   showRoutes: true,
 };
 
