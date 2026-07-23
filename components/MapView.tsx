@@ -1122,6 +1122,11 @@ export default function MapView({
   const [addSpotAt, setAddSpotAt] = useState<{ lat: number; lng: number } | null>(
     null
   );
+  // 「探訪スポットを追加」(スポット追加と同時に訪問記録をつける)の対象座標
+  const [visitSpotAt, setVisitSpotAt] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   const [pendingSpots, setPendingSpots] = useState<
     { id: string; lat: number; lng: number; name: string; status: string }[]
   >([]);
@@ -2100,9 +2105,18 @@ export default function MapView({
                 setAddSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
                 setContextMenu(null);
               }}
-              className="whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
+              className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
             >
               ここにスポットを追加
+            </button>
+            <button
+              onClick={() => {
+                setVisitSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
+                setContextMenu(null);
+              }}
+              className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
+            >
+              探訪スポットを追加
             </button>
           </div>
         </>
@@ -2134,6 +2148,38 @@ export default function MapView({
               ]);
             }
             setAddSpotAt(null);
+          }}
+        />
+      )}
+
+      {/* 探訪スポット追加モーダル(スポット追加と同時に訪問記録をつける) */}
+      {visitSpotAt && (
+        <AddSpotModal
+          lat={visitSpotAt.lat}
+          lng={visitSpotAt.lng}
+          spotTypeKey={spotTypeKey}
+          spots={spots}
+          role={role}
+          withVisit
+          onClose={() => setVisitSpotAt(null)}
+          onSaved={(spot) => {
+            if (spot.status === "private") {
+              loadPrivateSpots();
+            } else {
+              setPendingSpots((prev) => [
+                ...prev,
+                {
+                  id: spot.id,
+                  lat: spot.lat,
+                  lng: spot.lng,
+                  name: spot.name,
+                  status: spot.status,
+                },
+              ]);
+            }
+            // 訪問記録も同時についたので、訪問済み表示・訪問日の経路を更新する
+            loadVisits();
+            setVisitSpotAt(null);
           }}
         />
       )}
