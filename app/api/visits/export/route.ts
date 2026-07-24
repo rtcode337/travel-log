@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "fs";
 import path from "path";
 import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
-import { parseVisitPhotoPath } from "@/lib/photos";
+import { parseVisitPhotoPath, readVisitPhoto } from "@/lib/photos";
 import { buildCsv } from "@/lib/csv";
 import { formatCategoryList } from "@/lib/category";
 import { buildZip, type ZipEntry } from "@/lib/zip";
@@ -95,14 +94,12 @@ export async function GET(request: Request) {
     for (const relPath of row.photos) {
       const parsed = parseVisitPhotoPath(relPath);
       if (!parsed || parsed.userId !== userId) continue;
-      try {
-        const data = await fs.readFile(parsed.absPath);
-        const zipPath = `photos/${path.posix.basename(relPath)}`;
-        photoEntries.push({ name: zipPath, data });
-        zipPaths.push(zipPath);
-      } catch {
-        // 欠損ファイルはスキップ
-      }
+      // 保存先(ローカルFS / Supabase Storage)はlib/photoStorage.tsが切り替える
+      const data = await readVisitPhoto(parsed.relPath);
+      if (!data) continue; // 欠損はスキップ
+      const zipPath = `photos/${path.posix.basename(relPath)}`;
+      photoEntries.push({ name: zipPath, data: Buffer.from(data) });
+      zipPaths.push(zipPath);
     }
     csvRows.push([
       row.name,
