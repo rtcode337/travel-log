@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { savePlanListDraft } from "@/lib/planListDraft";
+import type { VisitPlanList } from "@/lib/types";
 
 /** 今日のローカル日付(`YYYY-MM-DD`)。開始日の初期値に使う */
 function todayKey(): string {
@@ -12,22 +13,30 @@ function todayKey(): string {
 }
 
 /**
- * 訪問予定リストの新規作成モーダル(基本情報の入力)。タイトル・説明(任意)・
+ * 訪問予定リストの作成・編集モーダル(基本情報の入力)。タイトル・説明(任意)・
  * 訪問予定期間(開始日〜終了日。終了日未入力なら開始日と同じ=単日)を入力し、
- * 「スポットを選ぶ」で下書きを保存して地図の作成モードへ遷移する。
+ * 「スポットを選ぶ/編集」で下書きを保存して地図の作成モードへ遷移する。
+ * `edit`を渡すと既存リストの編集(既存の経由スポットを引き継いで地図で編集し、
+ * 入力完了でPATCHする)。
  */
 export default function VisitPlanListFormModal({
   typeKey,
+  edit,
   onClose,
 }: {
   typeKey: string;
+  /** 指定すると編集モードになり、そのリストの内容を初期値にする */
+  edit?: VisitPlanList;
   onClose: () => void;
 }) {
   const router = useRouter();
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [startDate, setStartDate] = useState(todayKey());
-  const [endDate, setEndDate] = useState("");
+  const [title, setTitle] = useState(edit?.title ?? "");
+  const [description, setDescription] = useState(edit?.description ?? "");
+  const [startDate, setStartDate] = useState(edit?.start_date ?? todayKey());
+  // 単日(開始=終了)は終了日欄を空表示にする(新規と同じ扱い)
+  const [endDate, setEndDate] = useState(
+    edit && edit.end_date !== edit.start_date ? edit.end_date : ""
+  );
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -48,11 +57,13 @@ export default function VisitPlanListFormModal({
       return;
     }
     savePlanListDraft(typeKey, {
+      editingId: edit?.id ?? null,
       title: t,
       description: description.trim() || null,
       start_date: startDate,
       end_date: end,
-      spotIds: [],
+      // 編集時は既存の経由スポットを引き継いで地図で編集する
+      spotIds: edit?.spot_ids ?? [],
     });
     // 地図の作成モードへ。?buildList=1 でMapViewが下書きを読み込んで作成モードに入る
     router.push(`/${typeKey}/map?buildList=1`);
@@ -68,9 +79,11 @@ export default function VisitPlanListFormModal({
         onClick={(e) => e.stopPropagation()}
         className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
       >
-        <h2 className="font-bold">訪問予定リストを追加</h2>
+        <h2 className="font-bold">
+          {edit ? "訪問予定リストを編集" : "訪問予定リストを追加"}
+        </h2>
         <p className="text-xs text-gray-500">
-          リストの基本情報を入力してから、地図でスポットを選びます。
+          リストの基本情報を入力してから、地図でスポットを{edit ? "編集" : "選び"}ます。
         </p>
         <div>
           <label className="mb-1 block text-sm font-medium">タイトル *</label>
@@ -130,7 +143,7 @@ export default function VisitPlanListFormModal({
             type="submit"
             className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
           >
-            スポットを選ぶ →
+            {edit ? "スポットを編集 →" : "スポットを選ぶ →"}
           </button>
         </div>
       </form>

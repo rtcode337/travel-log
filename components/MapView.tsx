@@ -1057,14 +1057,23 @@ export default function MapView({
     if (!buildDraft) return;
     setSavingList(true);
     setBuildError(null);
-    const { error } = await api.visitPlanLists.create({
-      type: spotTypeKey,
-      title: buildDraft.title,
-      description: buildDraft.description,
-      start_date: buildDraft.start_date,
-      end_date: buildDraft.end_date,
-      spot_ids: buildDraft.spotIds,
-    });
+    // 編集中(editingIdあり)はPATCHで更新、新規はPOSTで作成
+    const { error } = buildDraft.editingId
+      ? await api.visitPlanLists.update(buildDraft.editingId, {
+          title: buildDraft.title,
+          description: buildDraft.description,
+          start_date: buildDraft.start_date,
+          end_date: buildDraft.end_date,
+          spot_ids: buildDraft.spotIds,
+        })
+      : await api.visitPlanLists.create({
+          type: spotTypeKey,
+          title: buildDraft.title,
+          description: buildDraft.description,
+          start_date: buildDraft.start_date,
+          end_date: buildDraft.end_date,
+          spot_ids: buildDraft.spotIds,
+        });
     setSavingList(false);
     if (error) {
       setBuildError("保存に失敗しました: " + error.message);
@@ -2246,6 +2255,7 @@ export default function MapView({
       {buildDraft && (
         <PlanBuildPanel
           title={buildDraft.title}
+          editing={buildDraft.editingId !== null}
           spotIds={buildDraft.spotIds}
           spotsById={spotById}
           seriesStyles={seriesStyles}

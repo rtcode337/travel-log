@@ -24,6 +24,7 @@ const LONG_PRESS_MS = 280;
  */
 export default function PlanBuildPanel({
   title,
+  editing = false,
   spotIds,
   spotsById,
   seriesStyles,
@@ -34,6 +35,8 @@ export default function PlanBuildPanel({
   onCancel,
 }: {
   title: string;
+  /** 既存リストの編集中なら見出し・ボタンの文言を「編集/更新」にする */
+  editing?: boolean;
   spotIds: string[];
   spotsById: Map<string, Spot>;
   seriesStyles: SeriesStyleDefinition[];
@@ -121,7 +124,9 @@ export default function PlanBuildPanel({
   return (
     <div className="absolute bottom-0 right-0 top-40 z-20 flex w-2/5 flex-col overflow-hidden rounded-tl-xl bg-white/95 shadow-xl backdrop-blur">
       <div className="border-b border-gray-200 p-3">
-        <p className="text-xs text-gray-500">訪問予定リストを作成中</p>
+        <p className="text-xs text-gray-500">
+          訪問予定リストを{editing ? "編集中" : "作成中"}
+        </p>
         <h2 className="break-words font-bold leading-snug">{title}</h2>
         <p className="mt-0.5 text-xs text-gray-500">
           ピンをタップして追加({spotIds.length}件)
@@ -191,7 +196,7 @@ export default function PlanBuildPanel({
           disabled={saving || spotIds.length === 0}
           className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {saving ? "保存中…" : "入力完了"}
+          {saving ? "保存中…" : editing ? "更新" : "入力完了"}
         </button>
         <button
           type="button"

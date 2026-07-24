@@ -17,6 +17,7 @@ export default function VisitPlanListDetailModal({
   spotsById,
   seriesStyles,
   onClose,
+  onEdit,
   onDeleted,
   onOpenSpot,
 }: {
@@ -24,6 +25,8 @@ export default function VisitPlanListDetailModal({
   spotsById: Map<string, Spot>;
   seriesStyles: SeriesStyleDefinition[];
   onClose: () => void;
+  /** 「編集」で呼ばれる。読み込み済みのリスト内容を渡す(呼び出し側で編集フローへ) */
+  onEdit: (list: VisitPlanList) => void;
   onDeleted: () => void;
   onOpenSpot: (spotId: string) => void;
 }) {
@@ -145,9 +148,16 @@ export default function VisitPlanListDetailModal({
             {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
             <button
               type="button"
+              onClick={() => onEdit(list)}
+              className="mt-4 w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
+            >
+              このリストを編集
+            </button>
+            <button
+              type="button"
               onClick={handleDelete}
               disabled={deleting}
-              className="mt-4 w-full rounded-lg border border-red-300 py-2 text-sm text-red-600 disabled:opacity-50"
+              className="mt-2 w-full rounded-lg border border-red-300 py-2 text-sm text-red-600 disabled:opacity-50"
             >
               {deleting ? "削除中…" : "このリストを削除"}
             </button>
