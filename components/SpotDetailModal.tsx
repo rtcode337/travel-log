@@ -289,13 +289,13 @@ export default function SpotDetailModal({
         ) : (
           <>
             <div className="mb-3 flex items-start justify-between gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <SeriesBadge
                   series={spot.series}
                   seriesStyles={seriesStyles}
                   isPrivate={spot.status === "private"}
                 />
-                <div>
+                <div className="min-w-0">
                   <h2 className="text-lg font-bold leading-tight">
                     {spot.name}
                     {spot.status === "private" && (

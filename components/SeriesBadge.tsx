@@ -28,7 +28,9 @@ export default function SeriesBadge({
 
   return (
     <span
-      className={`inline-flex items-center justify-center overflow-hidden rounded-full px-1.5 font-bold ${
+      // shrink-0: 長いスポット名などと横並びになったときにバッジが潰れてラベルが
+      // 欠けるのを防ぐ(バッジは常にラベルの幅を保ち、隣の要素側で折り返す)
+      className={`inline-flex shrink-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-full px-1.5 font-bold ${
         size === "sm" ? "h-5 min-w-5 text-xs" : "h-6 min-w-6 text-sm"
       }`}
       style={{
