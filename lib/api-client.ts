@@ -300,6 +300,20 @@ export const api = {
         method: "POST",
         body: JSON.stringify(input),
       }),
+    update: (
+      id: string,
+      input: {
+        title: string;
+        description: string | null;
+        start_date: string;
+        end_date: string;
+        spot_ids: string[];
+      }
+    ) =>
+      request<VisitPlanList>(`/api/visit-plan-lists/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/visit-plan-lists/${id}`, {
         method: "DELETE",

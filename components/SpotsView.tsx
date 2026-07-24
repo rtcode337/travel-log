@@ -209,6 +209,8 @@ export default function SpotsView({
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   // 訪問予定リストの新規作成モーダル、詳細表示中のリストID
   const [showListForm, setShowListForm] = useState(false);
+  // 編集対象の訪問予定リスト(詳細の「編集」から。VisitPlanListFormModalのeditに渡す)
+  const [editingList, setEditingList] = useState<VisitPlanList | null>(null);
   const [detailListId, setDetailListId] = useState<string | null>(null);
 
   const [browseMode, setBrowseMode] = useState<BrowseMode>("series");
@@ -896,10 +898,14 @@ export default function SpotsView({
           />
         )}
 
-        {showListForm && (
+        {(showListForm || editingList) && (
           <VisitPlanListFormModal
             typeKey={spotTypeKey}
-            onClose={() => setShowListForm(false)}
+            edit={editingList ?? undefined}
+            onClose={() => {
+              setShowListForm(false);
+              setEditingList(null);
+            }}
           />
         )}
 
@@ -909,6 +915,10 @@ export default function SpotsView({
             spotsById={spotById}
             seriesStyles={seriesStyles}
             onClose={() => setDetailListId(null)}
+            onEdit={(list) => {
+              setDetailListId(null);
+              setEditingList(list);
+            }}
             onDeleted={() => {
               setDetailListId(null);
               loadPlanLists();
