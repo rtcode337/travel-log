@@ -5,6 +5,8 @@
  */
 
 export interface PlanListDraft {
+  /** 既存リストの編集中ならそのID、新規作成なら null */
+  editingId: string | null;
   title: string;
   description: string | null;
   /** `YYYY-MM-DD` */
@@ -44,6 +46,7 @@ export function loadPlanListDraft(typeKey: string): PlanListDraft | null {
       return null;
     }
     return {
+      editingId: typeof d.editingId === "string" ? d.editingId : null,
       title: d.title,
       description: typeof d.description === "string" ? d.description : null,
       start_date: d.start_date,

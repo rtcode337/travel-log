@@ -218,7 +218,9 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 作成フローは、訪問予定欄の「+ 訪問予定リストを追加」→ 基本情報モーダル(`VisitPlanListFormModal`。タイトル・説明・期間)→ **下書きをlocalStorageへ保存**(`lib/planListDraft.ts`。「入力完了」までDBに保存しないため、SpotsView→MapViewのページ遷移をまたいで保持する必要がある)→ `/[type]/map?buildList=1`へ遷移して**地図の作成モード**に入る。作成モードでは`MapView`が右側に`PlanBuildPanel`(リスト名・選択済みスポットの並び替え/削除・「入力完了」)を出し、**ピンのタップを詳細表示ではなく追加確認ダイアログに回す**(`buildModeRef`で`ensureClusterLayers`が一度だけ束縛するクリックハンドラ`handleSpotSelect`の分岐を切り替える)。並び替えはタッチでも動くようポインタイベントの自前実装(ライブラリ非依存。3本線ハンドル)。「入力完了」で`POST /api/visit-plan-lists`(`{ type, title, description, start_date, end_date, spot_ids }`。spot_idsはseq順)して下書きを消し`/[type]/spots`へ戻る。
 
-一覧APIは`GET /api/visit-plan-lists?type=<キー>`で、各リストの経由スポットを**seq順の`spot_ids`(UUID配列)**として返す(スポット詳細は呼び出し側が保持済みの一覧から解決するため軽い)。リストのタップで`VisitPlanListDetailModal`(タイトル・説明・期間・経由スポット一覧・リスト削除)。`GET/DELETE /api/visit-plan-lists/[id]`は作成者本人のみ。
+一覧APIは`GET /api/visit-plan-lists?type=<キー>`で、各リストの経由スポットを**seq順の`spot_ids`(UUID配列)**として返す(スポット詳細は呼び出し側が保持済みの一覧から解決するため軽い)。リストのタップで`VisitPlanListDetailModal`(タイトル・説明・期間・経由スポット一覧・編集・削除)。`GET/PATCH/DELETE /api/visit-plan-lists/[id]`は作成者本人のみ。
+
+**編集は作成フローを再利用する**。詳細の「編集」→ `VisitPlanListFormModal`(`edit`propに既存リストを渡して基本情報を初期表示)→ 下書きに`editingId`と既存の`spotIds`を入れて地図の作成モードへ → スポットを足す/外す/並び替えて「更新」で`PATCH /api/visit-plan-lists/[id]`。PATCHは基本情報を更新し、経由スポットは受け取った`spot_ids`で**丸ごと置き換える**(items全削除→seq付きで入れ直し)。作成モードは下書きの`editingId`の有無で「入力完了(新規=POST)」と「更新(編集=PATCH)」を出し分ける(`completeBuild`)。
 
 ### touristのシリーズについて
 
