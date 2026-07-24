@@ -204,13 +204,15 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 ### `reviews`と`visits`の非対称設計
 
-`reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、シリーズの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される。`photos`(text[])にはBase64ではなく、`photos/`フォルダ(docker-composeでbindマウント、`lib/photos.ts`)へ保存したファイルの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。訪問記録はスポット詳細の訪問履歴から後から編集できる(`VisitFormModal`の編集モード=`visit` prop+PATCH `/api/visits/[id]`。写真は「既存の相対パス=残す」「data URL=新規追加」の混在で受け取り、相対パスはその訪問記録が現在持つものに限定して検証、外された写真のファイルはDB更新成功後に削除する。口コミは訪問記録と独立のデータのため編集モードでは入力欄を出さない)。
+`reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、シリーズの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される。`photos`(text[])にはBase64ではなく、保存先からの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する(`lib/photos.ts`)。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
+
+**写真の保存先は`PHOTO_STORAGE`環境変数で切り替えられる**(`lib/photoStorage.ts`の`PhotoStorage`インターフェース)。`fs`(既定)はローカルのファイルシステム(docker-composeが`./photos`を`/app/photos`にbindマウント。Docker運用はこちら。`PHOTOS_DIR`で変更可)、`supabase`はSupabase Storage(`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`/`SUPABASE_STORAGE_BUCKET`)。**永続ディスクを持てないホスト(Vercel等のサーバーレスやボリューム無しのコンテナホスト)へ載せるための切り替え**で、DBが`DATABASE_URL`だけで差し替わるのと同じ考え方。Supabase StorageはRESTが素直なのでSDKを足さず素の`fetch`だけで実装している(依存を増やさない方針。S3/R2直はSigV4署名が要るため未対応 — 足すならこのインターフェースに実装を1つ追加するだけ)。どの保存先でも公開URLは使わず、必ず認証付き配信ルートから読み出して返す(写真は非公開のため)。`lib/photos.ts`はパスの生成・検証とdata URLのデコードだけを持ち、保存先には依存しない(読み出しは`readVisitPhoto`に集約)。訪問記録はスポット詳細の訪問履歴から後から編集できる(`VisitFormModal`の編集モード=`visit` prop+PATCH `/api/visits/[id]`。写真は「既存の相対パス=残す」「data URL=新規追加」の混在で受け取り、相対パスはその訪問記録が現在持つものに限定して検証、外された写真のファイルはDB更新成功後に削除する。口コミは訪問記録と独立のデータのため編集モードでは入力欄を出さない)。
 
 `visits.visited_on`(timestamptz、nullable)は訪問した日時で、未入力なら`null`=表示は「時期不明」(`formatVisitedOn`)。入力は`datetime-local`のため常にローカル時刻で、送信時にISO 8601(UTC)へ変換してから渡す(文字列のまま送るとDB側がサーバーのタイムゾーンで解釈してずれる)。訪問記録フォーム(`VisitFormModal`)で写真を選ぶと、その写真のExif撮影日時を訪問日時欄に入れるボタンが出る(自動では入れない。複数枚選んだ場合は最も古い撮影日時)。Exifの読み取りは依存を増やさず`lib/exif.ts`の自前実装(JPEGのAPP1から`DateTimeOriginal`、無ければIFD0の`DateTime`だけを読む)で、縮小前の元ファイルから読む — canvasで描き直した時点でExifは失われるため。Exifの日時にはタイムゾーンが無いので端末のローカル時刻として解釈する(datetime-localの扱いと揃う)。Exifが無い・JPEG以外(HEICなど)・壊れている場合は例外を投げずボタンを出さないだけにする。
 
 かつては`date`型+`date_precision`列(`day`/`month`/`year`/`unknown`)で「年だけ分かる」等の粒度を持たせ、表示時に年月日を落としていたが、入力の手間に対して使われず廃止した(列ごと削除)。
 
-自分の訪問記録は`/[type]/spots`の「最近の訪問場所」見出し右のボタンからZIPで一括エクスポートできる(`GET /api/visits/export?type=<種別キー>`。typeは必須で、その種別の分のみ。種別横断のエクスポートは意図的に持たない)。ZIPの中身は`visits.csv`(BOM付きUTF-8。訪問のメモ+スポット情報、`lib/csv.ts`の`buildCsv`)と`photos/<uuid>.<ext>`(添付写真。CSVの「写真」列がこのZIP内パスを指す)。ZIP生成は依存を増やさず`lib/zip.ts`の自前実装(無圧縮STORE。中身が圧縮済み画像と小さなCSVのみのため)で、写真ファイルは配信APIと同じく`parseVisitPhotoPath`の所有者チェックを通ったものだけを読む。
+自分の訪問記録は`/[type]/spots`の「最近の訪問場所」見出し右のボタンからZIPで一括エクスポートできる(`GET /api/visits/export?type=<種別キー>`。typeは必須で、その種別の分のみ。種別横断のエクスポートは意図的に持たない)。ZIPの中身は`visits.csv`(BOM付きUTF-8。訪問のメモ+スポット情報、`lib/csv.ts`の`buildCsv`)と`photos/<uuid>.<ext>`(添付写真。CSVの「写真」列がこのZIP内パスを指す)。ZIP生成は依存を増やさず`lib/zip.ts`の自前実装(無圧縮STORE。中身が圧縮済み画像と小さなCSVのみのため)で、写真は配信APIと同じく`parseVisitPhotoPath`の所有者チェックを通ったものだけを`readVisitPhoto`で読む(保存先の切り替えに追随する)。
 
 ### 訪問予定リスト(旅程)
 

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "fs";
 import { getCurrentUserId } from "@/lib/auth/current-user";
-import { parseVisitPhotoPath } from "@/lib/photos";
+import { parseVisitPhotoPath, readVisitPhoto } from "@/lib/photos";
 
 /**
  * 訪問記録の写真を配信する。写真は非公開のため、パスの先頭セグメント
@@ -23,10 +22,9 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  let body: Uint8Array<ArrayBuffer>;
-  try {
-    body = Uint8Array.from(await fs.readFile(parsed.absPath));
-  } catch {
+  // 保存先(ローカルFS / Supabase Storage)はlib/photoStorage.tsが切り替える
+  const body = await readVisitPhoto(parsed.relPath);
+  if (!body) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
