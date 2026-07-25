@@ -547,21 +547,36 @@ function buildPlanListPath(
 /**
  * ルートと、地図に重ねる色付きの経路(訪問順の経路・訪問予定リストの経路)を
  * GeoJSONのLineString群にする。矢印画像の登録もここで済ませる。
+ * `start`([lng, lat])を渡した経路は、その座標を先頭に繋いで描く
+ * (訪問予定リストの経路で「現在地→リスト先頭のスポット」の線を引くのに使う。
+ * 経路のスポットが1件も無いときは始点だけでは線にならないため繋がない)。
  */
 function buildRouteGeoJSON(
   map: maplibregl.Map,
   routes: SpotRoute[],
   seriesStyles: SeriesStyleDefinition[],
-  extraPaths: { path: Spot[]; color: string; kind?: "visit" | "plan" }[]
+  extraPaths: {
+    path: Spot[];
+    color: string;
+    kind?: "visit" | "plan";
+    start?: [number, number] | null;
+  }[]
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, RouteFeatureProps> {
   const extraFeatures: GeoJSON.Feature<GeoJSON.LineString, RouteFeatureProps>[] =
     extraPaths
-      .filter((p) => p.path.length >= 2)
       .map((p) => ({
-        type: "Feature",
+        ...p,
+        coordinates: [
+          ...(p.start && p.path.length > 0 ? [p.start] : []),
+          ...p.path.map((s): [number, number] => [s.lng, s.lat]),
+        ],
+      }))
+      .filter((p) => p.coordinates.length >= 2)
+      .map((p) => ({
+        type: "Feature" as const,
         geometry: {
-          type: "LineString",
-          coordinates: p.path.map((s) => [s.lng, s.lat]),
+          type: "LineString" as const,
+          coordinates: p.coordinates,
         },
         properties: {
           color: p.color,
@@ -944,6 +959,12 @@ export default function MapView({
   const [visits, setVisits] = useState<Visit[]>([]);
   // 訪問予定リスト(絞り込みモーダルの「訪問予定リスト」セレクトで経路表示に使う)
   const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
+  // 現在地(GeolocateControlの青丸)の最新座標([lng, lat])。青丸の表示中だけ持ち
+  // (青丸ごと消えるOFFでnullに戻す)、訪問予定リストの経路表示で
+  // 「現在地→リスト先頭のスポット」の線を引くのに使う
+  const [currentLocation, setCurrentLocation] = useState<
+    [number, number] | null
+  >(null);
   // 経路表示するリストに、本体種別に無い(別スポット種別を重ねて追加した)スポットが
   // あるとき、その座標を api.spots.get で補完して経路に含める。resolvedRefで再取得を防ぐ
   const [planListExtraSpots, setPlanListExtraSpots] = useState<Map<string, Spot>>(
@@ -1525,6 +1546,17 @@ export default function MapView({
     };
     const handleTrackingEnd = () => {
       lastTrackingActive = false;
+      // このイベントはOFF(青丸ごと消える)だけでなくドラッグによるBACKGROUND
+      // (青丸は残る)でも発火するため、青丸のDOM要素が消えたかどうかでOFFを
+      // 見分けて現在地を忘れる。青丸の除去はこのイベントの後に行われることが
+      // あるため、1tick置いてから確認する
+      setTimeout(() => {
+        if (
+          !map.getContainer().querySelector(".maplibregl-user-location-dot")
+        ) {
+          setCurrentLocation(null);
+        }
+      }, 0);
     };
     geolocate.on("trackuserlocationstart", handleTrackingStart);
     geolocate.on("trackuserlocationend", handleTrackingEnd);
@@ -1571,7 +1603,17 @@ export default function MapView({
     };
 
     // 青丸は初回測位時に生成されるため、geolocate イベントで初めて子要素として差し込む
-    const handleGeolocate = () => {
+    const handleGeolocate = (e: GeolocationPosition) => {
+      // 訪問予定リストの経路の始点(現在地→先頭スポットの線)に使う現在地を覚える。
+      // 測位のたびの微小な揺れで再レンダーしないよう、約1m未満の変化は無視する
+      const { longitude, latitude } = e.coords;
+      setCurrentLocation((prev) =>
+        prev &&
+        Math.abs(prev[0] - longitude) < 1e-5 &&
+        Math.abs(prev[1] - latitude) < 1e-5
+          ? prev
+          : [longitude, latitude]
+      );
       if (!coneAttached) {
         const dot = map
           .getContainer()
@@ -2032,7 +2074,13 @@ export default function MapView({
       source?.setData(
         buildRouteGeoJSON(map, visibleRoutes, seriesStyles, [
           { path: visitPath, color: VISIT_PATH_COLOR, kind: "visit" },
-          { path: planListPath, color: PLAN_LIST_PATH_COLOR, kind: "plan" },
+          {
+            path: planListPath,
+            color: PLAN_LIST_PATH_COLOR,
+            kind: "plan",
+            // 現在地(青丸)を表示中は、現在地からリスト先頭のスポットまでも結ぶ
+            start: currentLocation,
+          },
         ])
       );
     });
@@ -2045,6 +2093,7 @@ export default function MapView({
     planLists,
     spotById,
     planPathSpotById,
+    currentLocation,
     openRouteDetail,
     openPathDetail,
   ]);
