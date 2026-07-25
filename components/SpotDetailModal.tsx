@@ -70,6 +70,7 @@ export default function SpotDetailModal({
   readOnly = false,
   onClose,
   onVisitChange,
+  onVisitRecorded,
   onSpotChange,
   onSpotDeleted,
   onVisitPlanChange,
@@ -88,6 +89,10 @@ export default function SpotDetailModal({
   onClose: () => void;
   /** 訪問記録の追加・削除があったときに呼ばれる(呼び出し元の一覧・バッジ更新用) */
   onVisitChange?: () => void;
+  /** 新しい訪問記録が追加されたときだけ、そのスポットIDとともに呼ばれる
+   * (地図で経路表示中の訪問予定リストから、訪問済みスポットを自動で外すのに使う。
+   *  訪問記録の編集・削除では呼ばれない) */
+  onVisitRecorded?: (spotId: string) => void;
   /** スポット自体の編集・承認/却下で内容が変わったときに、変更後の内容とともに呼ばれる
    * (呼び出し元の一覧の再取得・公開スポットキャッシュの更新用) */
   onSpotChange?: (spot: Spot) => void;
@@ -648,6 +653,8 @@ export default function SpotDetailModal({
             // 訪問記録時、サーバー側で訪問予定からも自動的に外れる
             onVisitPlanChange?.();
             onReviewChange?.();
+            // 地図で経路表示中の訪問予定リストから、訪問済みスポットを自動で外す
+            onVisitRecorded?.(spot.id);
           }}
         />
       )}
