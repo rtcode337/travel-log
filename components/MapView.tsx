@@ -1355,6 +1355,111 @@ export default function MapView({
     geolocate.on("trackuserlocationend", handleTrackingEnd);
     geolocate.on("error", handleTrackingEnd);
 
+    // 現在地追跡中に「端末が向いている方向」を Google マップ風の扇形コーンで表示する。
+    // MapLibre の GeolocateControl には Mapbox の showUserHeading 相当が無いため自前で用意する。
+    // コーンは現在地の青丸(.maplibregl-user-location-dot)の子要素として重ねるので、
+    // 青丸が addTo / remove されるのに合わせて表示・非表示と位置が自動で同期する。
+    // 向きは端末のコンパス(DeviceOrientation)から取り、地図の回転(bearing)ぶんは CSS で補正する。
+    const headingCone = document.createElement("div");
+    headingCone.className = "tl-heading-cone";
+    headingCone.setAttribute("aria-hidden", "true");
+    headingCone.style.display = "none";
+    headingCone.innerHTML =
+      '<svg viewBox="0 0 96 96" width="96" height="96">' +
+      '<defs><linearGradient id="tlHeadingGrad" x1="0" y1="38" x2="0" y2="8"' +
+      ' gradientUnits="userSpaceOnUse">' +
+      '<stop offset="0" stop-color="#1a73e8" stop-opacity="0.5"/>' +
+      '<stop offset="1" stop-color="#1a73e8" stop-opacity="0"/>' +
+      "</linearGradient></defs>" +
+      '<path d="M48 38 L30 8 A40 40 0 0 1 66 8 Z" fill="url(#tlHeadingGrad)"/>' +
+      "</svg>";
+
+    let coneAttached = false;
+    let lastHeading: number | null = null; // 端末が向く方位(真北からの時計回り度)。未取得は null
+    let displayedAngle = 0; // CSS に渡す連続角度(360 度をまたぐ空回りを防ぐため巻き戻さない)
+
+    const renderCone = () => {
+      if (lastHeading === null) {
+        headingCone.style.display = "none";
+        return;
+      }
+      headingCone.style.display = "";
+      // 画面上での見かけの角度 = 端末方位 - 地図の向き。境界で遠回りしないよう差分を ±180 度に丸める
+      const target = lastHeading - map.getBearing();
+      const delta = ((target - displayedAngle + 540) % 360) - 180;
+      displayedAngle += delta;
+      headingCone.style.transform = `translate(-50%, -50%) rotate(${displayedAngle}deg)`;
+    };
+
+    // 青丸は初回測位時に生成されるため、geolocate イベントで初めて子要素として差し込む
+    const handleGeolocate = () => {
+      if (!coneAttached) {
+        const dot = map
+          .getContainer()
+          .querySelector<HTMLElement>(".maplibregl-user-location-dot");
+        if (dot) {
+          dot.appendChild(headingCone);
+          coneAttached = true;
+        }
+      }
+      renderCone();
+    };
+    geolocate.on("geolocate", handleGeolocate);
+    map.on("rotate", renderCone);
+
+    const handleOrientation = (
+      e: DeviceOrientationEvent & { webkitCompassHeading?: number },
+    ) => {
+      let heading: number | null = null;
+      if (typeof e.webkitCompassHeading === "number") {
+        // iOS: 真北からの時計回り度がそのまま得られる
+        heading = e.webkitCompassHeading;
+      } else if (e.absolute && typeof e.alpha === "number") {
+        // その他: 絶対方位センサーの alpha(反時計回り)から換算する
+        heading = (360 - e.alpha) % 360;
+      }
+      if (heading === null || Number.isNaN(heading)) return;
+      lastHeading = heading;
+      renderCone();
+    };
+
+    let orientationStarted = false;
+    const startOrientation = () => {
+      if (orientationStarted) return;
+      orientationStarted = true;
+      // 絶対方位(deviceorientationabsolute)を優先し、無い環境は deviceorientation にフォールバック
+      window.addEventListener(
+        "deviceorientationabsolute",
+        handleOrientation as EventListener,
+      );
+      window.addEventListener(
+        "deviceorientation",
+        handleOrientation as EventListener,
+      );
+    };
+
+    // iOS 13+ はユーザー操作を起点にした明示許可が要る。現在地ボタンのタップを起点にする。
+    // ボタンは onAdd 内で非同期生成されるため、コンテナへのイベント委譲(キャプチャ)で拾う。
+    const orientationApi = DeviceOrientationEvent as unknown as {
+      requestPermission?: () => Promise<"granted" | "denied">;
+    };
+    const handleContainerClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest(".maplibregl-ctrl-geolocate")) return;
+      orientationApi
+        .requestPermission?.()
+        .then((res) => {
+          if (res === "granted") startOrientation();
+        })
+        .catch(() => {});
+    };
+    if (typeof orientationApi.requestPermission === "function") {
+      map.getContainer().addEventListener("click", handleContainerClick, true);
+    } else {
+      // 許可が不要な環境(Android / PC)は初めから購読しておく
+      startOrientation();
+    }
+
     const saveView = () => {
       lastViews.set(spotTypeKey, {
         center: map.getCenter().toArray() as [number, number],
@@ -1442,6 +1547,18 @@ export default function MapView({
       geolocate.off("trackuserlocationstart", handleTrackingStart);
       geolocate.off("trackuserlocationend", handleTrackingEnd);
       geolocate.off("error", handleTrackingEnd);
+      geolocate.off("geolocate", handleGeolocate);
+      map.off("rotate", renderCone);
+      window.removeEventListener(
+        "deviceorientationabsolute",
+        handleOrientation as EventListener,
+      );
+      window.removeEventListener(
+        "deviceorientation",
+        handleOrientation as EventListener,
+      );
+      map.getContainer().removeEventListener("click", handleContainerClick, true);
+      headingCone.remove();
       container.removeEventListener("touchstart", handleTouchStart);
       container.removeEventListener("touchmove", handleTouchMove);
       container.removeEventListener("touchend", clearLongPress);
