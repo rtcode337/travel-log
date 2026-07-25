@@ -25,6 +25,7 @@ import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
+import AddToPlanListModal from "@/components/AddToPlanListModal";
 
 /** Wikipediaの公式ロゴマーク(Simple Icons、CC0) */
 function WikipediaIcon({ className }: { className?: string }) {
@@ -113,6 +114,8 @@ export default function SpotDetailModal({
   const [showEditForm, setShowEditForm] = useState(false);
   // Wikipediaから取得したスポット情報(写真+概要)のモーダル表示
   const [showInfo, setShowInfo] = useState(false);
+  // 「訪問予定リストへ追加」モーダルの表示
+  const [showAddToList, setShowAddToList] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [planned, setPlanned] = useState(false);
@@ -474,7 +477,7 @@ export default function SpotDetailModal({
                   )}
                 </div>
                 {!readOnly && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap justify-end gap-2">
                     <button
                       onClick={toggleVisitPlan}
                       disabled={planUpdating}
@@ -485,6 +488,12 @@ export default function SpotDetailModal({
                       }`}
                     >
                       {planned ? "訪問予定をはずす" : "訪問予定にする"}
+                    </button>
+                    <button
+                      onClick={() => setShowAddToList(true)}
+                      className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
+                    >
+                      予定リストに追加
                     </button>
                     <button
                       onClick={() => setShowForm(true)}
@@ -722,6 +731,14 @@ export default function SpotDetailModal({
             setSpot(updated);
             onSpotChange?.(updated);
           }}
+        />
+      )}
+      {showAddToList && typeKey && (
+        <AddToPlanListModal
+          spotId={spotId}
+          spotName={spot?.name}
+          typeKey={typeKey}
+          onClose={() => setShowAddToList(false)}
         />
       )}
     </div>
