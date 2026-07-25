@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api-client";
 import { formatPlanDateRange } from "@/lib/planListDraft";
 import type { Spot, VisitPlanList } from "@/lib/types";
@@ -34,6 +34,10 @@ export default function VisitPlanListDetailModal({
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 呼び出し側の spotsById に無い(＝別スポット種別を重ねて追加した)スポットを
+  // IDから個別取得して補完する。resolvedRef で一度取得したIDの再取得を防ぐ
+  const [extraSpots, setExtraSpots] = useState<Map<string, Spot>>(new Map());
+  const resolvedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     api.visitPlanLists.get(listId).then(({ data }) => {
@@ -41,6 +45,28 @@ export default function VisitPlanListDetailModal({
       setLoading(false);
     });
   }, [listId]);
+
+  // 別種別スポット(spotsById に無いID)を api.spots.get で解決する
+  useEffect(() => {
+    if (!list) return;
+    const missing = list.spot_ids.filter(
+      (id) => !spotsById.has(id) && !resolvedRef.current.has(id)
+    );
+    if (missing.length === 0) return;
+    missing.forEach((id) => resolvedRef.current.add(id));
+    let cancelled = false;
+    Promise.all(missing.map((id) => api.spots.get(id))).then((results) => {
+      if (cancelled) return;
+      setExtraSpots((prev) => {
+        const next = new Map(prev);
+        for (const { data } of results) if (data) next.set(data.id, data);
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [list, spotsById]);
 
   const handleDelete = async () => {
     if (!list) return;
@@ -99,7 +125,7 @@ export default function VisitPlanListDetailModal({
 
             <ol className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
               {list.spot_ids.map((spotId, i) => {
-                const spot = spotsById.get(spotId);
+                const spot = spotsById.get(spotId) ?? extraSpots.get(spotId);
                 return (
                   <li key={spotId}>
                     <button
