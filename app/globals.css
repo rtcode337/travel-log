@@ -16,3 +16,22 @@ body {
 .maplibregl-marker:has(> .maplibregl-user-location-accuracy-circle) {
   pointer-events: none;
 }
+
+/* 現在地追跡中に端末が向いている方向を示す扇形コーン(Google マップ風)。
+   現在地の青丸の子として重ね、青丸の中心を軸に回す(回転角は JS が設定する)。
+   青丸(15px)より大きくはみ出して見せるので overflow は切らない */
+.tl-heading-cone {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 96px;
+  height: 96px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  transition: transform 0.12s ease-out;
+  will-change: transform;
+}
+.tl-heading-cone svg {
+  display: block;
+}
