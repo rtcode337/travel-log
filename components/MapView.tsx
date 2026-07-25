@@ -1365,16 +1365,17 @@ export default function MapView({
     headingCone.setAttribute("aria-hidden", "true");
     headingCone.style.display = "none";
     // 開き角 約95度・長めの扇形。濃い色の地図上でも見えるよう、根元の不透明度は高めにして
-      // 先端に向けて透明にフェードさせる。中心(60,60)が青丸=回転軸で、先端は少し上に置く
+      // 先端に向けて透明にフェードさせる。中心(60,60)が青丸=回転軸で、扇の先端もそこに置く
+      // (先端は青丸の背面に隠れ、丸の縁から扇が広がって見える。z-index は CSS で背面に回す)
     headingCone.innerHTML =
       '<svg viewBox="0 0 120 120" width="120" height="120">' +
-      '<defs><linearGradient id="tlHeadingGrad" x1="0" y1="52" x2="0" y2="6"' +
+      '<defs><linearGradient id="tlHeadingGrad" x1="0" y1="60" x2="0" y2="6"' +
       ' gradientUnits="userSpaceOnUse">' +
       '<stop offset="0" stop-color="#1a73e8" stop-opacity="0.6"/>' +
       '<stop offset="0.55" stop-color="#1a73e8" stop-opacity="0.3"/>' +
       '<stop offset="1" stop-color="#1a73e8" stop-opacity="0"/>' +
       "</linearGradient></defs>" +
-      '<path d="M60 52 L12 8 Q60 -6 108 8 Z" fill="url(#tlHeadingGrad)"/>' +
+      '<path d="M60 60 L12 8 Q60 -6 108 8 Z" fill="url(#tlHeadingGrad)"/>' +
       "</svg>";
 
     let coneAttached = false;
