@@ -122,7 +122,7 @@ export default function PlanBuildPanel({
   };
 
   return (
-    <div className="absolute bottom-0 right-0 top-40 z-20 flex w-2/5 flex-col overflow-hidden rounded-tl-xl bg-white/95 shadow-xl backdrop-blur">
+    <div className="absolute bottom-0 right-0 top-40 z-20 flex w-2/5 max-w-sm flex-col overflow-hidden rounded-tl-xl bg-white/95 shadow-xl backdrop-blur">
       <div className="border-b border-gray-200 p-3">
         <p className="text-xs text-gray-500">
           訪問予定リストを{editing ? "編集中" : "作成中"}
