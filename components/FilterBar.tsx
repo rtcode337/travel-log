@@ -9,6 +9,7 @@ import {
 } from "@/lib/seriesStyle";
 import { getCategoryOrder } from "@/lib/category";
 import SeriesFilter from "@/components/SeriesFilter";
+import HelpTip from "@/components/HelpTip";
 
 export type VisitedValue = "visited" | "unvisited";
 
@@ -38,6 +39,13 @@ export interface SpotFilters {
    * 型を共用しているため、一覧側では単に使われないだけ
    */
   showRoutes: boolean;
+  /**
+   * 「これだけを表示」で1つの経路だけに絞っている状態。'visit'=訪問順の経路(訪問日)の
+   * スポットだけ、'plan'=訪問予定リストのスポットだけを地図に表示し、他のスポット・
+   * ルート・もう一方の経路は隠す。null=通常(絞り込みに従って表示)。地図専用の設定で、
+   * 対象(visitedDate / planListId)が無いときは無視される
+   */
+  isolate: "visit" | "plan" | null;
 }
 
 export const DEFAULT_FILTERS: SpotFilters = {
@@ -47,6 +55,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   visitedDate: null,
   planListId: null,
   showRoutes: true,
+  isolate: null,
 };
 
 /**
@@ -314,9 +323,12 @@ export default function FilterBar({
       </div>
 
       {showRouteToggle && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-gray-500">
+        <div className="border-t border-gray-100 pt-3">
+          <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-gray-500">
             ルート
+            <HelpTip>
+              オンにすると、巡った順の矢印(ルート)を地図に表示します。シリーズ・カテゴリで絞り込み中は、該当するルートだけに絞られます。
+            </HelpTip>
           </span>
           <div className="flex flex-wrap gap-1.5">
             <Chip
@@ -328,9 +340,6 @@ export default function FilterBar({
               }
             />
           </div>
-          <p className="mt-1 text-xs text-gray-500">
-            オンにすると、巡った順の矢印(ルート)を地図に表示します。シリーズ・カテゴリで絞り込み中は、該当するルートだけに絞られます。
-          </p>
         </div>
       )}
 
