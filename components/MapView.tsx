@@ -911,6 +911,12 @@ export default function MapView({
   const [visits, setVisits] = useState<Visit[]>([]);
   // 訪問予定リスト(絞り込みモーダルの「訪問予定リスト」セレクトで経路表示に使う)
   const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
+  // 経路表示するリストに、本体種別に無い(別スポット種別を重ねて追加した)スポットが
+  // あるとき、その座標を api.spots.get で補完して経路に含める。resolvedRefで再取得を防ぐ
+  const [planListExtraSpots, setPlanListExtraSpots] = useState<Map<string, Spot>>(
+    new Map()
+  );
+  const planListResolvedRef = useRef<Set<string>>(new Set());
   const visitedIds = useMemo(
     () => new Set(visits.map((v) => v.spot_id)),
     [visits]
@@ -920,6 +926,12 @@ export default function MapView({
     for (const s of spots) m.set(s.id, s);
     return m;
   }, [spots]);
+  // 訪問予定リストの経路を組むときのスポット解決用。本体スポットに、別種別スポットの
+  // 補完(planListExtraSpots)を足す。補完が無いときは spotById をそのまま使う(参照維持)
+  const planPathSpotById = useMemo(() => {
+    if (planListExtraSpots.size === 0) return spotById;
+    return new Map([...spotById, ...planListExtraSpots]);
+  }, [spotById, planListExtraSpots]);
   /**
    * 訪問順の経路の対象日を選ぶドロップダウン用に、この種別のスポットへ訪問した
    * 日の一覧(新しい順)。他の種別の訪問しかない日は経路が0件になるため除く。
@@ -1003,10 +1015,38 @@ export default function MapView({
       const planListId = value || null;
       setFilters({ ...filters, planListId });
       if (!planListId) return;
-      fitMapToSpots(buildPlanListPath(planLists, { ...filters, planListId }, spotById));
+      fitMapToSpots(
+        buildPlanListPath(planLists, { ...filters, planListId }, planPathSpotById)
+      );
     },
-    [filters, setFilters, planLists, spotById, fitMapToSpots]
+    [filters, setFilters, planLists, planPathSpotById, fitMapToSpots]
   );
+
+  // 経路表示中のリストに本体種別で解決できないスポット(別種別を重ねて追加したもの)が
+  // あれば、api.spots.get で座標を補完する(経路線から抜けないように)
+  useEffect(() => {
+    const listId = filters.planListId;
+    if (!listId) return;
+    const list = planLists.find((l) => l.id === listId);
+    if (!list) return;
+    const missing = list.spot_ids.filter(
+      (id) => !spotById.has(id) && !planListResolvedRef.current.has(id)
+    );
+    if (missing.length === 0) return;
+    missing.forEach((id) => planListResolvedRef.current.add(id));
+    let cancelled = false;
+    Promise.all(missing.map((id) => api.spots.get(id))).then((results) => {
+      if (cancelled) return;
+      setPlanListExtraSpots((prev) => {
+        const next = new Map(prev);
+        for (const { data } of results) if (data) next.set(data.id, data);
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.planListId, planLists, spotById]);
   // マウント時と、マウント中に種別が切り替わった場合に、その種別の保存済み条件を読む
   useEffect(() => {
     setFiltersState(loadSavedFilters(spotTypeKey));
@@ -1779,7 +1819,7 @@ export default function MapView({
     // 絞り込みで外れていても必ず表示する(経路を辿るための表示のため全条件を免除)
     const pathIds = new Set([
       ...buildVisitPath(visits, filters, spotById).map((s) => s.id),
-      ...buildPlanListPath(planLists, filters, spotById).map((s) => s.id),
+      ...buildPlanListPath(planLists, filters, planPathSpotById).map((s) => s.id),
     ]);
     const filteredSpots = spots.filter(
       (spot) =>
@@ -1832,6 +1872,7 @@ export default function MapView({
   }, [
     spots,
     spotById,
+    planPathSpotById,
     visits,
     planLists,
     visitedIds,
@@ -1850,7 +1891,7 @@ export default function MapView({
 
     const visibleRoutes = filterVisibleRoutes(routes, filters, seriesStyles, spotById);
     const visitPath = buildVisitPath(visits, filters, spotById);
-    const planListPath = buildPlanListPath(planLists, filters, spotById);
+    const planListPath = buildPlanListPath(planLists, filters, planPathSpotById);
 
     runWhenMapReady(() => {
       ensureRouteLayers(map, setDetailRouteId);
@@ -1864,7 +1905,16 @@ export default function MapView({
         ])
       );
     });
-  }, [routes, filters, seriesStyles, runWhenMapReady, visits, planLists, spotById]);
+  }, [
+    routes,
+    filters,
+    seriesStyles,
+    runWhenMapReady,
+    visits,
+    planLists,
+    spotById,
+    planPathSpotById,
+  ]);
 
   // 別種別の重ね表示の描画。絞り込み・経由地ピンの免除は本体と同じロジックを、
   // その種別の保存済み設定・シリーズ設定で適用する(訪問順の経路(緑)は
