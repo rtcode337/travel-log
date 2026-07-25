@@ -1047,6 +1047,32 @@ export default function MapView({
       cancelled = true;
     };
   }, [filters.planListId, planLists, spotById]);
+
+  // 地図で訪問予定リストを経路表示中に、そのリスト内のスポットへ新しく訪問記録したら、
+  // 自動でそのスポットをリストから外す(訪問済みが経路に残り続けないように)。
+  // 表示中のリスト(filters.planListId)にそのスポットが含まれるときだけ動く
+  const handleVisitRecorded = useCallback(
+    async (spotId: string) => {
+      const listId = filters.planListId;
+      if (!listId) return;
+      const list = planLists.find((l) => l.id === listId);
+      if (!list || !list.spot_ids.includes(spotId)) return;
+      const nextSpotIds = list.spot_ids.filter((id) => id !== spotId);
+      const { data } = await api.visitPlanLists.update(listId, {
+        title: list.title,
+        description: list.description,
+        start_date: list.start_date,
+        end_date: list.end_date,
+        spot_ids: nextSpotIds,
+      });
+      setPlanLists((prev) =>
+        prev.map((l) =>
+          l.id === listId ? (data ?? { ...l, spot_ids: nextSpotIds }) : l
+        )
+      );
+    },
+    [filters.planListId, planLists]
+  );
   // マウント時と、マウント中に種別が切り替わった場合に、その種別の保存済み条件を読む
   useEffect(() => {
     setFiltersState(loadSavedFilters(spotTypeKey));
@@ -2718,6 +2744,7 @@ export default function MapView({
           spots={spots}
           onClose={() => setDetailSpotId(null)}
           onVisitChange={loadVisits}
+          onVisitRecorded={handleVisitRecorded}
           onSpotChange={(spot) => {
             spotCache.applySpotChange(spot);
             loadPrivateSpots();
