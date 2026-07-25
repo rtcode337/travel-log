@@ -822,12 +822,15 @@ function loadSavedFilters(typeKey: string): SpotFilters {
     // 訪問日は`YYYY-MM-DD`のみ受け付ける
     const date = (v: unknown): string | null =>
       typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+    const visited = strings(obj.visited).filter(
+      (v): v is VisitedValue => v === "visited" || v === "unvisited"
+    );
     return {
       series: strings(obj.series),
       categories: strings(obj.categories),
-      visited: strings(obj.visited).filter(
-        (v): v is VisitedValue => v === "visited" || v === "unvisited"
-      ),
+      // 空(「すべて」チップがあった頃の保存値・キー欠落)は既定=未訪問のみに倒す
+      // (現行UIに空選択の状態は無い。全件表示は両方選択で保存される)
+      visited: visited.length > 0 ? visited : [...DEFAULT_FILTERS.visited],
       // "none"=表示しない、日付=その日、それ以外(旧null・キー欠落など)=今日
       visitedDate:
         obj.visitedDate === "none" ? null : date(obj.visitedDate) ?? todayKey(),
@@ -879,6 +882,35 @@ function saveOverlayTypeKey(typeKey: string, overlay: string | null) {
   } catch {
     // 保存できなくてもこのセッションの重ね表示自体は動かす
   }
+}
+
+/**
+ * 絞り込みモーダルの各セクション(訪問日・訪問予定リスト・別の種別を重ねて表示)
+ * ごとの小さなリセットボタン。見出し行のリセット(絞り込みのみを戻す)とは独立に、
+ * そのセクションの選択だけを既定へ戻す。「これだけを表示」ボタンと同じ大きさで、
+ * 戻す対象があるときだけ青にする
+ */
+function SectionResetButton({
+  disabled,
+  onClick,
+}: {
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+        disabled
+          ? "border-gray-300 bg-white text-gray-400"
+          : "border-blue-600 bg-blue-600 text-white"
+      }`}
+    >
+      リセット
+    </button>
+  );
 }
 
 /**
@@ -2462,38 +2494,10 @@ export default function MapView({
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-bold">絞り込み</h2>
               <div className="flex items-center gap-3">
-                {(() => {
-                  // 地図のリセットは絞り込み(シリーズ・カテゴリ・訪問状況)に加え、
-                  // 訪問順の経路の対象日を今日に・重ね表示を「重ねない」に戻す。
-                  // showRoutesは表示切り替えのため対象外(現在の値を維持)
-                  const resettable =
-                    hasActiveFilters(filters) ||
-                    filters.visitedDate !== todayKey() ||
-                    filters.planListId !== null ||
-                    filters.isolate !== null ||
-                    overlayTypeKey !== null;
-                  return (
-                    <button
-                      type="button"
-                      disabled={!resettable}
-                      onClick={() => {
-                        setFilters({
-                          ...DEFAULT_FILTERS,
-                          showRoutes: filters.showRoutes,
-                          visitedDate: todayKey(),
-                        });
-                        setOverlayTypeKey(null);
-                      }}
-                      className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                        resettable
-                          ? "border-blue-600 bg-blue-600 text-white"
-                          : "border-gray-300 bg-white text-gray-400"
-                      }`}
-                    >
-                      リセット
-                    </button>
-                  );
-                })()}
+                {/* 見出しのリセットは絞り込み(シリーズ・カテゴリ・訪問状況)のみを
+                    既定に戻す。訪問日・訪問予定リスト・重ね表示は各セクションの
+                    個別リセットボタンで戻す */}
+                <FilterResetButton filters={filters} onChange={setFilters} />
                 <button
                   type="button"
                   onClick={() => setShowFilterModal(false)}
@@ -2524,25 +2528,43 @@ export default function MapView({
                     選んだ日に訪問したスポットを、訪問した順に矢印(緑)で結んで地図に表示します。その日に訪問したスポットは、絞り込みで外れていても表示されます。
                   </HelpTip>
                 </p>
-                {/* その日のスポットだけに絞る(他のスポット・ルート・訪問予定リストは隠す) */}
-                <button
-                  type="button"
-                  disabled={!filters.visitedDate}
-                  aria-pressed={filters.isolate === "visit"}
-                  onClick={() =>
-                    setFilters({
-                      ...filters,
-                      isolate: filters.isolate === "visit" ? null : "visit",
-                    })
-                  }
-                  className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-40 ${
-                    filters.isolate === "visit"
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-gray-300 bg-white text-gray-500"
-                  }`}
-                >
-                  これだけを表示
-                </button>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {/* その日のスポットだけに絞る(他のスポット・ルート・訪問予定リストは隠す) */}
+                  <button
+                    type="button"
+                    disabled={!filters.visitedDate}
+                    aria-pressed={filters.isolate === "visit"}
+                    onClick={() =>
+                      setFilters({
+                        ...filters,
+                        isolate: filters.isolate === "visit" ? null : "visit",
+                      })
+                    }
+                    className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-40 ${
+                      filters.isolate === "visit"
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-gray-300 bg-white text-gray-500"
+                    }`}
+                  >
+                    これだけを表示
+                  </button>
+                  {/* このセクションだけのリセット(対象日を既定=今日に戻し、
+                      「これだけを表示」も解除する) */}
+                  <SectionResetButton
+                    disabled={
+                      filters.visitedDate === visitDateOptions.today &&
+                      filters.isolate !== "visit"
+                    }
+                    onClick={() =>
+                      setFilters({
+                        ...filters,
+                        visitedDate: todayKey(),
+                        isolate:
+                          filters.isolate === "visit" ? null : filters.isolate,
+                      })
+                    }
+                  />
+                </div>
               </div>
               <select
                 aria-label="訪問順の経路の対象日"
@@ -2571,25 +2593,43 @@ export default function MapView({
                       選んだリストのスポットを、リストの順に矢印(紫)で結んで地図に表示します。リストのスポットは、絞り込みで外れていても表示されます。
                     </HelpTip>
                   </p>
-                  {/* そのリストのスポットだけに絞る(他のスポット・ルート・訪問順の経路は隠す) */}
-                  <button
-                    type="button"
-                    disabled={!filters.planListId}
-                    aria-pressed={filters.isolate === "plan"}
-                    onClick={() =>
-                      setFilters({
-                        ...filters,
-                        isolate: filters.isolate === "plan" ? null : "plan",
-                      })
-                    }
-                    className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-40 ${
-                      filters.isolate === "plan"
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-gray-300 bg-white text-gray-500"
-                    }`}
-                  >
-                    これだけを表示
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {/* そのリストのスポットだけに絞る(他のスポット・ルート・訪問順の経路は隠す) */}
+                    <button
+                      type="button"
+                      disabled={!filters.planListId}
+                      aria-pressed={filters.isolate === "plan"}
+                      onClick={() =>
+                        setFilters({
+                          ...filters,
+                          isolate: filters.isolate === "plan" ? null : "plan",
+                        })
+                      }
+                      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-40 ${
+                        filters.isolate === "plan"
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : "border-gray-300 bg-white text-gray-500"
+                      }`}
+                    >
+                      これだけを表示
+                    </button>
+                    {/* このセクションだけのリセット(「表示しない」へ戻し、
+                        「これだけを表示」も解除する) */}
+                    <SectionResetButton
+                      disabled={
+                        filters.planListId === null &&
+                        filters.isolate !== "plan"
+                      }
+                      onClick={() =>
+                        setFilters({
+                          ...filters,
+                          planListId: null,
+                          isolate:
+                            filters.isolate === "plan" ? null : filters.isolate,
+                        })
+                      }
+                    />
+                  </div>
                 </div>
                 <select
                   aria-label="経路表示する訪問予定リスト"
@@ -2621,17 +2661,24 @@ export default function MapView({
                           選んだ種別の公開スポットとルートを半透明で重ねて表示します(未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは、その種別の地図で自分が設定した内容に従います。
                         </HelpTip>
                       </p>
-                      {/* 種別を切り替えず、この地図の上のモーダルで重ね表示側の絞り込みを
-                          編集する(変更はその種別のlocalStorageへ保存され、描画にも即反映) */}
-                      {overlayTypeKey && overlaySpots && overlayType && (
-                        <button
-                          type="button"
-                          onClick={() => setShowOverlayFilterModal(true)}
-                          className="shrink-0 text-sm text-blue-600 underline"
-                        >
-                          絞り込みを編集
-                        </button>
-                      )}
+                      <div className="flex shrink-0 items-center gap-2">
+                        {/* 種別を切り替えず、この地図の上のモーダルで重ね表示側の絞り込みを
+                            編集する(変更はその種別のlocalStorageへ保存され、描画にも即反映) */}
+                        {overlayTypeKey && overlaySpots && overlayType && (
+                          <button
+                            type="button"
+                            onClick={() => setShowOverlayFilterModal(true)}
+                            className="shrink-0 text-sm text-blue-600 underline"
+                          >
+                            絞り込みを編集
+                          </button>
+                        )}
+                        {/* このセクションだけのリセット(「重ねない」へ戻す) */}
+                        <SectionResetButton
+                          disabled={overlayTypeKey === null}
+                          onClick={() => setOverlayTypeKey(null)}
+                        />
+                      </div>
                     </div>
                     <select
                       aria-label="重ねて表示する種別"
