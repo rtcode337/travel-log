@@ -27,6 +27,9 @@ body {
   width: 120px;
   height: 120px;
   pointer-events: none;
+  /* 青丸(.maplibregl-marker)は will-change:transform で重ね合わせコンテキストを作るので、
+     負の z-index にすると青丸の背面(その内部)に収まる。扇の先端が丸に隠れて縁から広がる */
+  z-index: -1;
   transform: translate(-50%, -50%);
   transform-origin: center;
   transition: transform 0.12s ease-out;
