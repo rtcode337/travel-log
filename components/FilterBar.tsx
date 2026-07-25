@@ -18,7 +18,12 @@ export interface SpotFilters {
   series: Series[];
   /** 空配列 = カテゴリによる絞り込みなし(「すべて」選択中、全件表示) */
   categories: Category[];
-  /** 空配列 = 訪問状況による絞り込みなし(「すべて」選択中、全件表示) */
+  /**
+   * 訪問状況の絞り込み。既定は`["unvisited"]`(未訪問のみ)で、「すべて」チップは
+   * 無い(両方選択=全件表示)。UI上は空選択を作れない(見た目が「何も表示しない」に
+   * 見えるのに全件表示になるため)が、判定(`passesFilters`)は旧保存データ互換の
+   * ため空配列=絞り込みなし(全件)としても動く
+   */
   visited: VisitedValue[];
   /**
    * 訪問順の経路を描く対象日(`YYYY-MM-DD`のローカル日付)。絞り込みではなく、
@@ -51,12 +56,17 @@ export interface SpotFilters {
 export const DEFAULT_FILTERS: SpotFilters = {
   series: [],
   categories: [],
-  visited: [],
+  visited: ["unvisited"],
   visitedDate: null,
   planListId: null,
   showRoutes: true,
   isolate: null,
 };
+
+/** 訪問状況が既定(未訪問のみ)のままか(絞り込み中とみなさない条件) */
+export function isDefaultVisited(visited: VisitedValue[]): boolean {
+  return visited.length === 1 && visited[0] === "unvisited";
+}
 
 /**
  * 訪問日時(`visits.visited_on`のISO文字列)を絞り込み・選択肢のキーに使う
@@ -107,22 +117,27 @@ export function passesFilters(
 }
 
 /**
- * 何らかの絞り込みが掛かっているか(リセットボタンと地図の絞り込みボタンの
- * 見た目の条件)。`showRoutes`は表示の切り替え、`visitedDate`は訪問順の経路の
- * 対象日(絞り込みではない)であって、どちらも絞り込みではないため含めない。
+ * 何らかの絞り込みが掛かっているか=既定と違う絞り込み条件か(リセットボタンと
+ * 地図の絞り込みボタンの見た目の条件)。訪問状況は既定が「未訪問のみ」のため、
+ * 空ではなく既定と違うかどうかで見る。`showRoutes`は表示の切り替え、
+ * `visitedDate`は訪問順の経路の対象日(絞り込みではない)であって、
+ * どちらも絞り込みではないため含めない。
  */
 export function hasActiveFilters(filters: SpotFilters): boolean {
   return (
     filters.series.length > 0 ||
     filters.categories.length > 0 ||
-    filters.visited.length > 0
+    !isDefaultVisited(filters.visited)
   );
 }
 
 /**
- * 全条件を「すべて」に戻すボタン(条件を1つずつ戻す手間を省く)。常に出しておき、
- * 戻す対象があるとき(`hasActiveFilters`)だけチップと同じ青にして知らせる
+ * 絞り込み(シリーズ・カテゴリ・訪問状況)だけを既定に戻すボタン
+ * (条件を1つずつ戻す手間を省く)。常に出しておき、戻す対象があるとき
+ * (`hasActiveFilters`)だけチップと同じ青にして知らせる
  * (出し入れするとボタンの位置が動くため)。
+ * 絞り込みではないもの(`showRoutes`・訪問日・訪問予定リスト・「これだけを表示」)は
+ * 対象外で現在値を維持する(地図ではそれぞれのセクションの個別リセットで戻す)。
  * 置き場所が呼び出し側で異なる(地図は絞り込みモーダルの見出し行、
  * スポット一覧は`FilterBar`の先頭)ため、`FilterBar`から切り出してある
  */
@@ -138,8 +153,14 @@ export function FilterResetButton({
     <button
       type="button"
       disabled={!active}
-      // showRoutesは絞り込みではないためリセットの対象外(現在の値を維持する)
-      onClick={() => onChange({ ...DEFAULT_FILTERS, showRoutes: filters.showRoutes })}
+      onClick={() =>
+        onChange({
+          ...filters,
+          series: [],
+          categories: [],
+          visited: [...DEFAULT_FILTERS.visited],
+        })
+      }
       className={`rounded-full border px-3 py-1 text-xs font-medium ${
         active ? ALL_CHIP_ACTIVE_CLASS : "border-gray-300 bg-white text-gray-400"
       }`}
@@ -298,6 +319,8 @@ export default function FilterBar({
         <span className="mb-1 block text-xs font-medium text-gray-500">
           訪問状況
         </span>
+        {/* 「すべて」チップは無し(両方選択=全件表示)。空選択は「何も選んでいない
+            見た目なのに全件表示」になって分かりにくいため、最後の1つは外せない */}
         <div className="flex flex-wrap gap-1.5">
           {VISITED_OPTIONS.map((opt) => (
             <Chip
@@ -305,20 +328,13 @@ export default function FilterBar({
               label={opt.label}
               active={filters.visited.includes(opt.value)}
               activeClassName={ALL_CHIP_ACTIVE_CLASS}
-              onClick={() =>
-                onChange({
-                  ...filters,
-                  visited: toggleSelection(filters.visited, opt.value),
-                })
-              }
+              onClick={() => {
+                const visited = toggleSelection(filters.visited, opt.value);
+                if (visited.length === 0) return;
+                onChange({ ...filters, visited });
+              }}
             />
           ))}
-          <Chip
-            label="すべて"
-            active={filters.visited.length === 0}
-            activeClassName={ALL_CHIP_ACTIVE_CLASS}
-            onClick={() => onChange({ ...filters, visited: [] })}
-          />
         </div>
       </div>
 

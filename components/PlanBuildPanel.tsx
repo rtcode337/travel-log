@@ -2,8 +2,11 @@
 
 import { useRef, useState } from "react";
 import type { Spot } from "@/lib/types";
-import { type SeriesStyleDefinition } from "@/lib/seriesStyle";
-import SeriesBadge from "@/components/SeriesBadge";
+import {
+  findSeriesStyle,
+  MY_SPOT_SERIES,
+  type SeriesStyleDefinition,
+} from "@/lib/seriesStyle";
 
 /** 配列の要素を from→to へ移動した新しい配列を返す */
 function move<T>(arr: T[], from: number, to: number): T[] {
@@ -13,14 +16,15 @@ function move<T>(arr: T[], from: number, to: number): T[] {
   return next;
 }
 
-/** 長押しからドラッグに移るまでの時間(ms) */
-const LONG_PRESS_MS = 280;
-
 /**
  * 訪問予定リスト作成モードで地図の右側に出すパネル。リストのタイトルと、
- * 選択済みスポットの一覧(×ボタン以外のどこでも長押し→ドラッグで並び替え)、
- * 「入力完了」ボタンを表示する。並び替えはタッチでも動くようポインタイベントで実装し、
- * ドラッグ中は`touch-action: none`+端での自動スクロールでスクロールと両立させる。
+ * 選択済みスポットの一覧(左端の三本線ハンドルをつかんでドラッグで並び替え)、
+ * 「入力完了」ボタンを表示する。並び替えはタッチでも動くようポインタイベントで実装する。
+ * `touch-action: none`はハンドルにだけ当て、行本体は通常のタッチスクロールを
+ * 妨げない(かつては行全体を長押し→ドラッグにしていたが、全行が
+ * `touch-action: none`になり一覧自体をスクロールできなかった)。
+ * シリーズは名前のバッジではなく色玉(シリーズの色+縁取り)で示す
+ * (シリーズ名が長いとスポット名の幅を食って何行にも折り返してしまうため)。
  */
 export default function PlanBuildPanel({
   title,
@@ -49,45 +53,23 @@ export default function PlanBuildPanel({
   const listRef = useRef<HTMLUListElement | null>(null);
   const rowRefs = useRef<(HTMLLIElement | null)[]>([]);
   const dragFrom = useRef<number | null>(null);
-  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startY = useRef(0);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
-  const clearPress = () => {
-    if (pressTimer.current != null) {
-      clearTimeout(pressTimer.current);
-      pressTimer.current = null;
+  const handleDragStart = (e: React.PointerEvent, i: number) => {
+    dragFrom.current = i;
+    setDragIndex(i);
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // 未対応環境では無視(マウスならcaptureなしでも動く)
     }
-  };
-
-  const handlePointerDown = (e: React.PointerEvent, i: number) => {
-    startY.current = e.clientY;
-    const el = e.currentTarget as HTMLElement;
-    const pid = e.pointerId;
-    clearPress();
-    // 長押しが確定したらドラッグ開始(タップやスクロールと区別する)
-    pressTimer.current = setTimeout(() => {
-      dragFrom.current = i;
-      setDragIndex(i);
-      try {
-        el.setPointerCapture(pid);
-      } catch {
-        // 未対応環境では無視(マウスならcaptureなしでも動く)
-      }
-      if (typeof navigator !== "undefined" && navigator.vibrate) {
-        navigator.vibrate(10);
-      }
-    }, LONG_PRESS_MS);
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate(10);
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (dragFrom.current == null) {
-      // 長押し確定前に大きく動いたら「並び替えではない」と判断して長押しをやめる
-      if (pressTimer.current != null && Math.abs(e.clientY - startY.current) > 8) {
-        clearPress();
-      }
-      return;
-    }
+    if (dragFrom.current == null) return;
     e.preventDefault();
     const y = e.clientY;
     // リストの端に近づいたら自動スクロール(長い一覧でも端まで運べるように)
@@ -116,7 +98,6 @@ export default function PlanBuildPanel({
   };
 
   const handlePointerUp = () => {
-    clearPress();
     dragFrom.current = null;
     setDragIndex(null);
   };
@@ -139,32 +120,53 @@ export default function PlanBuildPanel({
       >
         {spotIds.length === 0 && (
           <li className="p-3 text-xs text-gray-500">
-            地図のピンをタップすると、ここに追加されます。長押しで並び替えできます。
+            地図のピンをタップすると、ここに追加されます。左端の≡をつかんで動かすと並び替えできます。
           </li>
         )}
         {spotIds.map((spotId, i) => {
           const spot = spotsById.get(spotId);
+          // シリーズ未設定(null/空)は「マイスポット」の見た目・名前で示す
+          const style = spot ? findSeriesStyle(spot.series, seriesStyles) : null;
+          const seriesName =
+            spot && spot.series && spot.series.length > 0
+              ? spot.series
+              : MY_SPOT_SERIES;
           return (
             <li
               key={spotId}
               ref={(el) => {
                 rowRefs.current[i] = el;
               }}
-              onPointerDown={(e) => handlePointerDown(e, i)}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              className={`flex touch-none select-none items-center gap-2 px-2.5 py-2 ${
+              className={`flex select-none items-center gap-2 py-1.5 pr-2.5 ${
                 dragIndex === i ? "bg-blue-100" : ""
               }`}
             >
-              {spot ? (
+              {/* 並び替えハンドル。touch-action: noneはここにだけ当てる
+                  (行本体まで当てると一覧がタッチスクロールできなくなる) */}
+              <span
+                role="button"
+                aria-label="並び替え"
+                onPointerDown={(e) => handleDragStart(e, i)}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                className="shrink-0 touch-none cursor-grab self-stretch py-1 pl-2.5 pr-1 text-base leading-none text-gray-400"
+              >
+                <span className="flex h-full items-center">≡</span>
+              </span>
+              {spot && style ? (
                 <>
-                  <SeriesBadge
-                    series={spot.series}
-                    seriesStyles={seriesStyles}
-                    isPrivate={spot.status === "private"}
-                    size="sm"
+                  {/* シリーズは色玉で示す(名前のバッジだと長いシリーズ名が
+                      スポット名の幅を食うため出さない。名前はtitleで確認できる) */}
+                  <span
+                    className="h-3.5 w-3.5 shrink-0 rounded-full"
+                    title={seriesName}
+                    style={{
+                      backgroundColor: style.color,
+                      border: `1.5px ${
+                        spot.status === "private" ? "dashed" : "solid"
+                      } ${style.borderColor}`,
+                    }}
                   />
                   <span className="min-w-0 flex-1 break-words text-sm leading-snug">
                     {spot.name}
@@ -178,7 +180,6 @@ export default function PlanBuildPanel({
               <button
                 type="button"
                 aria-label="削除"
-                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => onRemove(spotId)}
                 className="shrink-0 px-1 text-lg leading-none text-gray-400 hover:text-red-500"
               >
