@@ -1123,6 +1123,29 @@ export default function MapView({
   // 重ね表示が無効の間は使われない(現在種別の値を返すだけ)
   const overlaySeriesStyles = useSeriesStyles(overlayTypeKey ?? spotTypeKey);
   const overlayCategories = useCategories(overlayTypeKey ?? spotTypeKey);
+
+  // 重ね表示(別種別)のピンのタップ: 作成モード中は本体ピンと同じく追加確認へ回す。
+  // それ以外は従来どおり読み取り専用の詳細を開く。ハンドラはレイヤー生成時に一度だけ
+  // 束縛されるため、buildModeRef を見て呼び出し時に分岐する(handleSpotSelectと同じ理由)
+  const handleOverlaySpotSelect = useCallback((id: string) => {
+    if (buildModeRef.current) setAddCandidate(id);
+    else setOverlayDetailSpotId(id);
+  }, []);
+
+  // 重ね表示スポットのID→Spot。作成中パネルや追加確認で別種別スポットの名前を解決する
+  const overlaySpotById = useMemo(() => {
+    const m = new Map<string, Spot>();
+    if (overlaySpots) for (const s of overlaySpots) m.set(s.id, s);
+    return m;
+  }, [overlaySpots]);
+
+  // 作成中パネルに渡す解決用マップ。本体スポットに重ね表示スポットを足したもの
+  // (IDが被ったら本体を優先)。これで別種別スポットも名前つきで一覧表示できる
+  const buildPanelSpotById = useMemo(() => {
+    const m = new Map(overlaySpotById);
+    for (const [id, s] of spotById) m.set(id, s);
+    return m;
+  }, [overlaySpotById, spotById]);
   // 重ね表示の絞り込み変更をその種別のlocalStorageへ保存しつつstateへ反映する
   // (overlayFiltersが変わると重ね表示の描画effectが再実行され、地図に即反映される)
   const setOverlayFiltersAndSave = useCallback(
@@ -1890,7 +1913,7 @@ export default function MapView({
       );
 
       const render = async () => {
-        ensureOverlayLayers(map, setOverlayDetailSpotId, setOverlayDetailRouteId);
+        ensureOverlayLayers(map, handleOverlaySpotSelect, setOverlayDetailRouteId);
         // クラスタは重ね先の種別の先頭シリーズの色で塗り、本体の青いクラスタと
         // 見分けられるようにする(シリーズ設定が空の種別は未知シリーズのピンと同系のグレー)
         const clusterColor = overlaySeriesStyles[0]?.color ?? "#9ca3af";
@@ -1933,6 +1956,7 @@ export default function MapView({
     overlaySeriesStyles,
     visitedIds,
     runWhenMapReady,
+    handleOverlaySpotSelect,
   ]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
@@ -2378,7 +2402,7 @@ export default function MapView({
           title={buildDraft.title}
           editing={buildDraft.editingId !== null}
           spotIds={buildDraft.spotIds}
-          spotsById={spotById}
+          spotsById={buildPanelSpotById}
           seriesStyles={seriesStyles}
           saving={savingList}
           onReorder={(spotIds) =>
@@ -2411,7 +2435,8 @@ export default function MapView({
             className="w-full max-w-xs space-y-3 rounded-2xl bg-white p-4"
           >
             {(() => {
-              const spot = spotById.get(addCandidate);
+              const spot =
+                spotById.get(addCandidate) ?? overlaySpotById.get(addCandidate);
               const already = buildDraft.spotIds.includes(addCandidate);
               return (
                 <>

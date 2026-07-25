@@ -104,16 +104,17 @@ export async function POST(request: Request) {
   const listId = rows[0].id;
 
   // 重複を除いた並び順のままseqを振って経由スポットを登録する。
-  // その種別に属する既存スポットだけを入れる(defensive)
+  // 存在するスポットだけを入れる(defensive)。地図で別スポット種別を重ねて追加できる
+  // ため種別は問わない(itemsテーブルも種別非依存。リスト自体のspot_type_idは所属の目印)
   const ordered = spotIds.filter((s, i) => spotIds.indexOf(s) === i);
   if (ordered.length > 0) {
     await query(
       `insert into visit_plan_list_items (list_id, spot_id, seq)
        select $1, s.id, ord.seq
        from unnest($2::uuid[]) with ordinality as ord(spot_id, seq)
-       join spots s on s.id = ord.spot_id and s.spot_type_id = $3
+       join spots s on s.id = ord.spot_id
        on conflict (list_id, spot_id) do nothing`,
-    [listId, ordered, spotTypeId]
+    [listId, ordered]
     );
   }
 
