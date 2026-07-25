@@ -806,8 +806,10 @@ function effectiveIsolate(filters: SpotFilters): "visit" | "plan" | null {
  * 保存済みの絞り込み条件を読む。未保存・不正値は既定(訪問順の経路=今日)を返す。
  * `visitedDate`は絞り込みではなく訪問順の経路の対象日で、既定は今日。「表示しない」は
  * 保存時に文字列`"none"`で書く(下記`saveFilters`)ため、`"none"`のときだけnull=表示
- * しないにする。旧仕様の保存値(絞り込みだった頃のnull・日付、キー欠落)は「明示的な
- * 表示しない」ではないので今日に倒す(既存ユーザーも初回から今日の経路が出る)。
+ * しないにする。「今日」は`"today"`で保存されるので、読み込み時のその日の`todayKey()`に
+ * 解決する(日付を固定しないので、翌日に開いてもその日が今日として選ばれる)。旧仕様の
+ * 保存値(絞り込みだった頃のnull・日付、キー欠落)は「明示的な表示しない」ではないので
+ * 今日に倒す(既存ユーザーも初回から今日の経路が出る)。
  */
 function loadSavedFilters(typeKey: string): SpotFilters {
   if (typeof localStorage === "undefined") return defaultMapFilters();
@@ -831,9 +833,14 @@ function loadSavedFilters(typeKey: string): SpotFilters {
       // 空(「すべて」チップがあった頃の保存値・キー欠落)は既定=未訪問のみに倒す
       // (現行UIに空選択の状態は無い。全件表示は両方選択で保存される)
       visited: visited.length > 0 ? visited : [...DEFAULT_FILTERS.visited],
-      // "none"=表示しない、日付=その日、それ以外(旧null・キー欠落など)=今日
+      // "none"=表示しない、"today"=(その日ではなく)常に今日、日付=その日、
+      // それ以外(旧null・キー欠落など)=今日
       visitedDate:
-        obj.visitedDate === "none" ? null : date(obj.visitedDate) ?? todayKey(),
+        obj.visitedDate === "none"
+          ? null
+          : obj.visitedDate === "today"
+            ? todayKey()
+            : date(obj.visitedDate) ?? todayKey(),
       // 訪問予定リストの経路対象(そのリストが今も存在するかは描画側で解決する)
       planListId: typeof obj.planListId === "string" ? obj.planListId : null,
       // キー自体が無い保存データ(この設定の追加前に保存されたもの)は既定のオン扱い
@@ -849,9 +856,20 @@ function loadSavedFilters(typeKey: string): SpotFilters {
 
 function saveFilters(typeKey: string, filters: SpotFilters) {
   try {
-    // 「表示しない」(null)は旧仕様の「絞り込みなしのnull」と区別するため"none"で保存する
-    // (でないと既存ユーザーの旧nullも「表示しない」に見えてしまう。loadSavedFilters参照)
-    const stored = { ...filters, visitedDate: filters.visitedDate ?? "none" };
+    // visitedDate の保存表現:
+    // - null(表示しない) → "none"(旧仕様の「絞り込みなしのnull」と区別。loadSavedFilters参照)
+    // - 今日(todayKey()と一致) → "today"(具体的な日付ではなく「今日」の意図で保存する。
+    //   でないと日付が固定され、翌日に前日が選ばれた状態で復元されてしまう。「今日」は
+    //   セレクトの選択肢として today のみで、others からは today を除いているため、
+    //   visitedDate が todayKey() と一致するのは「今日」を選んだときだけと判断できる)
+    // - それ以外の具体的な日付 → その日付をそのまま保存
+    const storedVisitedDate =
+      filters.visitedDate == null
+        ? "none"
+        : filters.visitedDate === todayKey()
+          ? "today"
+          : filters.visitedDate;
+    const stored = { ...filters, visitedDate: storedVisitedDate };
     localStorage.setItem(FILTERS_STORAGE_PREFIX + typeKey, JSON.stringify(stored));
   } catch {
     // プライベートブラウズ等で保存できなくても絞り込み自体は動かす
