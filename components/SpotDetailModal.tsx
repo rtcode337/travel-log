@@ -68,6 +68,7 @@ export default function SpotDetailModal({
   spotId,
   spots,
   readOnly = false,
+  allowVisitRecording = false,
   onClose,
   onVisitChange,
   onVisitRecorded,
@@ -86,6 +87,10 @@ export default function SpotDetailModal({
    * (このスポットは表示中の種別の地図では表示できないため)
    */
   readOnly?: boolean;
+  /** readOnly(重ね表示)でも「訪問を記録」だけは許可する。地図で経路表示中に、
+   *  重ね表示した別種別スポットへ種別を切り替えずに訪問記録し、リストから外すために使う。
+   *  スポットの編集・削除や訪問予定/予定リスト追加は readOnly のまま隠す */
+  allowVisitRecording?: boolean;
   onClose: () => void;
   /** 訪問記録の追加・削除があったときに呼ばれる(呼び出し元の一覧・バッジ更新用) */
   onVisitChange?: () => void;
@@ -481,25 +486,31 @@ export default function SpotDetailModal({
                     </p>
                   )}
                 </div>
-                {!readOnly && (
+                {(!readOnly || allowVisitRecording) && (
                   <div className="flex flex-wrap justify-end gap-2">
-                    <button
-                      onClick={toggleVisitPlan}
-                      disabled={planUpdating}
-                      className={`rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-                        planned
-                          ? "border border-gray-300 text-gray-600"
-                          : "border border-blue-600 text-blue-600"
-                      }`}
-                    >
-                      {planned ? "訪問予定をはずす" : "訪問予定にする"}
-                    </button>
-                    <button
-                      onClick={() => setShowAddToList(true)}
-                      className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
-                    >
-                      予定リストに追加
-                    </button>
+                    {/* スポットの管理系(訪問予定・予定リスト)は通常表示のときだけ。
+                        readOnly(重ね表示)では訪問記録だけを許可する */}
+                    {!readOnly && (
+                      <>
+                        <button
+                          onClick={toggleVisitPlan}
+                          disabled={planUpdating}
+                          className={`rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                            planned
+                              ? "border border-gray-300 text-gray-600"
+                              : "border border-blue-600 text-blue-600"
+                          }`}
+                        >
+                          {planned ? "訪問予定をはずす" : "訪問予定にする"}
+                        </button>
+                        <button
+                          onClick={() => setShowAddToList(true)}
+                          className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
+                        >
+                          予定リストに追加
+                        </button>
+                      </>
+                    )}
                     <button
                       onClick={() => setShowForm(true)}
                       className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
@@ -642,7 +653,7 @@ export default function SpotDetailModal({
         <VisitFormModal
           spotId={spot.id}
           spotName={spot.name}
-          reviewsEnabled={reviewsEnabled}
+          reviewsEnabled={!readOnly && reviewsEnabled}
           onClose={() => setShowForm(false)}
           onSaved={() => {
             setShowForm(false);
@@ -663,7 +674,7 @@ export default function SpotDetailModal({
         <VisitFormModal
           spotId={spot.id}
           spotName={spot.name}
-          reviewsEnabled={reviewsEnabled}
+          reviewsEnabled={!readOnly && reviewsEnabled}
           visit={editingVisit}
           onClose={() => setEditingVisit(null)}
           onSaved={() => {
