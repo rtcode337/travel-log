@@ -80,7 +80,7 @@ export async function PATCH(
     );
   }
 
-  // 本人のリストであることを確認しつつ、経由スポットの絞り込み用に種別IDを得る
+  // 本人のリストであることを確認する(存在しなければ404)
   const owned = await query<{ spot_type_id: string }>(
     "select spot_type_id from visit_plan_lists where id = $1 and user_id = $2",
     [id, userId]
@@ -97,7 +97,8 @@ export async function PATCH(
     [title, description, startDate, endDate, id]
   );
 
-  // 経由スポットは丸ごと置き換える(重複除去+その種別のスポットに限定)
+  // 経由スポットは丸ごと置き換える(重複除去+存在するスポットに限定)。
+  // 地図で別スポット種別を重ねて追加できるため種別は問わない(itemsテーブルも種別非依存)
   await query("delete from visit_plan_list_items where list_id = $1", [id]);
   const ordered = spotIds.filter((s, i) => spotIds.indexOf(s) === i);
   if (ordered.length > 0) {
@@ -105,9 +106,9 @@ export async function PATCH(
       `insert into visit_plan_list_items (list_id, spot_id, seq)
        select $1, s.id, ord.seq
        from unnest($2::uuid[]) with ordinality as ord(spot_id, seq)
-       join spots s on s.id = ord.spot_id and s.spot_type_id = $3
+       join spots s on s.id = ord.spot_id
        on conflict (list_id, spot_id) do nothing`,
-      [id, ordered, spotTypeId]
+      [id, ordered]
     );
   }
 
