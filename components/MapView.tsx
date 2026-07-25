@@ -1132,39 +1132,6 @@ export default function MapView({
     [filters, setFilters, planLists, planPathSpotById, fitMapToSpots]
   );
 
-  // 経路表示中のリストに本体種別で解決できないスポット(別種別を重ねて追加したもの)が
-  // あれば、api.spots.get で座標を補完する(経路線から抜けないように)
-  useEffect(() => {
-    const listId = filters.planListId;
-    if (!listId) return;
-    const list = planLists.find((l) => l.id === listId);
-    if (!list) return;
-    const missing = list.spot_ids.filter(
-      (id) => !spotById.has(id) && !planListResolvedRef.current.has(id)
-    );
-    if (missing.length === 0) return;
-    // 二重取得を防ぐため先に予約する。取得結果は id をキーにした追記のみの解決
-    // キャッシュに足すだけなので、この effect が(リスト変更などで)途中で作り直されても
-    // 破棄しない。破棄すると予約だけ残って経路からスポットが抜けたままになる
-    missing.forEach((id) => planListResolvedRef.current.add(id));
-    Promise.all(missing.map((id) => api.spots.get(id))).then((results) => {
-      const fetched = results
-        .map((r) => r.data)
-        .filter((s): s is Spot => s != null);
-      // 取得できなかった id は予約を外し、次に条件が変わったとき再取得できるようにする
-      const fetchedIds = new Set(fetched.map((s) => s.id));
-      for (const id of missing) {
-        if (!fetchedIds.has(id)) planListResolvedRef.current.delete(id);
-      }
-      if (fetched.length === 0) return;
-      setPlanListExtraSpots((prev) => {
-        const next = new Map(prev);
-        for (const s of fetched) next.set(s.id, s);
-        return next;
-      });
-    });
-  }, [filters.planListId, planLists, spotById]);
-
   // 地図で訪問予定リストを経路表示中に、そのリスト内のスポットへ新しく訪問記録したら、
   // 自動でそのスポットをリストから外す(訪問済みが経路に残り続けないように)。
   // 表示中のリスト(filters.planListId)にそのスポットが含まれるときだけ動く
@@ -1231,6 +1198,9 @@ export default function MapView({
   // ピンのクリックハンドラ(レイヤー作成時に一度だけ束縛される)から現在の作成モードを
   // 参照するためのref。作成モード中はピンタップを詳細表示でなくリスト追加に回す
   const buildModeRef = useRef(false);
+  // 作成モードに入った時点でスポットのある下書き(既存リストの編集など)は、
+  // その経路全体が見えるようスポット読み込み後に一度だけfitBoundsする
+  const buildFitPendingRef = useRef(false);
   // 作成中は下タブ(NavBar)を隠して、別タブへ移動して入力中の内容を失うのを防ぐ
   const { setHideNav } = useNavVisibility();
   useEffect(() => {
@@ -1241,12 +1211,51 @@ export default function MapView({
   // マウント時/種別切替時に ?buildList=1 なら下書きを読み込んで作成モードに入る
   useEffect(() => {
     if (buildListParam === "1") {
-      setBuildDraft(loadPlanListDraft(spotTypeKey));
+      const draft = loadPlanListDraft(spotTypeKey);
+      setBuildDraft(draft);
+      buildFitPendingRef.current = (draft?.spotIds.length ?? 0) > 0;
       // 経路詳細の「編集」から来た場合、基本情報モーダルは閉じて地図の作成モードに移る
       // (同一ページ遷移のため自動では閉じない。SpotsView からの遷移では unmount で消える)
       setEditingPlanList(null);
     }
   }, [buildListParam, spotTypeKey]);
+
+  // 経路表示中のリスト・作成モード中の下書きに、本体種別で解決できないスポット
+  // (別種別を重ねて追加したもの)があれば、api.spots.get で座標を補完する
+  // (経路線から抜けないように)
+  useEffect(() => {
+    const list = filters.planListId
+      ? planLists.find((l) => l.id === filters.planListId)
+      : undefined;
+    const targetIds = new Set([
+      ...(list?.spot_ids ?? []),
+      ...(buildDraft?.spotIds ?? []),
+    ]);
+    const missing = [...targetIds].filter(
+      (id) => !spotById.has(id) && !planListResolvedRef.current.has(id)
+    );
+    if (missing.length === 0) return;
+    // 二重取得を防ぐため先に予約する。取得結果は id をキーにした追記のみの解決
+    // キャッシュに足すだけなので、この effect が(リスト変更などで)途中で作り直されても
+    // 破棄しない。破棄すると予約だけ残って経路からスポットが抜けたままになる
+    missing.forEach((id) => planListResolvedRef.current.add(id));
+    Promise.all(missing.map((id) => api.spots.get(id))).then((results) => {
+      const fetched = results
+        .map((r) => r.data)
+        .filter((s): s is Spot => s != null);
+      // 取得できなかった id は予約を外し、次に条件が変わったとき再取得できるようにする
+      const fetchedIds = new Set(fetched.map((s) => s.id));
+      for (const id of missing) {
+        if (!fetchedIds.has(id)) planListResolvedRef.current.delete(id);
+      }
+      if (fetched.length === 0) return;
+      setPlanListExtraSpots((prev) => {
+        const next = new Map(prev);
+        for (const s of fetched) next.set(s.id, s);
+        return next;
+      });
+    });
+  }, [filters.planListId, planLists, spotById, buildDraft]);
 
   // ピンのタップ: 作成モード中は追加確認へ、それ以外は従来どおり詳細表示へ
   const handleSpotSelect = useCallback((id: string) => {
@@ -1369,6 +1378,33 @@ export default function MapView({
     for (const [id, s] of spotById) m.set(id, s);
     return m;
   }, [overlaySpotById, spotById]);
+
+  // 作成モード中の下書きの経路(選択済みスポットを選んだ順に繋いだもの)。地図に
+  // 訪問予定リストと同じ紫の矢印で描き、追加・削除・並び替えに即追従する。
+  // スポットは本体+重ね表示+別種別の補完(planListExtraSpots)で解決する
+  const buildDraftPath = useMemo(() => {
+    if (!buildDraft) return [];
+    return buildDraft.spotIds
+      .map(
+        (id) =>
+          spotById.get(id) ?? overlaySpotById.get(id) ?? planListExtraSpots.get(id)
+      )
+      .filter((s): s is Spot => s !== undefined);
+  }, [buildDraft, spotById, overlaySpotById, planListExtraSpots]);
+
+  // 作成モードに入った時点でスポットのある下書き(既存リストの編集など)は、
+  // 経路が解決でき次第、全体が見えるよう一度だけ地図を移動する
+  // (新規作成で最初のスポットを足したときに地図が飛ばないよう、入場時のみ)
+  useEffect(() => {
+    if (!buildFitPendingRef.current) return;
+    if (!buildDraft) {
+      buildFitPendingRef.current = false;
+      return;
+    }
+    if (buildDraftPath.length === 0) return;
+    buildFitPendingRef.current = false;
+    fitMapToSpots(buildDraftPath);
+  }, [buildDraft, buildDraftPath, fitMapToSpots]);
   // 重ね表示の絞り込み変更をその種別のlocalStorageへ保存しつつstateへ反映する
   // (overlayFiltersが変わると重ね表示の描画effectが再実行され、地図に即反映される)
   const setOverlayFiltersAndSave = useCallback(
@@ -2024,9 +2060,11 @@ export default function MapView({
     const visitPathIds = new Set(
       buildVisitPath(visits, filters, spotById).map((s) => s.id)
     );
-    const planPathIds = new Set(
-      buildPlanListPath(planLists, filters, planPathSpotById).map((s) => s.id)
-    );
+    // 作成モード中は、下書きの経由スポットも経路と同様に絞り込みから免除する
+    const planPathIds = new Set([
+      ...buildPlanListPath(planLists, filters, planPathSpotById).map((s) => s.id),
+      ...(buildDraft?.spotIds ?? []),
+    ]);
     // 「これだけを表示」中は、その経路のスポットだけに絞る(他のスポット・ルート・
     // もう一方の経路は隠す)。それ以外は従来どおり絞り込み+経路+ルート経由地で出す
     const isolate = effectiveIsolate(filters);
@@ -2089,6 +2127,7 @@ export default function MapView({
     planPathSpotById,
     visits,
     planLists,
+    buildDraft,
     visitedIds,
     filters,
     runWhenMapReady,
@@ -2111,8 +2150,11 @@ export default function MapView({
         : [];
     const visitPath =
       isolate === "plan" ? [] : buildVisitPath(visits, filters, spotById);
+    // 作成モード中に編集対象のリスト自身を経路表示していた場合は、更新前の経路が
+    // 下書きの経路と古い形のまま二重に残らないよう、保存済み側は描かない
     const planListPath =
-      isolate === "visit"
+      isolate === "visit" ||
+      (buildDraft !== null && filters.planListId === buildDraft.editingId)
         ? []
         : buildPlanListPath(planLists, filters, planPathSpotById);
 
@@ -2131,6 +2173,9 @@ export default function MapView({
             // 現在地(青丸)を表示中は、現在地からリスト先頭のスポットまでも結ぶ
             start: currentLocation,
           },
+          // 作成モード中の下書きの経路。kind無し=線のタップで詳細は開かない
+          // (作成中のタップはピンの追加操作を優先するため)
+          { path: buildDraftPath, color: PLAN_LIST_PATH_COLOR },
         ])
       );
     });
@@ -2144,6 +2189,8 @@ export default function MapView({
     spotById,
     planPathSpotById,
     currentLocation,
+    buildDraft,
+    buildDraftPath,
     openRouteDetail,
     openPathDetail,
   ]);
