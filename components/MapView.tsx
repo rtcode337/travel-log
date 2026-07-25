@@ -2733,7 +2733,9 @@ export default function MapView({
         <SpotDetailModal
           spotId={overlayDetailSpotId}
           readOnly
+          allowVisitRecording
           onClose={() => setOverlayDetailSpotId(null)}
+          onVisitRecorded={handleVisitRecorded}
         />
       )}
 
