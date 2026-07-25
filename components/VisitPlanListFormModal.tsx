@@ -22,11 +22,15 @@ function todayKey(): string {
 export default function VisitPlanListFormModal({
   typeKey,
   edit,
+  initialSpotIds,
   onClose,
 }: {
   typeKey: string;
   /** 指定すると編集モードになり、そのリストの内容を初期値にする */
   edit?: VisitPlanList;
+  /** 新規作成時に最初から入れておく経由スポットのID(スポット詳細からの作成で使う)。
+   *  編集モード(`edit`)のときは無視する */
+  initialSpotIds?: string[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -62,8 +66,9 @@ export default function VisitPlanListFormModal({
       description: description.trim() || null,
       start_date: startDate,
       end_date: end,
-      // 編集時は既存の経由スポットを引き継いで地図で編集する
-      spotIds: edit?.spot_ids ?? [],
+      // 編集時は既存の経由スポットを引き継ぐ。新規作成でスポット詳細から来た場合は
+      // そのスポットを最初の経由スポットとして入れておく
+      spotIds: edit?.spot_ids ?? initialSpotIds ?? [],
     });
     // 地図の作成モードへ。?buildList=1 でMapViewが下書きを読み込んで作成モードに入る
     router.push(`/${typeKey}/map?buildList=1`);
