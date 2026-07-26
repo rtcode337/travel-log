@@ -74,6 +74,13 @@ export async function GET(request: Request) {
   const conditions = [...baseConditions];
   const listParams = [...params];
 
+  // 自分が非表示にしたスポット(spot_hides)は「シリーズから探す」のページング一覧に
+  // 出さない(件数にも含めない)。解除は/[type]/spotsの「非表示にしたスポット」から。
+  // 非ページングの全件取得(自分の非公開スポット・管理画面のCSV差分等)には適用しない
+  conditions.push(
+    "not exists (select 1 from spot_hides h where h.user_id = $1 and h.spot_id = spots.id)"
+  );
+
   const search = searchParams.get("search");
   if (search) {
     listParams.push(`%${search}%`);

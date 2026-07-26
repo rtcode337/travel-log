@@ -26,7 +26,7 @@ import {
 } from "@/lib/mapStyle";
 import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
-import { getSpotTypeSetting } from "@/lib/types";
+import { countedVisits, getSpotTypeSetting } from "@/lib/types";
 import type {
   Role,
   Spot,
@@ -1028,6 +1028,9 @@ export default function MapView({
   const [visits, setVisits] = useState<Visit[]>([]);
   // 訪問予定リスト(絞り込みモーダルの「訪問予定リスト」セレクトで経路表示に使う)
   const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
+  // 自分が非表示にしたスポットのID(公開スポットをユーザーごとに地図・一覧から隠す設定。
+  // スポットのIDで引くため種別をまたいで共通に効き、重ね表示側にも同じ集合を適用する)
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   // 現在地(GeolocateControlの青丸)の最新座標([lng, lat])。青丸の表示中だけ持ち
   // (青丸ごと消えるOFFでnullに戻す)、訪問予定リストの経路表示で
   // 「現在地→リスト先頭のスポット」の線を引くのに使う
@@ -1040,8 +1043,11 @@ export default function MapView({
     new Map()
   );
   const planListResolvedRef = useRef<Set<string>>(new Set());
+  // 訪問済み(ピンの緑色・訪問状況の絞り込み)には未訪問記録(unvisited)を数えない。
+  // 訪問順の経路(buildVisitPath)・訪問日の選択肢は日時ありの未訪問記録も含むため、
+  // そちらはvisitsをそのまま使う
   const visitedIds = useMemo(
-    () => new Set(visits.map((v) => v.spot_id)),
+    () => new Set(countedVisits(visits).map((v) => v.spot_id)),
     [visits]
   );
   const spotById = useMemo(() => {
@@ -1960,6 +1966,10 @@ export default function MapView({
     const { data } = await api.visitPlanLists.list(spotTypeKey);
     setPlanLists(data ?? []);
   };
+  const loadHides = async () => {
+    const { data } = await api.spotHides.list();
+    setHiddenIds(new Set((data ?? []).map((h) => h.spot_id)));
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2012,7 +2022,12 @@ export default function MapView({
   // データ取得(公開スポット・公開ルートはspotCacheが読み込む)
   useEffect(() => {
     (async () => {
-      await Promise.all([loadPrivateSpots(), loadVisits(), loadPlanLists()]);
+      await Promise.all([
+        loadPrivateSpots(),
+        loadVisits(),
+        loadPlanLists(),
+        loadHides(),
+      ]);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2094,24 +2109,28 @@ export default function MapView({
     const isolateIds =
       isolate === "visit" ? visitPathIds : isolate === "plan" ? planPathIds : null;
     const pathIds = new Set([...visitPathIds, ...planPathIds]);
+    // 自分が非表示にしたスポットは絞り込み・ルート経由地の免除より前に除外する。
+    // ただし経路(訪問順・訪問予定リスト・作成中の下書き)の対象は、ユーザーが
+    // 明示的に選んで辿っている表示のため非表示でも出す(他の免除条件と同じ扱い)
     const filteredSpots = isolateIds
       ? spots.filter((spot) => isolateIds.has(spot.id))
       : spots.filter(
           (spot) =>
             pathIds.has(spot.id) ||
-            passesFilters(
-              filters,
-              spot.series,
-              spot.categories,
-              visitedIds.has(spot.id)
-            ) ||
-            (routeMemberIds.has(spot.id) &&
-              passesFilters(
-                { ...filters, series: [], categories: [] },
+            (!hiddenIds.has(spot.id) &&
+              (passesFilters(
+                filters,
                 spot.series,
                 spot.categories,
                 visitedIds.has(spot.id)
-              ))
+              ) ||
+                (routeMemberIds.has(spot.id) &&
+                  passesFilters(
+                    { ...filters, series: [], categories: [] },
+                    spot.series,
+                    spot.categories,
+                    visitedIds.has(spot.id)
+                  ))))
         );
 
     const renderSpots = async () => {
@@ -2152,6 +2171,7 @@ export default function MapView({
     planLists,
     buildDraft,
     visitedIds,
+    hiddenIds,
     filters,
     runWhenMapReady,
     seriesStyles,
@@ -2269,22 +2289,26 @@ export default function MapView({
       const routeMemberIds = new Set(
         visibleRoutes.flatMap((route) => route.points.map((p) => p.spot_id))
       );
+      // 非表示スポットは重ね表示側でも除外する(スポットIDによるユーザーごとの
+      // 設定のため種別をまたいで共通に効く)。リストの注視(membership)は本体と
+      // 同じく免除する
       const filtered = overlaySpots.filter((spot) =>
         isolateListIds
           ? isolateListIds.has(spot.id)
-          : passesFilters(
+          : !hiddenIds.has(spot.id) &&
+            (passesFilters(
               overlayFilters,
               spot.series,
               spot.categories,
               visitedIds.has(spot.id)
             ) ||
-            (routeMemberIds.has(spot.id) &&
-              passesFilters(
-                { ...overlayFilters, series: [], categories: [] },
-                spot.series,
-                spot.categories,
-                visitedIds.has(spot.id)
-              ))
+              (routeMemberIds.has(spot.id) &&
+                passesFilters(
+                  { ...overlayFilters, series: [], categories: [] },
+                  spot.series,
+                  spot.categories,
+                  visitedIds.has(spot.id)
+                )))
       );
 
       const render = async () => {
@@ -2330,6 +2354,7 @@ export default function MapView({
     overlayFilters,
     overlaySeriesStyles,
     visitedIds,
+    hiddenIds,
     runWhenMapReady,
     handleOverlaySpotSelect,
     // 「これだけを表示」の切り替えで重ね表示の出し分けが変わるため filters も見る。
@@ -3220,6 +3245,8 @@ export default function MapView({
           // 既存の訪問予定リストへの追加をリスト一覧へ反映する(経路表示中の
           // リストに追加した場合、地図の紫の経路も引き直される)
           onPlanListChange={loadPlanLists}
+          // 非表示にする/解除をピンの表示へ即反映する
+          onHideChange={loadHides}
           onSpotChange={(spot) => {
             spotCache.applySpotChange(spot);
             loadPrivateSpots();

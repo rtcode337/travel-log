@@ -18,6 +18,7 @@ export default function VisitFields({
   photos,
   onPhotosChange,
   onProcessingChange,
+  visitedOnHint,
 }: {
   visitedOn: string;
   onVisitedOnChange: (value: string) => void;
@@ -27,6 +28,9 @@ export default function VisitFields({
   onPhotosChange: (photos: string[]) => void;
   /** 写真の縮小処理中を親へ伝える(送信ボタンのdisable用) */
   onProcessingChange?: (processing: boolean) => void;
+  /** 訪問日時欄の下の説明文。未訪問記録では空欄の意味が「時期不明」ではなく
+   *  「下調べ」になるため、呼び出し側で差し替えられるようにしてある */
+  visitedOnHint?: string;
 }) {
   // photosと同じ並びの各写真のExif撮影日時(取得できなければnull)。既存写真は
   // 元ファイルが手元に無くExifを読めないためnull。add/removeはこの中で並行して更新する
@@ -100,7 +104,7 @@ export default function VisitFields({
           </button>
         )}
         <p className="mt-1 text-xs text-gray-400">
-          空欄のままにすると「時期不明」として記録されます。
+          {visitedOnHint ?? "空欄のままにすると「時期不明」として記録されます。"}
         </p>
       </div>
 

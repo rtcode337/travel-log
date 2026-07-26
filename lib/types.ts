@@ -301,7 +301,21 @@ export interface Visit {
   visited_on: string | null;
   memo: string | null;
   photos: string[];
+  /**
+   * trueなら「未訪問記録」: 訪問したが休みや時間の都合でちゃんと見られなかった
+   * (visited_onあり=その日の訪問順の経路には含まれ、訪問予定も外れる)、または
+   * 事前の下調べのメモ(visited_onなし=訪問予定は外れない)。どちらも訪問済みの
+   * 判定(ピンの緑色・訪問状況の絞り込み)には数えず、それ以外の扱い(写真・メモ・
+   * 編集・一覧)は通常の訪問記録と同じ
+   */
+  unvisited: boolean;
   created_at: string;
+}
+
+/** 訪問済みの判定(ピンの緑色・訪問状況の絞り込み・✓件数)に数える訪問記録だけを返す
+ * (未訪問記録=unvisitedの行を除く) */
+export function countedVisits(visits: Visit[]): Visit[] {
+  return visits.filter((v) => !v.unvisited);
 }
 
 /**
@@ -310,6 +324,17 @@ export interface Visit {
  */
 export function visitPhotoSrc(photo: string): string {
   return `/api/photos/${photo}`;
+}
+
+/**
+ * 非表示スポット。公開スポットのうち「自分は興味がない」ものをユーザーごとに
+ * 地図・一覧から隠す設定(スポット自体には影響しない)。visit_plansと同じトグル管理
+ */
+export interface SpotHide {
+  id: string;
+  user_id: string;
+  spot_id: string;
+  created_at: string;
 }
 
 /** 訪問予定(行きたい場所のブックマーク)。訪問を記録すると自動で消える */

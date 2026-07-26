@@ -6,6 +6,7 @@ import type {
   Role,
   Spot,
   SpotDeletion,
+  SpotHide,
   SpotRoute,
   SpotType,
   SpotTypeSettingKey,
@@ -265,6 +266,22 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/visits/${id}`, { method: "DELETE" }),
+  },
+  spotHides: {
+    // 非表示スポット(自分の地図・一覧から隠す設定)。spot_id省略時は自分の全件
+    list: (spotId?: string) =>
+      request<SpotHide[]>(
+        `/api/spot-hides${spotId ? `?spot_id=${spotId}` : ""}`
+      ),
+    create: (spotId: string) =>
+      request<SpotHide>("/api/spot-hides", {
+        method: "POST",
+        body: JSON.stringify({ spot_id: spotId }),
+      }),
+    delete: (spotId: string) =>
+      request<{ ok: boolean }>(`/api/spot-hides/${spotId}`, {
+        method: "DELETE",
+      }),
   },
   visitPlans: {
     list: (spotId?: string) =>
