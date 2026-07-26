@@ -13,6 +13,7 @@ import {
   type PublicReview,
   type Role,
   type Spot,
+  type SpotNote,
   type SpotType,
   type Visit,
 } from "@/lib/types";
@@ -22,6 +23,7 @@ import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import { resolveWikipediaLang } from "@/lib/region";
 import { formatCategoriesForDisplay, resolveCategories } from "@/lib/category";
 import VisitFormModal from "@/components/VisitFormModal";
+import SpotNoteFormModal from "@/components/SpotNoteFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
@@ -77,6 +79,8 @@ export default function SpotDetailModal({
   onVisitPlanChange,
   onPlanListChange,
   onReviewChange,
+  onSpotNoteChange,
+  onHideChange,
 }: {
   spotId: string;
   /** 編集モーダルのシリーズ・カテゴリ入力サジェスト用(省略時はサジェストなし) */
@@ -111,6 +115,10 @@ export default function SpotDetailModal({
   onPlanListChange?: () => void;
   /** 口コミの投稿があったときに呼ばれる(呼び出し元の「自分が書いた口コミ」一覧の再取得用) */
   onReviewChange?: () => void;
+  /** 未訪問記録の追加・編集・削除があったときに呼ばれる(呼び出し元の一覧の再取得用) */
+  onSpotNoteChange?: () => void;
+  /** このスポットの非表示/解除を切り替えたときに呼ばれる(呼び出し元の地図・一覧への反映用) */
+  onHideChange?: () => void;
 }) {
   const typeKey = useCurrentSpotTypeKey();
   const [spot, setSpot] = useState<Spot | null>(null);
@@ -134,6 +142,13 @@ export default function SpotDetailModal({
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [planned, setPlanned] = useState(false);
   const [planUpdating, setPlanUpdating] = useState(false);
+  // 未訪問記録(自分の分。訪問記録にはしない個人メモ)と、そのフォームの表示状態
+  const [spotNotes, setSpotNotes] = useState<SpotNote[]>([]);
+  const [showNoteForm, setShowNoteForm] = useState(false);
+  const [editingNote, setEditingNote] = useState<SpotNote | null>(null);
+  // このスポットを自分の地図・一覧から非表示にしているか(公開スポットのみ)
+  const [hidden, setHidden] = useState(false);
+  const [hideUpdating, setHideUpdating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [moderating, setModerating] = useState(false);
   // 訪問履歴のサムネイルをタップしたときに拡大表示する写真のURL
@@ -189,16 +204,22 @@ export default function SpotDetailModal({
       { data: visitsData },
       { data: typesData },
       { data: plansData },
+      { data: notesData },
+      { data: hidesData },
     ] = await Promise.all([
       api.spots.get(spotId),
       api.visits.list(spotId),
       api.spotTypes.list(),
       api.visitPlans.list(spotId),
+      api.spotNotes.list(spotId),
+      api.spotHides.list(spotId),
     ]);
     setSpot(spotData ?? null);
     setVisits(visitsData ?? []);
     setSpotTypes(typesData ?? []);
     setPlanned((plansData?.length ?? 0) > 0);
+    setSpotNotes(notesData ?? []);
+    setHidden((hidesData?.length ?? 0) > 0);
     setLoading(false);
   }, [spotId]);
 
@@ -293,6 +314,25 @@ export default function SpotDetailModal({
     await api.visits.delete(id);
     load();
     onVisitChange?.();
+  };
+
+  const deleteSpotNote = async (id: string) => {
+    if (!confirm("この未訪問記録を削除しますか?")) return;
+    await api.spotNotes.delete(id);
+    load();
+    onSpotNoteChange?.();
+  };
+
+  // 非表示のトグル(公開スポットのみ)。地図・一覧への反映は呼び出し元が行う
+  const toggleHidden = async () => {
+    setHideUpdating(true);
+    const { error } = hidden
+      ? await api.spotHides.delete(spotId)
+      : await api.spotHides.create(spotId);
+    setHideUpdating(false);
+    if (error) return;
+    setHidden((prev) => !prev);
+    onHideChange?.();
   };
 
   const handleDeleteSpot = async () => {
@@ -626,6 +666,68 @@ export default function SpotDetailModal({
               )}
             </div>
 
+            {/* 未訪問記録(訪問記録にはしない個人メモ。休みで見られなかった・下調べなど)。
+                個人データのため読み取り専用(重ね表示)では出さない */}
+            {!readOnly && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold">
+                      未訪問記録
+                      {spotNotes.length > 0 && (
+                        <span className="ml-1 font-normal text-gray-400">
+                          ({spotNotes.length}件)
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      休みで見られなかった・下調べのメモなど(非公開・訪問済みにはなりません)
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowNoteForm(true)}
+                    className="shrink-0 rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
+                  >
+                    + 未訪問記録
+                  </button>
+                </div>
+                {spotNotes.length > 0 && (
+                  <ul className="divide-y divide-gray-100">
+                    {spotNotes.map((note) => (
+                      <li key={note.id} className="py-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            {note.noted_on && (
+                              <p className="text-sm font-medium">
+                                {formatVisitedOn(note.noted_on)}
+                              </p>
+                            )}
+                            <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
+                              {note.memo}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <button
+                              onClick={() => setEditingNote(note)}
+                              className="text-xs text-gray-400 hover:text-blue-600"
+                            >
+                              編集
+                            </button>
+                            <button
+                              onClick={() => deleteSpotNote(note.id)}
+                              className="text-xs text-gray-400 hover:text-red-500"
+                            >
+                              削除
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             {/* 口コミ(公開・掲示板形式) */}
             {reviewsEnabled && (
               <div className="mt-4 border-t border-gray-100 pt-4">
@@ -687,9 +789,52 @@ export default function SpotDetailModal({
                 )}
               </div>
             )}
+            {/* 非表示スポット(公開スポットを自分の地図・一覧から隠す)。スポット自体には
+                影響しないユーザーごとの設定のため、公開スポットでのみ出す */}
+            {!readOnly && spot.status === "published" && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-gray-400">
+                    {hidden
+                      ? "このスポットは非表示にしています(自分の地図・一覧に表示されません)。"
+                      : "興味のないスポットは、自分の地図・一覧から非表示にできます(他のユーザーには影響しません)。"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={toggleHidden}
+                    disabled={hideUpdating}
+                    className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                      hidden
+                        ? "border-blue-600 text-blue-600"
+                        : "border-gray-300 text-gray-500"
+                    }`}
+                  >
+                    {hidden ? "非表示を解除" : "非表示にする"}
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
+
+      {(showNoteForm || editingNote) && spot && (
+        <SpotNoteFormModal
+          spotId={spot.id}
+          spotName={spot.name}
+          note={editingNote ?? undefined}
+          onClose={() => {
+            setShowNoteForm(false);
+            setEditingNote(null);
+          }}
+          onSaved={() => {
+            setShowNoteForm(false);
+            setEditingNote(null);
+            load();
+            onSpotNoteChange?.();
+          }}
+        />
+      )}
 
       {showForm && spot && (
         <VisitFormModal

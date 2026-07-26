@@ -312,6 +312,33 @@ export function visitPhotoSrc(photo: string): string {
   return `/api/photos/${photo}`;
 }
 
+/**
+ * 未訪問記録。訪問したが休みや時間の都合でちゃんと見られなかった、事前の下調べを
+ * メモしておきたい、といった「訪問記録にはしない個人メモ」(非公開)。
+ * visitsと独立で、同一スポットに複数件持てる。訪問済みの判定(ピンの色・
+ * 訪問状況の絞り込み)には一切関与せず、訪問記録の作成時にも自動では消えない
+ */
+export interface SpotNote {
+  id: string;
+  user_id: string;
+  spot_id: string;
+  /** 対象の日時(訪問を試みた日など。ISO 8601文字列)。不要ならnull */
+  noted_on: string | null;
+  memo: string;
+  created_at: string;
+}
+
+/**
+ * 非表示スポット。公開スポットのうち「自分は興味がない」ものをユーザーごとに
+ * 地図・一覧から隠す設定(スポット自体には影響しない)。visit_plansと同じトグル管理
+ */
+export interface SpotHide {
+  id: string;
+  user_id: string;
+  spot_id: string;
+  created_at: string;
+}
+
 /** 訪問予定(行きたい場所のブックマーク)。訪問を記録すると自動で消える */
 export interface VisitPlan {
   id: string;

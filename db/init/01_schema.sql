@@ -244,6 +244,44 @@ create index visits_user_id_idx on visits (user_id);
 create index visits_spot_id_idx on visits (spot_id);
 
 -- =============================================================
+-- spot_notes: 未訪問記録。訪問したが休みや時間の都合でちゃんと見られなかった、
+-- 事前の下調べをメモしておきたい、といった「訪問記録にはしない個人メモ」。
+-- visitsと独立の非公開データで、同一ユーザー×同一スポットで複数件持てる。
+-- 訪問済みの判定(ピンの色・訪問状況の絞り込み)には一切関与せず、
+-- 訪問記録の作成時にも自動では消えない(下調べは訪問後も見返せる方がよい)。
+-- noted_onは対象の日時(訪問を試みた日など)。不要ならnullでよい
+-- =============================================================
+create table spot_notes (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references users (id) on delete cascade,
+  spot_id    uuid not null references spots (id) on delete cascade,
+  noted_on   timestamptz,
+  memo       text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index spot_notes_user_id_idx on spot_notes (user_id);
+create index spot_notes_spot_id_idx on spot_notes (spot_id);
+
+-- =============================================================
+-- spot_hides: 非表示スポット。公開スポットのうち「自分は興味がない」ものを
+-- ユーザーごとに地図・一覧から隠すための設定(スポット自体には一切影響しない)。
+-- 同一ユーザー×同一スポットは1件まで(トグル管理。visit_plansと同じ構造)
+-- =============================================================
+create table spot_hides (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references users (id) on delete cascade,
+  spot_id    uuid not null references spots (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, spot_id)
+);
+
+create index spot_hides_user_id_idx on spot_hides (user_id);
+create index spot_hides_spot_id_idx on spot_hides (spot_id);
+
+-- =============================================================
 -- visit_plans: 訪問予定リスト(行きたい場所のブックマーク)。
 -- 同一ユーザー×同一スポットは1件まで(トグル管理)。訪問を記録すると自動で消える
 -- (app/api/visits/route.tsのPOST参照)
@@ -344,6 +382,14 @@ create trigger spot_route_points_set_updated_at
 
 create trigger visits_set_updated_at
   before update on visits
+  for each row execute function set_updated_at();
+
+create trigger spot_notes_set_updated_at
+  before update on spot_notes
+  for each row execute function set_updated_at();
+
+create trigger spot_hides_set_updated_at
+  before update on spot_hides
   for each row execute function set_updated_at();
 
 create trigger visit_plans_set_updated_at

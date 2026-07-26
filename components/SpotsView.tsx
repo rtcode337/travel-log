@@ -8,6 +8,8 @@ import {
   type MyReview,
   type Series,
   type Spot,
+  type SpotHide,
+  type SpotNote,
   type Visit,
   type VisitPlan,
   type VisitPlanList,
@@ -204,6 +206,10 @@ export default function SpotsView({
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
   const [myReviews, setMyReviews] = useState<MyReview[]>([]);
+  // 未訪問記録(訪問記録にはしない個人メモ)と、非表示にしたスポット(全種別分。
+  // どちらもspot_id基準のため、この種別のスポットに絞る処理は表示側で行う)
+  const [spotNotes, setSpotNotes] = useState<SpotNote[]>([]);
+  const [spotHides, setSpotHides] = useState<SpotHide[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
@@ -294,6 +300,16 @@ export default function SpotsView({
     setMyReviews(data ?? []);
   }, [spotTypeKey]);
 
+  const loadSpotNotes = useCallback(async () => {
+    const { data } = await api.spotNotes.list();
+    setSpotNotes(data ?? []);
+  }, []);
+
+  const loadSpotHides = useCallback(async () => {
+    const { data } = await api.spotHides.list();
+    setSpotHides(data ?? []);
+  }, []);
+
   // 公開スポットはIndexedDBの明示ダウンロードキャッシュ(spotCache)から得るため、
   // ここでは自分の非公開スポットだけをAPIから取り直す
   const loadPrivateSpots = useCallback(async () => {
@@ -311,6 +327,13 @@ export default function SpotsView({
     },
     [spotCache, loadPrivateSpots, managementLoaded, loadManagementSpots]
   );
+
+  /** 非表示にする/解除の切り替え後の再取得。「シリーズから探す」はサーバー側で
+   * 非表示スポットを除外しているため、読み込み済みならページも取り直す */
+  const handleHideChange = useCallback(() => {
+    loadSpotHides();
+    if (managementLoaded) loadManagementSpots();
+  }, [loadSpotHides, managementLoaded, loadManagementSpots]);
 
   /** スポットの詳細画面での削除後、表示中のモードに応じて取り直す */
   const refreshAfterSpotDelete = useCallback(
@@ -331,6 +354,8 @@ export default function SpotsView({
         loadVisitPlans(),
         loadPlanLists(),
         loadMyReviews(),
+        loadSpotNotes(),
+        loadSpotHides(),
       ]);
       setLoading(false);
     })();
@@ -340,6 +365,8 @@ export default function SpotsView({
     loadVisitPlans,
     loadPlanLists,
     loadMyReviews,
+    loadSpotNotes,
+    loadSpotHides,
     spotTypeKey,
   ]);
 
@@ -352,6 +379,31 @@ export default function SpotsView({
   const visitedIds = useMemo(
     () => new Set(visits.map((v) => v.spot_id)),
     [visits]
+  );
+
+  // 自分が非表示にしたスポットのID。地域別・シリーズ別の閲覧一覧からは除外する
+  // (訪問予定・訪問記録などの自分の記録の一覧は明示データのためそのまま出す)
+  const hiddenIds = useMemo(
+    () => new Set(spotHides.map((h) => h.spot_id)),
+    [spotHides]
+  );
+
+  /** この種別のスポットへの未訪問記録(APIの並び=日時が新しい順・不明は最後) */
+  const myNotes = useMemo(
+    () =>
+      spotNotes
+        .filter((n) => spotById.has(n.spot_id))
+        .map((n) => ({ note: n, spot: spotById.get(n.spot_id)! })),
+    [spotNotes, spotById]
+  );
+
+  /** この種別で非表示にしたスポット(新しく非表示にした順)。解除の入口になる一覧 */
+  const hiddenSpots = useMemo(
+    () =>
+      spotHides
+        .filter((h) => spotById.has(h.spot_id))
+        .map((h) => spotById.get(h.spot_id)!),
+    [spotHides, spotById]
   );
 
   /** spot_id → 最新訪問日(ソート用) */
@@ -401,6 +453,8 @@ export default function SpotsView({
   const regionRows = useMemo(() => {
     const counts = new Map<string, { total: number; visited: number }>();
     for (const spot of spots) {
+      // 非表示にしたスポットは地域別の件数・一覧に含めない
+      if (hiddenIds.has(spot.id)) continue;
       const row = counts.get(spot.region) ?? { total: 0, visited: 0 };
       row.total += 1;
       if (visitedIds.has(spot.id)) row.visited += 1;
@@ -409,11 +463,12 @@ export default function SpotsView({
     return Array.from(counts.keys())
       .sort((a, b) => compareRegions(a, b, regionScope))
       .map((p) => ({ region: p, ...counts.get(p)! }));
-  }, [spots, visitedIds, regionScope]);
+  }, [spots, visitedIds, hiddenIds, regionScope]);
 
   const filteredSpots = useMemo(() => {
     const list = spots.filter((s) => {
       if (s.region !== selectedRegion) return false;
+      if (hiddenIds.has(s.id)) return false;
       return passesFilters(filters, s.series, s.categories, visitedIds.has(s.id));
     });
     list.sort((a, b) => {
@@ -441,6 +496,7 @@ export default function SpotsView({
     selectedRegion,
     filters,
     visitedIds,
+    hiddenIds,
     sortKey,
     latestVisitDate,
     seriesStyles,
@@ -449,6 +505,8 @@ export default function SpotsView({
   const plannedPager = usePagedItems(plannedSpots, CLIENT_PAGE_SIZE);
   const recentVisitsPager = usePagedItems(recentVisits, CLIENT_PAGE_SIZE);
   const myReviewsPager = usePagedItems(myReviews, CLIENT_PAGE_SIZE);
+  const myNotesPager = usePagedItems(myNotes, CLIENT_PAGE_SIZE);
+  const hiddenSpotsPager = usePagedItems(hiddenSpots, CLIENT_PAGE_SIZE);
   const privateSpotsPager = usePagedItems(myPrivateSpots, CLIENT_PAGE_SIZE);
   const filteredSpotsPager = usePagedItems(filteredSpots, CLIENT_PAGE_SIZE);
   const { setPage: setFilteredPage } = filteredSpotsPager;
@@ -654,6 +712,52 @@ export default function SpotsView({
                 </>
               )}
             </div>
+            {/* 未訪問記録(休みで見られなかった・下調べのメモ)。0件のときは出さない */}
+            {myNotes.length > 0 && (
+              <div className="mb-6">
+                <h1 className="mb-4 text-lg font-bold">未訪問記録</h1>
+                <PagedListHeader
+                  page={myNotesPager.page}
+                  totalPages={myNotesPager.totalPages}
+                  total={myNotesPager.total}
+                  onChange={myNotesPager.setPage}
+                />
+                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  {myNotesPager.pageItems.map(({ note, spot }) => (
+                    <li key={note.id}>
+                      <button
+                        onClick={() => setDetailSpotId(spot.id)}
+                        className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                      >
+                        <SeriesBadge
+                          series={spot.series}
+                          seriesStyles={seriesStyles}
+                          isPrivate={spot.status === "private"}
+                          size="sm"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{spot.name}</p>
+                          <p className="text-xs text-gray-500">{spot.region}</p>
+                          <p className="mt-1 line-clamp-2 text-sm text-gray-700">
+                            {note.memo}
+                          </p>
+                        </div>
+                        {note.noted_on && (
+                          <span className="shrink-0 text-xs text-gray-400">
+                            {new Date(note.noted_on).toLocaleDateString("ja-JP")}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <PagedListFooter
+                  page={myNotesPager.page}
+                  totalPages={myNotesPager.totalPages}
+                  onChange={myNotesPager.setPage}
+                />
+              </div>
+            )}
             {myReviews.length > 0 && (
               <div className="mb-6">
                 <h1 className="mb-4 text-lg font-bold">自分が書いた口コミ</h1>
@@ -733,6 +837,50 @@ export default function SpotsView({
                   page={privateSpotsPager.page}
                   totalPages={privateSpotsPager.totalPages}
                   onChange={privateSpotsPager.setPage}
+                />
+              </div>
+            )}
+            {/* 非表示にしたスポット(地図・一覧から除外中)。解除の入口として
+                ここにだけ表示する。0件のときは出さない */}
+            {hiddenSpots.length > 0 && (
+              <div className="mb-6">
+                <h1 className="mb-1 text-lg font-bold">非表示にしたスポット</h1>
+                <p className="mb-4 text-xs text-gray-500">
+                  地図・一覧に表示していないスポットです。タップして開き、「非表示を解除」で元に戻せます。
+                </p>
+                <PagedListHeader
+                  page={hiddenSpotsPager.page}
+                  totalPages={hiddenSpotsPager.totalPages}
+                  total={hiddenSpotsPager.total}
+                  onChange={hiddenSpotsPager.setPage}
+                />
+                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                  {hiddenSpotsPager.pageItems.map((spot) => (
+                    <li key={spot.id}>
+                      <button
+                        onClick={() => setDetailSpotId(spot.id)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                      >
+                        <SeriesBadge
+                          series={spot.series}
+                          seriesStyles={seriesStyles}
+                          size="sm"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{spot.name}</p>
+                          <p className="text-xs text-gray-500">{spot.region}</p>
+                        </div>
+                        <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                          非表示中
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <PagedListFooter
+                  page={hiddenSpotsPager.page}
+                  totalPages={hiddenSpotsPager.totalPages}
+                  onChange={hiddenSpotsPager.setPage}
                 />
               </div>
             )}
@@ -898,6 +1046,8 @@ export default function SpotsView({
             onVisitPlanChange={loadVisitPlans}
             onPlanListChange={loadPlanLists}
             onReviewChange={loadMyReviews}
+            onSpotNoteChange={loadSpotNotes}
+            onHideChange={handleHideChange}
           />
         )}
 
@@ -1034,6 +1184,8 @@ export default function SpotsView({
           onVisitPlanChange={loadVisitPlans}
           onPlanListChange={loadPlanLists}
           onReviewChange={loadMyReviews}
+          onSpotNoteChange={loadSpotNotes}
+          onHideChange={handleHideChange}
         />
       )}
     </main>

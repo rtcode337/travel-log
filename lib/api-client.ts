@@ -6,6 +6,8 @@ import type {
   Role,
   Spot,
   SpotDeletion,
+  SpotHide,
+  SpotNote,
   SpotRoute,
   SpotType,
   SpotTypeSettingKey,
@@ -265,6 +267,41 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/visits/${id}`, { method: "DELETE" }),
+  },
+  spotNotes: {
+    // 未訪問記録(訪問記録にはしない個人メモ)。spot_id省略時は自分の全件
+    list: (spotId?: string) =>
+      request<SpotNote[]>(
+        `/api/spot-notes${spotId ? `?spot_id=${spotId}` : ""}`
+      ),
+    create: (note: { spot_id: string; noted_on: string | null; memo: string }) =>
+      request<SpotNote>("/api/spot-notes", {
+        method: "POST",
+        body: JSON.stringify(note),
+      }),
+    update: (id: string, note: { noted_on: string | null; memo: string }) =>
+      request<SpotNote>(`/api/spot-notes/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(note),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/api/spot-notes/${id}`, { method: "DELETE" }),
+  },
+  spotHides: {
+    // 非表示スポット(自分の地図・一覧から隠す設定)。spot_id省略時は自分の全件
+    list: (spotId?: string) =>
+      request<SpotHide[]>(
+        `/api/spot-hides${spotId ? `?spot_id=${spotId}` : ""}`
+      ),
+    create: (spotId: string) =>
+      request<SpotHide>("/api/spot-hides", {
+        method: "POST",
+        body: JSON.stringify({ spot_id: spotId }),
+      }),
+    delete: (spotId: string) =>
+      request<{ ok: boolean }>(`/api/spot-hides/${spotId}`, {
+        method: "DELETE",
+      }),
   },
   visitPlans: {
     list: (spotId?: string) =>
