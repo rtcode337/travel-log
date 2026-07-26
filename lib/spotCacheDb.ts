@@ -25,6 +25,14 @@ export type CachedSpot = Pick<
 
 export interface StoredSpotCache {
   downloadedAt: string; // ISO
+  /**
+   * ダウンロードしたデータ(公開スポット・公開ルート)の中で最も新しいupdated_at。
+   * 鮮度チェック(/api/spots/last-updated との比較)は端末の時計に依らないよう
+   * downloadedAt(端末時刻)ではなくこちら(サーバー時刻)で行う。
+   * この項目を持たない旧エントリはdownloadedAtへフォールバックする(任意項目のため
+   * DB_VERSIONは上げない)
+   */
+  latestUpdatedAt?: string | null;
   spots: CachedSpot[];
   /**
    * 公開(published)ルート。公開スポットのダウンロードと同時に取得して一緒に保存する

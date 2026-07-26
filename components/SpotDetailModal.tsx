@@ -75,6 +75,7 @@ export default function SpotDetailModal({
   onSpotChange,
   onSpotDeleted,
   onVisitPlanChange,
+  onPlanListChange,
   onReviewChange,
 }: {
   spotId: string;
@@ -105,6 +106,9 @@ export default function SpotDetailModal({
   onSpotDeleted?: (spotId: string) => void;
   /** 訪問予定への追加・解除があったときに呼ばれる(呼び出し元の一覧の再取得用) */
   onVisitPlanChange?: () => void;
+  /** 既存の訪問予定リストへこのスポットを追加したときに呼ばれる(呼び出し元の
+   * リスト一覧の再取得用。地図なら経路表示中のリストの線にも反映される) */
+  onPlanListChange?: () => void;
   /** 口コミの投稿があったときに呼ばれる(呼び出し元の「自分が書いた口コミ」一覧の再取得用) */
   onReviewChange?: () => void;
 }) {
@@ -134,6 +138,40 @@ export default function SpotDetailModal({
   const [moderating, setModerating] = useState(false);
   // 訪問履歴のサムネイルをタップしたときに拡大表示する写真のURL
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  // 「Google マップで経路を表示」のorigin(出発地)に使う現在地([lat, lng])。
+  // originを指定しないとGoogle マップ側が最後に開いていた地点等を出発地にして
+  // しまうことがあるため、現在地が分かるときは明示的に渡す。ただし位置情報の
+  // 権限が既に許可されている場合のみ取得する(スポット詳細を開いただけで権限
+  // ダイアログを出さないため)。取れないときはoriginなし=従来の挙動に落とす
+  const [routeOrigin, setRouteOrigin] = useState<[number, number] | null>(null);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await navigator.permissions.query({ name: "geolocation" });
+        if (cancelled || status.state !== "granted") return;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (!cancelled) {
+              setRouteOrigin([pos.coords.latitude, pos.coords.longitude]);
+            }
+          },
+          () => {
+            // 取得失敗(タイムアウト等)はoriginなしのままにする
+          },
+          // 地図の現在地表示(GeolocateControl)が直近に取った位置があればそれで足りる
+          { maximumAge: 60_000, timeout: 10_000 }
+        );
+      } catch {
+        // permissions APIが無い環境では従来どおりoriginなし
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // 拡大表示中はEscキーでも閉じられるようにする
   useEffect(() => {
@@ -463,7 +501,11 @@ export default function SpotDetailModal({
                 <a
                   href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
                     `${spot.lat},${spot.lng}`
-                  )}`}
+                  )}${
+                    routeOrigin
+                      ? `&origin=${encodeURIComponent(`${routeOrigin[0]},${routeOrigin[1]}`)}`
+                      : ""
+                  }`}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Google マップで経路を表示"
@@ -757,6 +799,7 @@ export default function SpotDetailModal({
           spotName={spot?.name}
           typeKey={typeKey}
           onClose={() => setShowAddToList(false)}
+          onAdded={onPlanListChange}
         />
       )}
     </div>

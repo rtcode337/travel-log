@@ -110,6 +110,12 @@ export interface SpotRoute {
   status: SpotStatus;
   created_by: string | null;
   created_at: string;
+  /**
+   * 経由地の入れ替え(upsert)でも進む。公開スポットキャッシュの鮮度判定
+   * (lib/useSpotCache.ts)に使う。旧バージョンで保存したキャッシュ内の
+   * ルートには入っていないことがある
+   */
+  updated_at: string;
   points: SpotRoutePoint[];
 }
 

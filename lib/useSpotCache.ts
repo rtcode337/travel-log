@@ -15,10 +15,15 @@ import {
 /** アプリ内で扱う公開スポットキャッシュ(spotsは表示用にSpotへ復元済み) */
 export interface SpotCacheEntry {
   downloadedAt: string; // ISO
+  /** ダウンロードしたデータの中で最も新しいupdated_at(鮮度チェック用。旧エントリはnull) */
+  latestUpdatedAt: string | null;
   spots: Spot[];
   /** 公開ルート(公開スポットと同時にダウンロードして保存される) */
   routes: SpotRoute[];
 }
+
+/** ダウンロード確認ダイアログを出す理由(未ダウンロード / キャッシュより新しい更新がある) */
+export type SpotDownloadPromptReason = "missing" | "stale";
 
 const SAVE_ERROR =
   "スポットデータの保存に失敗しました。次に開いたときは再ダウンロードが必要です。";
@@ -46,10 +51,31 @@ export function formatDownloadedAt(iso: string): string {
   });
 }
 
+/** aとbのうち新しい方のISO日時を返す(null・不正値は無視する) */
+function laterOf(a: string | null, b: string | null | undefined): string | null {
+  const aTime = a ? Date.parse(a) : NaN;
+  const bTime = b ? Date.parse(b) : NaN;
+  if (Number.isNaN(bTime)) return Number.isNaN(aTime) ? null : a;
+  if (Number.isNaN(aTime)) return b ?? null;
+  return aTime >= bTime ? a : (b ?? null);
+}
+
+/**
+ * ダウンロードしたデータの中で最も新しいupdated_atを求める(鮮度チェック用に保存する)。
+ * 旧バージョンのキャッシュから来たルートはupdated_atを持たないことがあるため無視する
+ */
+function latestUpdatedAtOf(spots: Spot[], routes: SpotRoute[]): string | null {
+  let latest: string | null = null;
+  for (const s of spots) latest = laterOf(latest, s.updated_at);
+  for (const r of routes) latest = laterOf(latest, r.updated_at);
+  return latest;
+}
+
 /** ダウンロードした公開スポット・公開ルートをキャッシュの保存用エントリにまとめる */
 function toStored(spots: Spot[], routes: SpotRoute[]): StoredSpotCache {
   return {
     downloadedAt: new Date().toISOString(),
+    latestUpdatedAt: latestUpdatedAtOf(spots, routes),
     spots: spots.map(trimSpot),
     routes,
   };
@@ -59,6 +85,7 @@ function toStored(spots: Spot[], routes: SpotRoute[]): StoredSpotCache {
 function toEntry(stored: StoredSpotCache): SpotCacheEntry {
   return {
     downloadedAt: stored.downloadedAt,
+    latestUpdatedAt: stored.latestUpdatedAt ?? null,
     spots: stored.spots.map(expandSpot),
     routes: stored.routes ?? [],
   };
@@ -149,17 +176,27 @@ export async function downloadSpotCacheFor(
 /**
  * 公開スポットは頻繁に変わらないため、ページを開くたびにAPIから取り直すのではなく
  * スポット種別ごとにIndexedDBへ明示的にダウンロード・キャッシュする
- * (/[type]/map・/[type]/spots で共通利用)。未ダウンロードならページを開いたタイミングで
- * 一度だけダウンロード確認ダイアログを出す。
+ * (/[type]/map・/[type]/spots で共通利用)。
+ *
+ * autoPromptがtrue(地図)の場合、ページを開いたタイミングで一度だけ、
+ * 未ダウンロードならダウンロード確認ダイアログを出し、ダウンロード済みなら
+ * サーバー側の公開スポット・公開ルートに更新が入っていないかを裏で確認して
+ * (/api/spots/last-updated)、キャッシュが古ければ再ダウンロードを促すダイアログを出す。
+ * スポット一覧(/[type]/spots)はautoPrompt: falseで呼び、どちらのダイアログも出さない
+ * (ダウンロードは地図側から行う)。
  *
  * 数万件規模の種別でも保存できるよう、保存先はlocalStorage(約5MB上限)
  * ではなくIndexedDBを使い、かつ地図・一覧で使うフィールドだけに間引いて保存する
  * (lib/spotCacheDb.ts)。
  */
-export function useSpotCache(typeKey: string) {
+export function useSpotCache(
+  typeKey: string,
+  { autoPrompt = true }: { autoPrompt?: boolean } = {}
+) {
   const [entry, setEntry] = useState<SpotCacheEntry | null>(null);
   const [ready, setReady] = useState(false);
-  const [showMissingPrompt, setShowMissingPrompt] = useState(false);
+  const [downloadPrompt, setDownloadPrompt] =
+    useState<SpotDownloadPromptReason | null>(null);
   // ダウンロード本体を読む前に、サイズが分かった時点で見せる確認ダイアログ
   // (sizeBytesはContent-Lengthそのもの=これから受信する生JSONのバイト数。
   // 実際にIndexedDBへ保存するのは間引き後のデータのため、保存サイズはこれより小さくなる)
@@ -208,10 +245,45 @@ export function useSpotCache(typeKey: string) {
   }, [typeKey]);
 
   useEffect(() => {
-    if (!ready || autoPromptedRef.current || entry) return;
+    if (!ready || autoPromptedRef.current || !autoPrompt) return;
     autoPromptedRef.current = true;
-    setShowMissingPrompt(true);
-  }, [ready, entry]);
+    if (!entry) {
+      setDownloadPrompt("missing");
+      return;
+    }
+    // ダウンロード済みでも、公開スポット・公開ルートに更新が入っていないかを裏で確認し、
+    // キャッシュが古ければ未ダウンロード時と同じ形の確認ダイアログを出す。
+    // api-clientのGETキャッシュに乗ると次回以降このタブで再チェックされなくなるため素のfetch。
+    // 確認の失敗(オフライン等)は黙って無視し、キャッシュのまま使い続ける
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ type: typeKey });
+        const res = await fetch(`/api/spots/last-updated?${qs.toString()}`);
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          data?: { latest: string | null; spotCount: number; routeCount: number };
+        };
+        const remote = body.data;
+        if (!remote || cancelled) return;
+        // 件数の違いは削除(max(updated_at)が進まない)を拾うため。日時の比較は
+        // 端末の時計とずれないよう、原則ダウンロード時に保存したサーバー日時
+        // (latestUpdatedAt)と比べる(持たない旧エントリのみdownloadedAtで近似)
+        const cachedLatest = entry.latestUpdatedAt ?? entry.downloadedAt;
+        const stale =
+          remote.spotCount !== entry.spots.length ||
+          remote.routeCount !== entry.routes.length ||
+          (remote.latest != null &&
+            Date.parse(remote.latest) > Date.parse(cachedLatest));
+        if (stale) setDownloadPrompt("stale");
+      } catch {
+        // オフライン等。エラー表示もしない(キャッシュでの閲覧は続けられる)
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, entry, autoPrompt, typeKey]);
 
   /** ダウンロード済みデータを保存する。保存に失敗してもこのセッションの表示は続けられる */
   const persist = useCallback(
@@ -275,7 +347,7 @@ export function useSpotCache(typeKey: string) {
     []
   );
 
-  /** ヘッダー確認を挟まず、一気に取得する(「未ダウンロードです」ダイアログ用) */
+  /** ヘッダー確認を挟まず、一気に取得する(「未ダウンロードです」「更新があります」ダイアログ用) */
   const fetchPublished = useCallback(async (): Promise<Spot[] | null> => {
     const opened = await openFetch();
     if (!opened) return null;
@@ -340,21 +412,22 @@ export function useSpotCache(typeKey: string) {
     setManualConfirm(null);
   }, []);
 
-  /** 「未ダウンロードです」ダイアログで同意したとき */
-  const confirmMissingDownload = useCallback(async () => {
-    setShowMissingPrompt(false);
+  /** 「未ダウンロードです」「更新があります」ダイアログで同意したとき(どちらも全件を取り直す) */
+  const confirmDownloadPrompt = useCallback(async () => {
+    const reason = downloadPrompt;
+    setDownloadPrompt(null);
     const data = await fetchPublished();
     if (!data) {
       // 失敗・キャンセル時は確認ダイアログに戻す(エラーはそのダイアログ内に表示される)
-      setShowMissingPrompt(true);
+      setDownloadPrompt(reason);
       return;
     }
     const stored = toStored(data, await fetchPublicRoutes());
     setEntry(toEntry(stored));
     persist(stored);
-  }, [fetchPublished, persist, fetchPublicRoutes]);
+  }, [downloadPrompt, fetchPublished, persist, fetchPublicRoutes]);
 
-  const dismissMissingPrompt = useCallback(() => setShowMissingPrompt(false), []);
+  const dismissDownloadPrompt = useCallback(() => setDownloadPrompt(null), []);
 
   /** ダウンロード済みの公開スポットキャッシュを削除する(歯車メニューから明示的に実行) */
   const clearCache = useCallback(async () => {
@@ -388,9 +461,17 @@ export function useSpotCache(typeKey: string) {
               ? prev.spots.map((s) => (s.id === spot.id ? spot : s))
               : [...prev.spots, spot]
             : prev.spots.filter((s) => s.id !== spot.id);
-        const next = { ...prev, spots };
+        // この変更でサーバー側のupdated_atも進んでいるため、キャッシュ側の
+        // 鮮度基準も進めておく(次の鮮度チェックが自分の変更を「更新あり」と
+        // 誤検知しないように)
+        const next = {
+          ...prev,
+          spots,
+          latestUpdatedAt: laterOf(prev.latestUpdatedAt, spot.updated_at),
+        };
         persist({
           downloadedAt: next.downloadedAt,
+          latestUpdatedAt: next.latestUpdatedAt,
           spots: next.spots.map(trimSpot),
           routes: next.routes,
         });
@@ -408,6 +489,7 @@ export function useSpotCache(typeKey: string) {
         const next = { ...prev, spots: prev.spots.filter((s) => s.id !== spotId) };
         persist({
           downloadedAt: next.downloadedAt,
+          latestUpdatedAt: next.latestUpdatedAt,
           spots: next.spots.map(trimSpot),
           routes: next.routes,
         });
@@ -426,14 +508,14 @@ export function useSpotCache(typeKey: string) {
     downloading,
     progress,
     error,
-    showMissingPrompt,
+    downloadPrompt,
     manualConfirm,
     startManualDownload,
     cancelDownload,
     confirmManualDownload,
     cancelManualDownload,
-    confirmMissingDownload,
-    dismissMissingPrompt,
+    confirmDownloadPrompt,
+    dismissDownloadPrompt,
     clearCache,
     applySpotChange,
     applySpotDelete,

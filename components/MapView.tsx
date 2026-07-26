@@ -119,6 +119,13 @@ const VISIT_PATH_COLOR = "#16a34a";
 const PLAN_LIST_PATH_COLOR = "#9333ea";
 
 /**
+ * 「現在地→訪問予定リスト先頭のスポット」の区間の線・矢印の色。
+ * GeolocateControlの現在地の青丸(maplibre-gl既定の.maplibregl-user-location-dot)と
+ * 同じ青にして、現在地から出ている線だと分かるようにする
+ */
+const CURRENT_LOCATION_PATH_COLOR = "#1da1f2";
+
+/**
  * ルートの進行方向を示す右向き矢印(白フチ付き)の画像を色ごとに生成して登録する。
  * symbol-placement: "line" のシンボルはライン方向に回転して置かれるため、
  * 「右向き」がそのまま巡った順の向きになる。冪等・同期
@@ -547,9 +554,11 @@ function buildPlanListPath(
 /**
  * ルートと、地図に重ねる色付きの経路(訪問順の経路・訪問予定リストの経路)を
  * GeoJSONのLineString群にする。矢印画像の登録もここで済ませる。
- * `start`([lng, lat])を渡した経路は、その座標を先頭に繋いで描く
- * (訪問予定リストの経路で「現在地→リスト先頭のスポット」の線を引くのに使う。
- * 経路のスポットが1件も無いときは始点だけでは線にならないため繋がない)。
+ * `start`([lng, lat])を渡した経路は、その座標からその経路の先頭までの区間を
+ * `startColor`(省略時は経路と同色)の別のLineStringとして繋いで描く
+ * (訪問予定リストの経路で「現在地→リスト先頭のスポット」の線を現在地の青丸と
+ * 同じ色で引くのに使う。経路のスポットが1件も無いときは始点だけでは線に
+ * ならないため繋がない)。
  */
 function buildRouteGeoJSON(
   map: maplibregl.Map,
@@ -560,17 +569,27 @@ function buildRouteGeoJSON(
     color: string;
     kind?: "visit" | "plan";
     start?: [number, number] | null;
+    startColor?: string;
   }[]
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, RouteFeatureProps> {
   const extraFeatures: GeoJSON.Feature<GeoJSON.LineString, RouteFeatureProps>[] =
     extraPaths
-      .map((p) => ({
-        ...p,
-        coordinates: [
-          ...(p.start && p.path.length > 0 ? [p.start] : []),
-          ...p.path.map((s): [number, number] => [s.lng, s.lat]),
-        ],
-      }))
+      .flatMap((p) => [
+        // 始点(現在地)→経路先頭の区間。色を分けられるよう独立した線にする
+        ...(p.start && p.path.length > 0
+          ? [
+              {
+                ...p,
+                color: p.startColor ?? p.color,
+                coordinates: [
+                  p.start,
+                  [p.path[0].lng, p.path[0].lat] as [number, number],
+                ],
+              },
+            ]
+          : []),
+        { ...p, coordinates: p.path.map((s): [number, number] => [s.lng, s.lat]) },
+      ])
       .filter((p) => p.coordinates.length >= 2)
       .map((p) => ({
         type: "Feature" as const,
@@ -1217,6 +1236,10 @@ export default function MapView({
       // 経路詳細の「編集」から来た場合、基本情報モーダルは閉じて地図の作成モードに移る
       // (同一ページ遷移のため自動では閉じない。SpotsView からの遷移では unmount で消える)
       setEditingPlanList(null);
+      // スポット詳細の「訪問予定リストへ追加」→「新しいリストを作成」から来た場合も
+      // 同じく同一ページ遷移のため、スポット詳細(とその中の追加モーダル・基本情報
+      // フォーム)を明示的に閉じる
+      setDetailSpotId(null);
     }
   }, [buildListParam, spotTypeKey]);
 
@@ -2171,11 +2194,20 @@ export default function MapView({
             color: PLAN_LIST_PATH_COLOR,
             kind: "plan",
             // 現在地(青丸)を表示中は、現在地からリスト先頭のスポットまでも結ぶ
+            // (この区間だけ青丸と同じ青)
             start: currentLocation,
+            startColor: CURRENT_LOCATION_PATH_COLOR,
           },
           // 作成モード中の下書きの経路。kind無し=線のタップで詳細は開かない
-          // (作成中のタップはピンの追加操作を優先するため)
-          { path: buildDraftPath, color: PLAN_LIST_PATH_COLOR },
+          // (作成中のタップはピンの追加操作を優先するため)。
+          // 保存済みリストの経路表示と同じく、現在地(青丸)を表示中は
+          // 現在地から下書き先頭のスポットまでも青で結ぶ
+          {
+            path: buildDraftPath,
+            color: PLAN_LIST_PATH_COLOR,
+            start: currentLocation,
+            startColor: CURRENT_LOCATION_PATH_COLOR,
+          },
         ])
       );
     });
@@ -3185,6 +3217,9 @@ export default function MapView({
           onClose={() => setDetailSpotId(null)}
           onVisitChange={loadVisits}
           onVisitRecorded={handleVisitRecorded}
+          // 既存の訪問予定リストへの追加をリスト一覧へ反映する(経路表示中の
+          // リストに追加した場合、地図の紫の経路も引き直される)
+          onPlanListChange={loadPlanLists}
           onSpotChange={(spot) => {
             spotCache.applySpotChange(spot);
             loadPrivateSpots();

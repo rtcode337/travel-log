@@ -64,19 +64,23 @@ export function DownloadProgressDialog({
 
 /**
  * 公開スポットのダウンロード確認まわりのダイアログ。
- * 未ダウンロード時の確認と、歯車メニューからの手動ダウンロード確認の両方をここでまとめて描画する
- * (/[type]/map・/[type]/spots で共通利用)。
+ * 地図を開いたときの自動確認(未ダウンロード時と、ダウンロード済みキャッシュより
+ * 新しい更新がサーバーにあるとき)と、歯車メニューからの手動ダウンロード確認の両方を
+ * ここでまとめて描画する(/[type]/map・/[type]/spots で共通利用。ただし一覧側は
+ * autoPrompt: falseで自動確認を出さないため、実際に表示されるのは地図のみ)。
  * ダウンロード中は全画面を覆う進捗ダイアログを最前面(NavBar・他ダイアログより上)に出し、
  * 完了までタブ移動などの操作をできなくする。
  */
 export default function SpotDownloadDialogs({ cache }: { cache: SpotCache }) {
   return (
     <>
-      {cache.showMissingPrompt && (
+      {cache.downloadPrompt && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-4">
             <p className="text-sm text-gray-700">
-              スポットデータが未ダウンロードです。ダウンロードしますか?
+              {cache.downloadPrompt === "stale"
+                ? "スポットデータが更新されています。最新のデータをダウンロードしますか?"
+                : "スポットデータが未ダウンロードです。ダウンロードしますか?"}
             </p>
             {cache.error && (
               <p className="mt-2 text-xs text-red-600">{cache.error}</p>
@@ -84,14 +88,14 @@ export default function SpotDownloadDialogs({ cache }: { cache: SpotCache }) {
             <div className="mt-4 flex gap-2">
               <button
                 type="button"
-                onClick={cache.dismissMissingPrompt}
+                onClick={cache.dismissDownloadPrompt}
                 className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
               >
                 あとで
               </button>
               <button
                 type="button"
-                onClick={cache.confirmMissingDownload}
+                onClick={cache.confirmDownloadPrompt}
                 className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
               >
                 ダウンロード
