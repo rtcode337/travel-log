@@ -22,6 +22,7 @@ interface ExportRow {
   visited_on: Date | null;
   memo: string | null;
   photos: string[];
+  unvisited: boolean;
   name: string;
   name_kana: string | null;
   lat: number;
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
   }
 
   const { rows } = await query<ExportRow>(
-    `select v.visited_on, v.memo, v.photos,
+    `select v.visited_on, v.memo, v.photos, v.unvisited,
             s.name, s.name_kana, s.lat, s.lng, s.region, s.series, s.categories
      from visits v
      join spots s on s.id = v.spot_id
@@ -83,6 +84,7 @@ export async function GET(request: Request) {
       "訪問日時(JST)",
       "メモ",
       "写真",
+      "未訪問記録",
     ],
   ];
 
@@ -113,6 +115,8 @@ export async function GET(request: Request) {
       formatVisitedAtJst(row.visited_on),
       row.memo,
       zipPaths.join(";"),
+      // 未訪問記録(訪問済みに数えない記録)は「未訪問」、通常の訪問記録は空欄
+      row.unvisited ? "未訪問" : "",
     ]);
   }
 

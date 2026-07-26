@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import {
+  countedVisits,
   formatVisitedOn,
   getSpotTypeSetting,
   REVIEWS_PAGE_SIZE,
@@ -77,6 +78,7 @@ export default function SpotDetailModal({
   onVisitPlanChange,
   onPlanListChange,
   onReviewChange,
+  onHideChange,
 }: {
   spotId: string;
   /** 編集モーダルのシリーズ・カテゴリ入力サジェスト用(省略時はサジェストなし) */
@@ -111,6 +113,8 @@ export default function SpotDetailModal({
   onPlanListChange?: () => void;
   /** 口コミの投稿があったときに呼ばれる(呼び出し元の「自分が書いた口コミ」一覧の再取得用) */
   onReviewChange?: () => void;
+  /** このスポットの非表示/解除を切り替えたときに呼ばれる(呼び出し元の地図・一覧への反映用) */
+  onHideChange?: () => void;
 }) {
   const typeKey = useCurrentSpotTypeKey();
   const [spot, setSpot] = useState<Spot | null>(null);
@@ -121,6 +125,8 @@ export default function SpotDetailModal({
   const [reviewsPage, setReviewsPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  // 「+ 未訪問記録」から開いたか(訪問記録と同じフォームを、未訪問記録オンで開く)
+  const [formUnvisited, setFormUnvisited] = useState(false);
   // 非公開スポットの位置修正(ドラッグ)モーダルの表示
   const [showReposition, setShowReposition] = useState(false);
   // 編集対象の訪問記録(訪問履歴の「編集」から開く。VisitFormModalの編集モード)
@@ -134,6 +140,9 @@ export default function SpotDetailModal({
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [planned, setPlanned] = useState(false);
   const [planUpdating, setPlanUpdating] = useState(false);
+  // このスポットを自分の地図・一覧から非表示にしているか(公開スポットのみ)
+  const [hidden, setHidden] = useState(false);
+  const [hideUpdating, setHideUpdating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [moderating, setModerating] = useState(false);
   // 訪問履歴のサムネイルをタップしたときに拡大表示する写真のURL
@@ -189,16 +198,19 @@ export default function SpotDetailModal({
       { data: visitsData },
       { data: typesData },
       { data: plansData },
+      { data: hidesData },
     ] = await Promise.all([
       api.spots.get(spotId),
       api.visits.list(spotId),
       api.spotTypes.list(),
       api.visitPlans.list(spotId),
+      api.spotHides.list(spotId),
     ]);
     setSpot(spotData ?? null);
     setVisits(visitsData ?? []);
     setSpotTypes(typesData ?? []);
     setPlanned((plansData?.length ?? 0) > 0);
+    setHidden((hidesData?.length ?? 0) > 0);
     setLoading(false);
   }, [spotId]);
 
@@ -293,6 +305,18 @@ export default function SpotDetailModal({
     await api.visits.delete(id);
     load();
     onVisitChange?.();
+  };
+
+  // 非表示のトグル(公開スポットのみ)。地図・一覧への反映は呼び出し元が行う
+  const toggleHidden = async () => {
+    setHideUpdating(true);
+    const { error } = hidden
+      ? await api.spotHides.delete(spotId)
+      : await api.spotHides.create(spotId);
+    setHideUpdating(false);
+    if (error) return;
+    setHidden((prev) => !prev);
+    onHideChange?.();
   };
 
   const handleDeleteSpot = async () => {
@@ -522,9 +546,10 @@ export default function SpotDetailModal({
               <div className="mb-3 flex items-center justify-between">
                 <div>
                   <h3 className="font-bold">訪問履歴</h3>
-                  {visits.length > 0 && (
+                  {/* 未訪問記録は訪問済みに数えないため、✓の回数には含めない */}
+                  {countedVisits(visits).length > 0 && (
                     <p className="text-sm font-normal text-green-600">
-                      ✓ {visits.length}回
+                      ✓ {countedVisits(visits).length}回
                     </p>
                   )}
                 </div>
@@ -553,8 +578,24 @@ export default function SpotDetailModal({
                         </button>
                       </>
                     )}
+                    {/* 未訪問記録(訪問済みにしない記録)も同じフォーム・同じ訪問履歴に
+                        記録する。ちゃんと見られなかった/下調べのメモ用 */}
+                    {!readOnly && (
+                      <button
+                        onClick={() => {
+                          setFormUnvisited(true);
+                          setShowForm(true);
+                        }}
+                        className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
+                      >
+                        + 未訪問記録
+                      </button>
+                    )}
                     <button
-                      onClick={() => setShowForm(true)}
+                      onClick={() => {
+                        setFormUnvisited(false);
+                        setShowForm(true);
+                      }}
                       className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
                     >
                       + 訪問を記録
@@ -573,7 +614,15 @@ export default function SpotDetailModal({
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium">
-                            {formatVisitedOn(visit.visited_on)}
+                            {/* 日時なしの未訪問記録=下調べのメモ(「時期不明」とは意味が違う) */}
+                            {visit.unvisited && !visit.visited_on
+                              ? "下調べ"
+                              : formatVisitedOn(visit.visited_on)}
+                            {visit.unvisited && (
+                              <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-700">
+                                未訪問
+                              </span>
+                            )}
                           </p>
                           {visit.memo && (
                             <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
@@ -687,6 +736,31 @@ export default function SpotDetailModal({
                 )}
               </div>
             )}
+            {/* 非表示スポット(公開スポットを自分の地図・一覧から隠す)。スポット自体には
+                影響しないユーザーごとの設定のため、公開スポットでのみ出す */}
+            {!readOnly && spot.status === "published" && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-gray-400">
+                    {hidden
+                      ? "このスポットは非表示にしています(自分の地図・一覧に表示されません)。"
+                      : "興味のないスポットは、自分の地図・一覧から非表示にできます(他のユーザーには影響しません)。"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={toggleHidden}
+                    disabled={hideUpdating}
+                    className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                      hidden
+                        ? "border-blue-600 text-blue-600"
+                        : "border-gray-300 text-gray-500"
+                    }`}
+                  >
+                    {hidden ? "非表示を解除" : "非表示にする"}
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -696,8 +770,9 @@ export default function SpotDetailModal({
           spotId={spot.id}
           spotName={spot.name}
           reviewsEnabled={!readOnly && reviewsEnabled}
+          initialUnvisited={formUnvisited}
           onClose={() => setShowForm(false)}
-          onSaved={() => {
+          onSaved={(saved) => {
             setShowForm(false);
             load();
             setReviewsPage(1);
@@ -706,8 +781,12 @@ export default function SpotDetailModal({
             // 訪問記録時、サーバー側で訪問予定からも自動的に外れる
             onVisitPlanChange?.();
             onReviewChange?.();
-            // 地図で経路表示中の訪問予定リストから、訪問済みスポットを自動で外す
-            onVisitRecorded?.(spot.id);
+            // 地図で経路表示中の訪問予定リストから、訪問済みスポットを自動で外す。
+            // 日時なしの未訪問記録(下調べ)はサーバー側でも訪問予定が残る
+            // (まだ行っていない)ため、リストからも外さない
+            if (saved && !(saved.unvisited && !saved.visited_on)) {
+              onVisitRecorded?.(spot.id);
+            }
           }}
         />
       )}

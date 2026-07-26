@@ -67,13 +67,17 @@ export async function PATCH(
     );
   }
 
+  // unvisited(未訪問記録かどうか)は指定されたときだけ更新する(旧クライアント互換)
+  const unvisited =
+    typeof body.unvisited === "boolean" ? body.unvisited : existing.unvisited;
+
   let rows: Visit[];
   try {
     ({ rows } = await query<Visit>(
-      `update visits set visited_on = $1, memo = $2, photos = $3
-       where id = $4 and user_id = $5
+      `update visits set visited_on = $1, memo = $2, photos = $3, unvisited = $4
+       where id = $5 and user_id = $6
        returning *`,
-      [body.visited_on, body.memo, photoPaths, id, userId]
+      [body.visited_on, body.memo, photoPaths, unvisited, id, userId]
     ));
   } catch (e) {
     // DBに記録できなかった新規写真ファイルを残さない
