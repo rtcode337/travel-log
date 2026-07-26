@@ -31,13 +31,18 @@ export default function VisitFormModal({
 }) {
   // datetime-localは「ローカル時刻のYYYY-MM-DDTHH:mm」を扱うため、現在時刻を
   // UTCではなくローカルのまま初期値にする(toISOStringだとUTCにずれる)。
-  // 編集時は既存の訪問日時(未入力=時期不明なら空欄)から始める
+  // 編集時は既存の訪問日時(未入力=時期不明なら空欄)から始める。
+  // 「+ 未訪問記録」から開いたとき(initialUnvisited)は空欄=下調べを既定にする
+  // (現在時刻をプリセットすると、そのまま保存しただけで「訪れたが改めて来たい」
+  // 記録=今日の経路に含まれ訪問予定も外れる扱いになってしまうため)
   const [visitedOn, setVisitedOn] = useState(() =>
     visit
       ? visit.visited_on
         ? toDateTimeLocalValue(new Date(visit.visited_on))
         : ""
-      : toDateTimeLocalValue(new Date())
+      : initialUnvisited
+        ? ""
+        : toDateTimeLocalValue(new Date())
   );
   const [memo, setMemo] = useState(visit?.memo ?? "");
   // 未訪問記録(訪問済みに数えない記録)にするか。編集時は既存値から始める
@@ -117,6 +122,11 @@ export default function VisitFormModal({
             photos={photos}
             onPhotosChange={setPhotos}
             onProcessingChange={setProcessingPhotos}
+            visitedOnHint={
+              unvisited
+                ? "空欄のままなら下調べのメモになります(どの経路にも含まれず、訪問予定も残ります)。"
+                : undefined
+            }
           />
 
           {/* 未訪問記録の切り替え。訪問記録と同じフォーム・同じ訪問履歴に記録し、
@@ -134,7 +144,8 @@ export default function VisitFormModal({
                 <span className="mt-0.5 block text-xs text-gray-400">
                   休みや時間の都合でちゃんと見られなかったときや、事前の下調べのメモに。
                   訪問日時を入れると「訪れたが改めて来たい」記録としてその日の経路に含まれ、
-                  訪問予定からも外れます。訪問日時が空欄なら下調べのメモになり、訪問予定は残ります。
+                  訪問予定からも外れます。訪問日時が空欄なら下調べのメモになり、
+                  どの経路にも含まれず、訪問予定も残ります。
                 </span>
               </span>
             </label>
