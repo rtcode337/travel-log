@@ -49,7 +49,7 @@ export async function GET(request: Request) {
 
   const { rows } = await query<SpotRoute>(
     `select r.id, r.spot_type_id, r.name, r.series, r.description,
-       r.status, r.created_by, r.created_at,
+       r.status, r.created_by, r.created_at, r.updated_at,
        coalesce(
          (select json_agg(json_build_object(
              'spot_id', p.spot_id, 'seq', p.seq,

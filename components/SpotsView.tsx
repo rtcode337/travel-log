@@ -186,7 +186,9 @@ export default function SpotsView({
   /** 表示対象のスポット種別キー(常に /[type]/spots から渡される) */
   spotTypeKey: string;
 }) {
-  const spotCache = useSpotCache(spotTypeKey);
+  // 一覧では未ダウンロード・更新ありの自動確認ダイアログを出さない(地図側でだけ促す。
+  // 未ダウンロードのままなら公開スポット抜き=自分のスポットだけの一覧になる)
+  const spotCache = useSpotCache(spotTypeKey, { autoPrompt: false });
   const seriesStyles = useSeriesStyles(spotTypeKey);
   // 種別のカテゴリ設定。絞り込みチップの並び順に使う
   const categories = useCategories(spotTypeKey);
@@ -894,6 +896,7 @@ export default function SpotsView({
             onSpotChange={refreshAfterSpotChange}
             onSpotDeleted={refreshAfterSpotDelete}
             onVisitPlanChange={loadVisitPlans}
+            onPlanListChange={loadPlanLists}
             onReviewChange={loadMyReviews}
           />
         )}
@@ -1029,6 +1032,7 @@ export default function SpotsView({
           onSpotChange={refreshAfterSpotChange}
           onSpotDeleted={refreshAfterSpotDelete}
           onVisitPlanChange={loadVisitPlans}
+          onPlanListChange={loadPlanLists}
           onReviewChange={loadMyReviews}
         />
       )}
