@@ -26,7 +26,7 @@ import {
 } from "@/lib/mapStyle";
 import { useRegionScope } from "@/lib/useRegionScope";
 import { DEFAULT_REGION_SCOPE } from "@/lib/region";
-import { getSpotTypeSetting } from "@/lib/types";
+import { countedVisits, getSpotTypeSetting } from "@/lib/types";
 import type {
   Role,
   Spot,
@@ -1043,8 +1043,11 @@ export default function MapView({
     new Map()
   );
   const planListResolvedRef = useRef<Set<string>>(new Set());
+  // 訪問済み(ピンの緑色・訪問状況の絞り込み)には未訪問記録(unvisited)を数えない。
+  // 訪問順の経路(buildVisitPath)・訪問日の選択肢は日時ありの未訪問記録も含むため、
+  // そちらはvisitsをそのまま使う
   const visitedIds = useMemo(
-    () => new Set(visits.map((v) => v.spot_id)),
+    () => new Set(countedVisits(visits).map((v) => v.spot_id)),
     [visits]
   );
   const spotById = useMemo(() => {

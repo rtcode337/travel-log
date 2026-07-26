@@ -225,7 +225,12 @@ create index spot_route_points_spot_id_idx on spot_route_points (spot_id);
 -- =============================================================
 -- visits: 訪問記録(同一スポットへの複数回訪問を許容)。
 -- visited_onは訪問した日時(timestamptz)。覚えていない場合はnullでよく、
--- 表示は「時期不明」になる
+-- 表示は「時期不明」になる。
+-- unvisited=trueの行は「未訪問記録」: 訪問したが休みや時間の都合でちゃんと
+-- 見られなかった(visited_onあり=その日の訪問順の経路には含まれ、訪問予定も外れる)、
+-- または事前の下調べのメモ(visited_onなし=訪問予定は外れない)。どちらも
+-- 訪問済みの判定(ピンの緑色・訪問状況の絞り込み)には数えず、それ以外の扱い
+-- (写真・メモ・編集・一覧)は通常の訪問記録と同じ
 -- =============================================================
 create table visits (
   id             uuid primary key default gen_random_uuid(),
@@ -236,33 +241,13 @@ create table visits (
   -- photosフォルダ(docker-composeでbindマウント)内の相対パス
   -- 「<ユーザーID>/<年>/<月>/<uuid>.<拡張子>」を保存する(lib/photos.ts参照)
   photos         text[] not null default '{}',
+  unvisited      boolean not null default false,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
 
 create index visits_user_id_idx on visits (user_id);
 create index visits_spot_id_idx on visits (spot_id);
-
--- =============================================================
--- spot_notes: 未訪問記録。訪問したが休みや時間の都合でちゃんと見られなかった、
--- 事前の下調べをメモしておきたい、といった「訪問記録にはしない個人メモ」。
--- visitsと独立の非公開データで、同一ユーザー×同一スポットで複数件持てる。
--- 訪問済みの判定(ピンの色・訪問状況の絞り込み)には一切関与せず、
--- 訪問記録の作成時にも自動では消えない(下調べは訪問後も見返せる方がよい)。
--- noted_onは対象の日時(訪問を試みた日など)。不要ならnullでよい
--- =============================================================
-create table spot_notes (
-  id         uuid primary key default gen_random_uuid(),
-  user_id    uuid not null references users (id) on delete cascade,
-  spot_id    uuid not null references spots (id) on delete cascade,
-  noted_on   timestamptz,
-  memo       text not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index spot_notes_user_id_idx on spot_notes (user_id);
-create index spot_notes_spot_id_idx on spot_notes (spot_id);
 
 -- =============================================================
 -- spot_hides: 非表示スポット。公開スポットのうち「自分は興味がない」ものを
@@ -382,10 +367,6 @@ create trigger spot_route_points_set_updated_at
 
 create trigger visits_set_updated_at
   before update on visits
-  for each row execute function set_updated_at();
-
-create trigger spot_notes_set_updated_at
-  before update on spot_notes
   for each row execute function set_updated_at();
 
 create trigger spot_hides_set_updated_at

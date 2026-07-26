@@ -11,6 +11,7 @@ export default function VisitFormModal({
   spotName,
   reviewsEnabled,
   visit,
+  initialUnvisited = false,
   onClose,
   onSaved,
 }: {
@@ -20,8 +21,13 @@ export default function VisitFormModal({
   reviewsEnabled: boolean;
   /** 指定すると既存の訪問記録の編集モードになる(口コミ入力欄は出さない) */
   visit?: Visit;
+  /** 新規作成時に「未訪問記録」を最初からオンにして開く(「+ 未訪問記録」ボタン用。
+   *  フォーム内のチェックボックスでいつでも切り替えられる) */
+  initialUnvisited?: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  /** 保存後に、保存された訪問記録とともに呼ばれる(呼び出し元が未訪問記録かどうか・
+   *  日時の有無で後続処理(訪問予定リストからの自動除外など)を出し分けるのに使う) */
+  onSaved: (saved?: Visit) => void;
 }) {
   // datetime-localは「ローカル時刻のYYYY-MM-DDTHH:mm」を扱うため、現在時刻を
   // UTCではなくローカルのまま初期値にする(toISOStringだとUTCにずれる)。
@@ -34,6 +40,8 @@ export default function VisitFormModal({
       : toDateTimeLocalValue(new Date())
   );
   const [memo, setMemo] = useState(visit?.memo ?? "");
+  // 未訪問記録(訪問済みに数えない記録)にするか。編集時は既存値から始める
+  const [unvisited, setUnvisited] = useState(visit?.unvisited ?? initialUnvisited);
   // 各要素は「既存写真の相対パス」または「追加写真のdata URL」。この形のまま
   // PATCHに渡す(サーバー側がパス=残す・data URL=新規保存と解釈する)
   const [photos, setPhotos] = useState<string[]>(visit?.photos ?? []);
@@ -54,8 +62,9 @@ export default function VisitFormModal({
       visited_on: visitedOn ? new Date(visitedOn).toISOString() : null,
       memo: memo.trim() || null,
       photos,
+      unvisited,
     };
-    const { error: visitError } = visit
+    const { data: saved, error: visitError } = visit
       ? await api.visits.update(visit.id, payload)
       : await api.visits.create(payload);
     if (visitError) {
@@ -64,7 +73,7 @@ export default function VisitFormModal({
       return;
     }
 
-    if (!visit && reviewsEnabled && reviewBody.trim()) {
+    if (!visit && reviewsEnabled && !unvisited && reviewBody.trim()) {
       const { error: reviewError } = await api.reviews.create(
         spotId,
         reviewBody.trim()
@@ -77,7 +86,7 @@ export default function VisitFormModal({
     }
 
     setSaving(false);
-    onSaved();
+    onSaved(saved ?? undefined);
   };
 
   return (
@@ -89,7 +98,15 @@ export default function VisitFormModal({
         className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-1 font-bold">{visit ? "訪問記録を編集" : "訪問を記録"}</h2>
+        <h2 className="mb-1 font-bold">
+          {visit
+            ? unvisited
+              ? "未訪問記録を編集"
+              : "訪問記録を編集"
+            : unvisited
+              ? "未訪問記録を追加"
+              : "訪問を記録"}
+        </h2>
         <p className="mb-4 text-sm text-gray-500">{spotName}</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <VisitFields
@@ -102,8 +119,29 @@ export default function VisitFormModal({
             onProcessingChange={setProcessingPhotos}
           />
 
-          {/* 口コミは訪問記録とは独立のデータのため、編集モードでは出さない */}
-          {reviewsEnabled && !visit && (
+          {/* 未訪問記録の切り替え。訪問記録と同じフォーム・同じ訪問履歴に記録し、
+              訪問済みに数えるかどうかだけをこのフラグで分ける */}
+          <div className="border-t border-gray-100 pt-3">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={unvisited}
+                onChange={(e) => setUnvisited(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium">未訪問記録にする(訪問済みにしない)</span>
+                <span className="mt-0.5 block text-xs text-gray-400">
+                  休みや時間の都合でちゃんと見られなかったときや、事前の下調べのメモに。
+                  訪問日時を入れると「訪れたが改めて来たい」記録としてその日の経路に含まれ、
+                  訪問予定からも外れます。訪問日時が空欄なら下調べのメモになり、訪問予定は残ります。
+                </span>
+              </span>
+            </label>
+          </div>
+
+          {/* 口コミは訪問記録とは独立のデータのため、編集モードと未訪問記録では出さない */}
+          {reviewsEnabled && !visit && !unvisited && (
             <div className="border-t border-gray-100 pt-3">
               <label className="mb-1 block text-sm font-medium">
                 口コミ投稿(公開・任意)

@@ -216,9 +216,14 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 自分の訪問記録は`/[type]/spots`の「最近の訪問場所」見出し右のボタンからZIPで一括エクスポートできる(`GET /api/visits/export?type=<種別キー>`。typeは必須で、その種別の分のみ。種別横断のエクスポートは意図的に持たない)。ZIPの中身は`visits.csv`(BOM付きUTF-8。訪問のメモ+スポット情報、`lib/csv.ts`の`buildCsv`)と`photos/<uuid>.<ext>`(添付写真。CSVの「写真」列がこのZIP内パスを指す)。ZIP生成は依存を増やさず`lib/zip.ts`の自前実装(無圧縮STORE。中身が圧縮済み画像と小さなCSVのみのため)で、写真は配信APIと同じく`parseVisitPhotoPath`の所有者チェックを通ったものだけを`readVisitPhoto`で読む(保存先の切り替えに追随する)。
 
-### 未訪問記録(`spot_notes`)と非表示スポット(`spot_hides`)
+### 未訪問記録(`visits.unvisited`)と非表示スポット(`spot_hides`)
 
-**未訪問記録**は「訪問したが休みや時間の都合でちゃんと見られなかった」「事前の下調べをメモしておきたい」ときの、**訪問記録(`visits`)にはしない非公開の個人メモ**。`spot_notes`(user_id, spot_id, noted_on(任意のtimestamptz), memo(必須))で、同一ユーザー×同一スポットに複数件持てる。訪問済みの判定(ピンの緑色・訪問状況の絞り込み)には一切関与せず、訪問予定(`visit_plans`)も外れず、訪問記録の作成時にも自動では消えない(下調べは訪問後も見返せる方がよいため)。API は`/api/spot-notes`(GET(`?spot_id=`省略時は自分の全件)/POST)と`/api/spot-notes/[id]`(PATCH/DELETE、本人のみ)。UIはスポット詳細(`SpotDetailModal`)の「未訪問記録」セクション(訪問履歴と口コミの間。追加・編集は`SpotNoteFormModal` — `VisitFormModal`と違い写真・口コミの無い日時+メモだけの軽いフォーム)と、`/[type]/spots`の「未訪問記録」一覧(spot_idを手元の一覧から解決するため、公開スポット未ダウンロード時はその分が出ない — 訪問予定と同じ割り切り)。個人データのため読み取り専用表示(重ね表示の`readOnly`)ではセクション自体を出さない。
+**未訪問記録**は「訪問したが休みや時間の都合でちゃんと見られなかった(改めて来たい)」「事前の下調べをメモしておきたい」ときの、**訪問済みには数えない訪問記録**。独立したテーブルではなく`visits`の`unvisited`フラグ(boolean、既定false)で、訪問記録と同じ場所(同じフォーム`VisitFormModal`のチェックボックス、スポット詳細の同じ訪問履歴一覧、`/[type]/spots`の「最近の訪問場所」、訪問記録ZIPエクスポートの「未訪問記録」列)に記録される。日時の有無で意味が分かれる:
+
+- **`visited_on`あり=「訪れたが改めて来たい」**。その日の訪問順の経路(`buildVisitPath`は`unvisited`を見ない)に含まれ、訪問予定(`visit_plans`)からも通常の訪問と同じく自動で外れる(地図で経路表示中の訪問予定リストからの自動除外も同じ。`VisitFormModal`の`onSaved`が保存済みレコードを渡し、`SpotDetailModal`が出し分ける)
+- **`visited_on`なし=「下調べ」**。まだ行っていないため訪問予定は外れない(POST `/api/visits`が`unvisited && !visited_on`のときだけ`visit_plans`の削除をスキップ)。表示は「時期不明」ではなく「下調べ」
+
+どちらも**訪問済みの判定には数えない**: `lib/types.ts`の`countedVisits`(`unvisited`を除いたvisits)をピンの緑色・訪問状況の絞り込み・✓回数・地域別の訪問数・訪問日順ソートの`visitedIds`/`latestVisitDate`算出に使う。それ以外(写真・メモ・Exif・編集・削除・一覧表示)は通常の訪問記録と完全に同じで、一覧では琥珀色の「未訪問」バッジで見分ける。作成は訪問履歴の「+ 未訪問記録」ボタン(同じフォームを`initialUnvisited`で開くだけ)からも、通常フォーム内のチェックボックスからもできる。
 
 **非表示スポット**は「公開スポットのうち自分は興味がないもの」をユーザーごとに自分の地図・一覧から隠す設定。`spot_hides`(user_id×spot_idで一意。`visit_plans`と同じトグル構造)で、スポット自体には影響しない。APIは`/api/spot-hides`(GET/POST upsert)と`/api/spot-hides/[spotId]`(DELETE)。切り替えはスポット詳細の最下部のトグル(公開スポットのみ表示)。除外の掛かり方:
 

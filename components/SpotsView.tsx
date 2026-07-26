@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import {
+  countedVisits,
   SPOTS_PAGE_SIZE,
   formatVisitedOn,
   type MyReview,
   type Series,
   type Spot,
   type SpotHide,
-  type SpotNote,
   type Visit,
   type VisitPlan,
   type VisitPlanList,
@@ -206,9 +206,8 @@ export default function SpotsView({
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
   const [myReviews, setMyReviews] = useState<MyReview[]>([]);
-  // 未訪問記録(訪問記録にはしない個人メモ)と、非表示にしたスポット(全種別分。
-  // どちらもspot_id基準のため、この種別のスポットに絞る処理は表示側で行う)
-  const [spotNotes, setSpotNotes] = useState<SpotNote[]>([]);
+  // 非表示にしたスポット(全種別分。spot_id基準のため、この種別のスポットに
+  // 絞る処理は表示側で行う)
   const [spotHides, setSpotHides] = useState<SpotHide[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
@@ -300,11 +299,6 @@ export default function SpotsView({
     setMyReviews(data ?? []);
   }, [spotTypeKey]);
 
-  const loadSpotNotes = useCallback(async () => {
-    const { data } = await api.spotNotes.list();
-    setSpotNotes(data ?? []);
-  }, []);
-
   const loadSpotHides = useCallback(async () => {
     const { data } = await api.spotHides.list();
     setSpotHides(data ?? []);
@@ -354,7 +348,6 @@ export default function SpotsView({
         loadVisitPlans(),
         loadPlanLists(),
         loadMyReviews(),
-        loadSpotNotes(),
         loadSpotHides(),
       ]);
       setLoading(false);
@@ -365,7 +358,6 @@ export default function SpotsView({
     loadVisitPlans,
     loadPlanLists,
     loadMyReviews,
-    loadSpotNotes,
     loadSpotHides,
     spotTypeKey,
   ]);
@@ -376,8 +368,10 @@ export default function SpotsView({
     return m;
   }, [spots]);
 
+  // 訪問済み(✓・地域別の訪問数・訪問状況の絞り込み)には未訪問記録(unvisited)を
+  // 数えない。「最近の訪問場所」の一覧には未訪問記録も「未訪問」バッジ付きで出す
   const visitedIds = useMemo(
-    () => new Set(visits.map((v) => v.spot_id)),
+    () => new Set(countedVisits(visits).map((v) => v.spot_id)),
     [visits]
   );
 
@@ -386,15 +380,6 @@ export default function SpotsView({
   const hiddenIds = useMemo(
     () => new Set(spotHides.map((h) => h.spot_id)),
     [spotHides]
-  );
-
-  /** この種別のスポットへの未訪問記録(APIの並び=日時が新しい順・不明は最後) */
-  const myNotes = useMemo(
-    () =>
-      spotNotes
-        .filter((n) => spotById.has(n.spot_id))
-        .map((n) => ({ note: n, spot: spotById.get(n.spot_id)! })),
-    [spotNotes, spotById]
   );
 
   /** この種別で非表示にしたスポット(新しく非表示にした順)。解除の入口になる一覧 */
@@ -406,10 +391,10 @@ export default function SpotsView({
     [spotHides, spotById]
   );
 
-  /** spot_id → 最新訪問日(ソート用) */
+  /** spot_id → 最新訪問日(ソート用)。未訪問記録は訪問した日ではないため含めない */
   const latestVisitDate = useMemo(() => {
     const m = new Map<string, string>();
-    for (const v of visits) {
+    for (const v of countedVisits(visits)) {
       const d = v.visited_on ?? "";
       if (!m.has(v.spot_id) || d > (m.get(v.spot_id) ?? "")) {
         m.set(v.spot_id, d);
@@ -505,7 +490,6 @@ export default function SpotsView({
   const plannedPager = usePagedItems(plannedSpots, CLIENT_PAGE_SIZE);
   const recentVisitsPager = usePagedItems(recentVisits, CLIENT_PAGE_SIZE);
   const myReviewsPager = usePagedItems(myReviews, CLIENT_PAGE_SIZE);
-  const myNotesPager = usePagedItems(myNotes, CLIENT_PAGE_SIZE);
   const hiddenSpotsPager = usePagedItems(hiddenSpots, CLIENT_PAGE_SIZE);
   const privateSpotsPager = usePagedItems(myPrivateSpots, CLIENT_PAGE_SIZE);
   const filteredSpotsPager = usePagedItems(filteredSpots, CLIENT_PAGE_SIZE);
@@ -696,8 +680,16 @@ export default function SpotsView({
                               <p className="truncate font-medium">{spot.name}</p>
                               <p className="text-xs text-gray-500">{spot.region}</p>
                             </div>
+                            {/* 未訪問記録(訪問済みに数えない記録)はバッジで見分ける */}
+                            {visit.unvisited && (
+                              <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">
+                                未訪問
+                              </span>
+                            )}
                             <span className="shrink-0 text-xs text-gray-400">
-                              {formatVisitedOn(visit.visited_on)}
+                              {visit.unvisited && !visit.visited_on
+                                ? "下調べ"
+                                : formatVisitedOn(visit.visited_on)}
                             </span>
                           </button>
                         </li>
@@ -712,52 +704,6 @@ export default function SpotsView({
                 </>
               )}
             </div>
-            {/* 未訪問記録(休みで見られなかった・下調べのメモ)。0件のときは出さない */}
-            {myNotes.length > 0 && (
-              <div className="mb-6">
-                <h1 className="mb-4 text-lg font-bold">未訪問記録</h1>
-                <PagedListHeader
-                  page={myNotesPager.page}
-                  totalPages={myNotesPager.totalPages}
-                  total={myNotesPager.total}
-                  onChange={myNotesPager.setPage}
-                />
-                <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-                  {myNotesPager.pageItems.map(({ note, spot }) => (
-                    <li key={note.id}>
-                      <button
-                        onClick={() => setDetailSpotId(spot.id)}
-                        className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-gray-50"
-                      >
-                        <SeriesBadge
-                          series={spot.series}
-                          seriesStyles={seriesStyles}
-                          isPrivate={spot.status === "private"}
-                          size="sm"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">{spot.name}</p>
-                          <p className="text-xs text-gray-500">{spot.region}</p>
-                          <p className="mt-1 line-clamp-2 text-sm text-gray-700">
-                            {note.memo}
-                          </p>
-                        </div>
-                        {note.noted_on && (
-                          <span className="shrink-0 text-xs text-gray-400">
-                            {new Date(note.noted_on).toLocaleDateString("ja-JP")}
-                          </span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <PagedListFooter
-                  page={myNotesPager.page}
-                  totalPages={myNotesPager.totalPages}
-                  onChange={myNotesPager.setPage}
-                />
-              </div>
-            )}
             {myReviews.length > 0 && (
               <div className="mb-6">
                 <h1 className="mb-4 text-lg font-bold">自分が書いた口コミ</h1>
@@ -1046,7 +992,6 @@ export default function SpotsView({
             onVisitPlanChange={loadVisitPlans}
             onPlanListChange={loadPlanLists}
             onReviewChange={loadMyReviews}
-            onSpotNoteChange={loadSpotNotes}
             onHideChange={handleHideChange}
           />
         )}
@@ -1184,7 +1129,6 @@ export default function SpotsView({
           onVisitPlanChange={loadVisitPlans}
           onPlanListChange={loadPlanLists}
           onReviewChange={loadMyReviews}
-          onSpotNoteChange={loadSpotNotes}
           onHideChange={handleHideChange}
         />
       )}

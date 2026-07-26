@@ -63,13 +63,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // unvisited=trueは「未訪問記録」(訪問済みには数えない記録)。省略時は通常の訪問記録
+  const unvisited = body.unvisited === true;
+
   let rows: Visit[];
   try {
     ({ rows } = await query<Visit>(
-      `insert into visits (user_id, spot_id, visited_on, memo, photos)
-       values ($1, $2, $3, $4, $5)
+      `insert into visits (user_id, spot_id, visited_on, memo, photos, unvisited)
+       values ($1, $2, $3, $4, $5, $6)
        returning *`,
-      [userId, body.spot_id, body.visited_on, body.memo, photoPaths]
+      [userId, body.spot_id, body.visited_on, body.memo, photoPaths, unvisited]
     ));
   } catch (e) {
     // DBに記録できなかった写真ファイルを残さない
@@ -77,11 +80,16 @@ export async function POST(request: Request) {
     throw e;
   }
 
-  // 訪問を記録したら、その場所は訪問予定リストから自動的に外す
-  await query("delete from visit_plans where user_id = $1 and spot_id = $2", [
-    userId,
-    body.spot_id,
-  ]);
+  // 訪問を記録したら、その場所は訪問予定リストから自動的に外す。ただし
+  // 日時なしの未訪問記録(=まだ行っていない下調べのメモ)は行きたい場所の
+  // ままなので外さない(日時ありの未訪問記録は「訪れたが改めて来たい」
+  // 記録のため、通常の訪問と同じく外す)
+  if (!(unvisited && !body.visited_on)) {
+    await query("delete from visit_plans where user_id = $1 and spot_id = $2", [
+      userId,
+      body.spot_id,
+    ]);
+  }
 
   return NextResponse.json({ data: rows[0] });
 }
