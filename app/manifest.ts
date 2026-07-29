@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 
 // /manifest.webmanifest として配信される(Next.jsのMetadata Files規約)。
-// このパスはmiddleware.tsの認証ガードから除外している — ブラウザのmanifest取得は
+// このパスはproxy.tsの認証ガードから除外している — ブラウザのmanifest取得は
 // 既定でCookieを送らないため、ガード対象のままだと/loginへのリダイレクトになり
 // インストール不能になる。
 export default function manifest(): MetadataRoute.Manifest {

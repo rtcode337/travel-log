@@ -6,7 +6,7 @@ import {
   SPOT_TYPE_PATH_PATTERN,
 } from "@/lib/last-spot-type";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = await verifySessionToken(token);
 

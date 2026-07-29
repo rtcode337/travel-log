@@ -13,6 +13,15 @@ updates:
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # TypeScript 7(Goネイティブ版)はNext.jsが未対応(JS実装のCompiler APIが同梱されなく
+      # なり、next buildがTypeScriptを検出できず失敗する)。Next側の対応後に手動で上げる
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # Node本体のメジャーはLTS入りしてから上げる方針(Dockerfileのnodeイメージと同時に、
+      # ランタイムと同じメジャーへ手動で上げる)。26は2026年10月にLTS入り予定
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # Dockerfileのベースイメージ(アプリ本体=node、db-init=postgres)
   - package-ecosystem: "docker"
@@ -27,6 +36,10 @@ updates:
       # Postgresのメジャーアップデートはdb/dataの移行作業(pg_upgradeまたは
       # dump/restore)が必要なため、自動PRにはしない(意図的に手動で上げる)
       - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+      # NodeのメジャーはLTS入りしたものだけを使う(Currentは追わない)。26は2026年10月に
+      # LTS入り予定で、それまでは現行Active LTSの24を使う。上げるときは@types/nodeも同時に
+      - dependency-name: "node"
         update-types: ["version-update:semver-major"]
 
   # docker-compose直書きのイメージ(dbサービスのpostgres:16-alpine)

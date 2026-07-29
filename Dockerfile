@@ -1,4 +1,4 @@
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -16,7 +16,7 @@ RUN npm run build
 
 # 本番実行用: next buildの成果物のみを含む最小イメージ。mainへのpushでGitHub Actionsが
 # このステージをビルドしてGHCRへ公開し、docker-compose.ymlのappサービスがそれを参照する
-FROM node:22-alpine AS prod
+FROM node:24-alpine AS prod
 WORKDIR /app
 ENV NODE_ENV=production
 # GitHub Actionsが --build-arg BUILD_NUMBER=<JST日時>-<短縮コミットハッシュ> で渡すビルド番号。
