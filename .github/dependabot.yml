@@ -1,0 +1,49 @@
+# Dependabot のバージョン更新設定(脆弱性対応のsecurity updatesとは別に、
+# 依存の定期的な更新PRを作らせる)。すべて週1回・月曜(JST)にまとめてチェックする
+version: 2
+updates:
+  # npm依存(package.json / package-lock.json)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "Asia/Tokyo"
+    # minor・patchは1本のPRにまとめる(個別PRの洪水を避ける)。majorだけ個別PR
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # Dockerfileのベースイメージ(アプリ本体=node、db-init=postgres)
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+      - "/db"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "Asia/Tokyo"
+    ignore:
+      # Postgresのメジャーアップデートはdb/dataの移行作業(pg_upgradeまたは
+      # dump/restore)が必要なため、自動PRにはしない(意図的に手動で上げる)
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
+  # docker-compose直書きのイメージ(dbサービスのpostgres:16-alpine)
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "Asia/Tokyo"
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actionsのアクション(.github/workflows/)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "Asia/Tokyo"
