@@ -80,12 +80,25 @@ export default function VisitFields({
     <>
       <div>
         <label className="mb-1 block text-sm font-medium">訪問日時</label>
-        <input
-          type="datetime-local"
-          value={visitedOn}
-          onChange={(e) => onVisitedOnChange(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-        />
+        <div className="flex gap-1.5">
+          <input
+            type="datetime-local"
+            value={visitedOn}
+            onChange={(e) => onVisitedOnChange(e.target.value)}
+            className="w-full min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+          {/* 「時期不明」「下調べ」用に空欄へ戻すボタン(ブラウザによっては
+              datetime-local入力のクリア手段が無いため) */}
+          {visitedOn && (
+            <button
+              type="button"
+              onClick={() => onVisitedOnChange("")}
+              className="shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600"
+            >
+              削除
+            </button>
+          )}
+        </div>
         {earliestTakenAt && takenAtValue && takenAtValue !== visitedOn && (
           <button
             type="button"

@@ -67,6 +67,17 @@ export default function SeriesFilter({
 
   return (
     <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
+      <button
+        type="button"
+        onClick={() => onChange([])}
+        className={`flex-1 px-2 py-1.5 font-medium ${
+          selected.length === 0
+            ? "bg-blue-600 text-white"
+            : "text-gray-500 hover:bg-gray-50"
+        }`}
+      >
+        すべて
+      </button>
       {series.map((r) => {
         const style = findSeriesStyle(r, seriesStyles);
         const active = selected.includes(r);
@@ -101,17 +112,6 @@ export default function SeriesFilter({
           </button>
         );
       })}
-      <button
-        type="button"
-        onClick={() => onChange([])}
-        className={`flex-1 px-2 py-1.5 font-medium ${
-          selected.length === 0
-            ? "bg-blue-600 text-white"
-            : "text-gray-500 hover:bg-gray-50"
-        }`}
-      >
-        すべて
-      </button>
     </div>
   );
 }

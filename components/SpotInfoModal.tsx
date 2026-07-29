@@ -38,6 +38,22 @@ function coreOf(name: string): string {
 }
 
 /**
+ * iOSのPWA(スタンドアロン起動)かどうか。この状態のiOSでは`target="_blank"`が
+ * 本物のSafariではなくアプリ内ブラウザ(閉じるボタン付きのオーバーレイ)で開かれる。
+ * iPadOSはUAが`Macintosh`になるためタッチ点数でも判定する
+ */
+function isIosStandalone(): boolean {
+  const standalone =
+    window.matchMedia("(display-mode: standalone)").matches ||
+    // iOS Safari独自プロパティ(型定義に無い)
+    (navigator as unknown as { standalone?: boolean }).standalone === true;
+  const ios =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1);
+  return standalone && ios;
+}
+
+/**
  * スポット名と完全一致する記事(またはそのリダイレクト先)があればタイトルを返す。
  * 「森戸神社」の正式記事名が「森戸大明神」であるような、通称/正式名称の食い違いは
  * 全文検索の文字列一致だけでは拾えないため、まずこちらで解決を試みる
@@ -189,14 +205,14 @@ export default function SpotInfoModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
       onClick={(e) => {
         e.stopPropagation();
         onClose();
       }}
     >
       <div
-        className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+        className="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-2">
@@ -243,6 +259,15 @@ export default function SpotInfoModal({
                 href={articleUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                // iOSのPWAではtarget="_blank"がアプリ内ブラウザで開かれてしまうため、
+                // iOSが解釈する`x-safari-https://`スキームで本物のSafariに切り替える
+                // (それ以外の環境は通常のリンクのまま)
+                onClick={(e) => {
+                  if (isIosStandalone() && articleUrl.startsWith("https://")) {
+                    e.preventDefault();
+                    window.location.href = `x-safari-${articleUrl}`;
+                  }
+                }}
                 className="mt-3 inline-block text-sm text-blue-600 underline"
               >
                 Wikipediaで続きを読む ↗
