@@ -230,11 +230,8 @@ export default function SpotsView({
   const [managementLoading, setManagementLoading] = useState(false);
   const [managementSearchInput, setManagementSearchInput] = useState("");
   const [managementSearch, setManagementSearch] = useState("");
-  // A〜Eのシリーズはtourist種別専用(CLAUDE.md参照)。それ以外の種別では
-  // 「A」を既定にすると該当スポットが無く常に0件表示になるため、すべて(空配列)を既定にする
-  const [managementSeries, setManagementSeries] = useState<Series[]>(
-    spotTypeKey === "tourist" ? ["A"] : []
-  );
+  // すべて(空配列)を既定にする(種別によらず全件から探し始められるように)
+  const [managementSeries, setManagementSeries] = useState<Series[]>([]);
   const [managementPage, setManagementPage] = useState(1);
 
   const loadManagementSpots = useCallback(async () => {
@@ -993,6 +990,7 @@ export default function SpotsView({
             onPlanListChange={loadPlanLists}
             onReviewChange={loadMyReviews}
             onHideChange={handleHideChange}
+            onOpenSpot={setDetailSpotId}
           />
         )}
 
@@ -1130,6 +1128,7 @@ export default function SpotsView({
           onPlanListChange={loadPlanLists}
           onReviewChange={loadMyReviews}
           onHideChange={handleHideChange}
+          onOpenSpot={setDetailSpotId}
         />
       )}
     </main>

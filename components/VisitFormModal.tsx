@@ -11,7 +11,6 @@ export default function VisitFormModal({
   spotName,
   reviewsEnabled,
   visit,
-  initialUnvisited = false,
   onClose,
   onSaved,
 }: {
@@ -21,9 +20,6 @@ export default function VisitFormModal({
   reviewsEnabled: boolean;
   /** 指定すると既存の訪問記録の編集モードになる(口コミ入力欄は出さない) */
   visit?: Visit;
-  /** 新規作成時に「未訪問記録」を最初からオンにして開く(「+ 未訪問記録」ボタン用。
-   *  フォーム内のチェックボックスでいつでも切り替えられる) */
-  initialUnvisited?: boolean;
   onClose: () => void;
   /** 保存後に、保存された訪問記録とともに呼ばれる(呼び出し元が未訪問記録かどうか・
    *  日時の有無で後続処理(訪問予定リストからの自動除外など)を出し分けるのに使う) */
@@ -31,22 +27,17 @@ export default function VisitFormModal({
 }) {
   // datetime-localは「ローカル時刻のYYYY-MM-DDTHH:mm」を扱うため、現在時刻を
   // UTCではなくローカルのまま初期値にする(toISOStringだとUTCにずれる)。
-  // 編集時は既存の訪問日時(未入力=時期不明なら空欄)から始める。
-  // 「+ 未訪問記録」から開いたとき(initialUnvisited)は空欄=下調べを既定にする
-  // (現在時刻をプリセットすると、そのまま保存しただけで「訪れたが改めて来たい」
-  // 記録=今日の経路に含まれ訪問予定も外れる扱いになってしまうため)
+  // 編集時は既存の訪問日時(未入力=時期不明なら空欄)から始める
   const [visitedOn, setVisitedOn] = useState(() =>
     visit
       ? visit.visited_on
         ? toDateTimeLocalValue(new Date(visit.visited_on))
         : ""
-      : initialUnvisited
-        ? ""
-        : toDateTimeLocalValue(new Date())
+      : toDateTimeLocalValue(new Date())
   );
   const [memo, setMemo] = useState(visit?.memo ?? "");
   // 未訪問記録(訪問済みに数えない記録)にするか。編集時は既存値から始める
-  const [unvisited, setUnvisited] = useState(visit?.unvisited ?? initialUnvisited);
+  const [unvisited, setUnvisited] = useState(visit?.unvisited ?? false);
   // 各要素は「既存写真の相対パス」または「追加写真のdata URL」。この形のまま
   // PATCHに渡す(サーバー側がパス=残す・data URL=新規保存と解釈する)
   const [photos, setPhotos] = useState<string[]>(visit?.photos ?? []);
@@ -96,11 +87,11 @@ export default function VisitFormModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
-        className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+        className="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-1 font-bold">

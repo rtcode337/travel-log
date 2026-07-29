@@ -2606,12 +2606,12 @@ export default function MapView({
       {/* 絞り込みモーダル */}
       {showFilterModal && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onClick={() => setShowFilterModal(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+            className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
           >
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-bold">絞り込み</h2>
@@ -2882,12 +2882,12 @@ export default function MapView({
           const overlayType = spotTypes.find((t) => t.key === overlayTypeKey);
           return (
             <div
-              className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center"
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
               onClick={() => setShowOverlayFilterModal(false)}
             >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="max-h-[90dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+                className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
               >
                 <div className="flex items-center justify-between gap-2">
                   <h2 className="font-bold">
@@ -3113,9 +3113,7 @@ export default function MapView({
       )}
 
       {/* ルート・経路の詳細モーダル(ルート/訪問順の経路/訪問予定リストの経路の線・矢印の
-          タップで開く。重ね表示のルートも共用)。他のモーダルと違い常に中央表示にする
-          (角丸画面のスマホで下端に寄せると端が見切れるため。中身が地点一覧だけの小さな
-          モーダルなので中央でも邪魔にならない) */}
+          タップで開く。重ね表示のルートも共用) */}
       {routeDetailView && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -3255,6 +3253,7 @@ export default function MapView({
             spotCache.applySpotDelete(id);
             loadPrivateSpots();
           }}
+          onOpenSpot={setDetailSpotId}
         />
       )}
 

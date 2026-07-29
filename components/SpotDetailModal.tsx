@@ -16,7 +16,9 @@ import {
   type Spot,
   type SpotType,
   type Visit,
+  type VisitPlanList,
 } from "@/lib/types";
+import { formatPlanDateRange } from "@/lib/planListDraft";
 import SeriesBadge from "@/components/SeriesBadge";
 import MiniMap from "@/components/MiniMap";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
@@ -27,6 +29,8 @@ import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
 import AddToPlanListModal from "@/components/AddToPlanListModal";
+import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
+import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 
 /** Wikipediaの公式ロゴマーク(Simple Icons、CC0) */
 function WikipediaIcon({ className }: { className?: string }) {
@@ -55,6 +59,19 @@ function DirectionsIcon({ className }: { className?: string }) {
   );
 }
 
+/** 星アイコン(Google Material Symbols「star」/「star_border」、Apache License 2.0) */
+function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      {filled ? (
+        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+      ) : (
+        <path d="M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z" />
+      )}
+    </svg>
+  );
+}
+
 function formatReviewDatetime(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", {
     year: "numeric",
@@ -79,6 +96,7 @@ export default function SpotDetailModal({
   onPlanListChange,
   onReviewChange,
   onHideChange,
+  onOpenSpot,
 }: {
   spotId: string;
   /** 編集モーダルのシリーズ・カテゴリ入力サジェスト用(省略時はサジェストなし) */
@@ -115,6 +133,9 @@ export default function SpotDetailModal({
   onReviewChange?: () => void;
   /** このスポットの非表示/解除を切り替えたときに呼ばれる(呼び出し元の地図・一覧への反映用) */
   onHideChange?: () => void;
+  /** 「訪問予定」セクションのリスト詳細から別のスポットが選ばれたときに呼ばれる
+   * (呼び出し元が表示対象のスポットIDを差し替える。省略時はリスト詳細を閉じるだけ) */
+  onOpenSpot?: (spotId: string) => void;
 }) {
   const typeKey = useCurrentSpotTypeKey();
   const [spot, setSpot] = useState<Spot | null>(null);
@@ -125,8 +146,6 @@ export default function SpotDetailModal({
   const [reviewsPage, setReviewsPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  // 「+ 未訪問記録」から開いたか(訪問記録と同じフォームを、未訪問記録オンで開く)
-  const [formUnvisited, setFormUnvisited] = useState(false);
   // 非公開スポットの位置修正(ドラッグ)モーダルの表示
   const [showReposition, setShowReposition] = useState(false);
   // 編集対象の訪問記録(訪問履歴の「編集」から開く。VisitFormModalの編集モード)
@@ -140,6 +159,11 @@ export default function SpotDetailModal({
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [planned, setPlanned] = useState(false);
   const [planUpdating, setPlanUpdating] = useState(false);
+  // この種別の訪問予定リスト(「訪問予定」セクションでこのスポットを含むものを表示する)
+  const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
+  // 「訪問予定」セクションから開くリスト詳細と、その「編集」から開く編集フォーム
+  const [detailListId, setDetailListId] = useState<string | null>(null);
+  const [editingPlanList, setEditingPlanList] = useState<VisitPlanList | null>(null);
   // このスポットを自分の地図・一覧から非表示にしているか(公開スポットのみ)
   const [hidden, setHidden] = useState(false);
   const [hideUpdating, setHideUpdating] = useState(false);
@@ -219,6 +243,17 @@ export default function SpotDetailModal({
     setReviewsPage(1);
   }, [load]);
 
+  // 訪問予定リストの読み込み(readOnly=重ね表示では予定系を出さないため読まない)
+  const loadPlanLists = useCallback(async () => {
+    if (!typeKey || readOnly) return;
+    const { data } = await api.visitPlanLists.list(typeKey);
+    setPlanLists(data ?? []);
+  }, [typeKey, readOnly]);
+
+  useEffect(() => {
+    loadPlanLists();
+  }, [loadPlanLists]);
+
   useEffect(() => {
     api.auth.me().then(({ data }) => {
       setMyId(data?.id ?? null);
@@ -236,6 +271,20 @@ export default function SpotDetailModal({
     setPlanned((prev) => !prev);
     onVisitPlanChange?.();
   };
+
+  // このスポットを経由スポットに含む訪問予定リスト(「訪問予定」セクションに表示)
+  const containingPlanLists = useMemo(
+    () => planLists.filter((list) => list.spot_ids.includes(spotId)),
+    [planLists, spotId]
+  );
+
+  // リスト詳細モーダルの経由スポット解決用。spots(サジェスト用の一覧)+表示中の
+  // スポットから引き、無いIDはモーダル側がAPIで補完する
+  const spotsById = useMemo(() => {
+    const map = new Map((spots ?? []).map((s) => [s.id, s] as const));
+    if (spot) map.set(spot.id, spot);
+    return map;
+  }, [spots, spot]);
 
   const isSpotAdmin = !!myRole && SPOT_ADMIN_ROLES.includes(myRole);
 
@@ -350,11 +399,11 @@ export default function SpotDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
-        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+        className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4"
         onClick={(e) => e.stopPropagation()}
       >
         {loading ? (
@@ -423,13 +472,24 @@ export default function SpotDetailModal({
                   </p>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="rounded-full px-2 text-xl leading-none text-gray-400"
-                aria-label="閉じる"
-              >
-                ×
-              </button>
+              {/* 閉じるのはモーダル外側のタップで足りるため×ボタンは置かず、
+                  その位置に訪問予定のブックマーク風★トグル(塗り=予定あり)を置く */}
+              {!readOnly && (
+                <button
+                  onClick={toggleVisitPlan}
+                  disabled={planUpdating}
+                  aria-label={planned ? "訪問予定をはずす" : "訪問予定にする"}
+                  title={planned ? "訪問予定をはずす" : "訪問予定にする"}
+                  aria-pressed={planned}
+                  className={`shrink-0 rounded p-1 disabled:opacity-50 ${
+                    planned
+                      ? "text-amber-400 hover:bg-amber-50"
+                      : "text-gray-400 hover:bg-gray-50"
+                  }`}
+                >
+                  <StarIcon filled={planned} className="size-6" />
+                </button>
+              )}
             </div>
 
             {spot.description && (
@@ -555,47 +615,10 @@ export default function SpotDetailModal({
                 </div>
                 {(!readOnly || allowVisitRecording) && (
                   <div className="flex flex-wrap justify-end gap-2">
-                    {/* スポットの管理系(訪問予定・予定リスト)は通常表示のときだけ。
-                        readOnly(重ね表示)では訪問記録だけを許可する */}
-                    {!readOnly && (
-                      <>
-                        <button
-                          onClick={toggleVisitPlan}
-                          disabled={planUpdating}
-                          className={`rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-                            planned
-                              ? "border border-gray-300 text-gray-600"
-                              : "border border-blue-600 text-blue-600"
-                          }`}
-                        >
-                          {planned ? "訪問予定をはずす" : "訪問予定にする"}
-                        </button>
-                        <button
-                          onClick={() => setShowAddToList(true)}
-                          className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
-                        >
-                          予定リストに追加
-                        </button>
-                      </>
-                    )}
-                    {/* 未訪問記録(訪問済みにしない記録)も同じフォーム・同じ訪問履歴に
-                        記録する。ちゃんと見られなかった/下調べのメモ用 */}
-                    {!readOnly && (
-                      <button
-                        onClick={() => {
-                          setFormUnvisited(true);
-                          setShowForm(true);
-                        }}
-                        className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
-                      >
-                        + 未訪問記録
-                      </button>
-                    )}
+                    {/* 未訪問記録(訪問済みにしない記録)も同じフォームから記録する
+                        (フォーム内のチェックボックスで切り替え) */}
                     <button
-                      onClick={() => {
-                        setFormUnvisited(false);
-                        setShowForm(true);
-                      }}
+                      onClick={() => setShowForm(true)}
                       className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
                     >
                       + 訪問を記録
@@ -674,6 +697,45 @@ export default function SpotDetailModal({
                 </ul>
               )}
             </div>
+
+            {/* 訪問予定(訪問予定リスト)。リストへの追加と、このスポットを含む
+                リストの表示。★(訪問予定の単独ブックマーク)はヘッダー右上 */}
+            {!readOnly && (
+              <div className="mt-4 border-t border-gray-100 pt-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="font-bold">訪問予定</h3>
+                  <button
+                    onClick={() => setShowAddToList(true)}
+                    className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
+                  >
+                    リストに追加
+                  </button>
+                </div>
+                {containingPlanLists.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    このスポットを含む訪問予定リストはありません。
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-gray-100">
+                    {containingPlanLists.map((list) => (
+                      <li key={list.id} className="py-2">
+                        <button
+                          type="button"
+                          onClick={() => setDetailListId(list.id)}
+                          className="text-sm font-medium text-blue-600 underline"
+                        >
+                          {list.title}
+                        </button>
+                        <p className="text-xs text-gray-500">
+                          {formatPlanDateRange(list.start_date, list.end_date)}・
+                          {list.spot_ids.length}件
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
             {/* 口コミ(公開・掲示板形式) */}
             {reviewsEnabled && (
@@ -770,7 +832,6 @@ export default function SpotDetailModal({
           spotId={spot.id}
           spotName={spot.name}
           reviewsEnabled={!readOnly && reviewsEnabled}
-          initialUnvisited={formUnvisited}
           onClose={() => setShowForm(false)}
           onSaved={(saved) => {
             setShowForm(false);
@@ -878,7 +939,42 @@ export default function SpotDetailModal({
           spotName={spot?.name}
           typeKey={typeKey}
           onClose={() => setShowAddToList(false)}
-          onAdded={onPlanListChange}
+          onAdded={() => {
+            loadPlanLists();
+            onPlanListChange?.();
+          }}
+        />
+      )}
+      {/* 「訪問予定」セクションのタイトルから開くリスト詳細(z-50同士だが後段に
+          描画されるため上に重なる) */}
+      {detailListId && (
+        <VisitPlanListDetailModal
+          listId={detailListId}
+          spotsById={spotsById}
+          seriesStyles={seriesStyles}
+          onClose={() => setDetailListId(null)}
+          onEdit={(list) => {
+            setDetailListId(null);
+            setEditingPlanList(list);
+          }}
+          onDeleted={() => {
+            setDetailListId(null);
+            loadPlanLists();
+            onPlanListChange?.();
+          }}
+          onOpenSpot={(id) => {
+            setDetailListId(null);
+            // 表示中のスポット自身なら閉じるだけでよい。別のスポットは呼び出し元に
+            // 表示対象の差し替えを頼む(onOpenSpot未指定の呼び出し元では何もしない)
+            if (id !== spotId) onOpenSpot?.(id);
+          }}
+        />
+      )}
+      {editingPlanList && typeKey && (
+        <VisitPlanListFormModal
+          typeKey={typeKey}
+          edit={editingPlanList}
+          onClose={() => setEditingPlanList(null)}
         />
       )}
     </div>

@@ -77,11 +77,11 @@ export default function SpotRepositionModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md space-y-3 rounded-t-2xl bg-white p-4 sm:rounded-2xl"
+        className="w-full max-w-md space-y-3 rounded-2xl bg-white p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-2">
