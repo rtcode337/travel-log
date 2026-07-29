@@ -1702,6 +1702,7 @@ export default function AdminView({
                   required
                   value={newUserEmail}
                   onChange={(e) => setNewUserEmail(e.target.value)}
+                  placeholder="user@example.com"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 />
               </div>
@@ -1763,13 +1764,13 @@ export default function AdminView({
 
         {/* 右カラム(またはadminでない場合は唯一のカラム): スポットの管理 */}
         <div>
-          <h2 className="mb-2 text-base font-bold">
-            このスポット種別の管理({currentTypeLabel})
-          </h2>
-
           <div className="flex flex-col gap-6">
             {isAdmin && currentType && (
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <details>
+                <summary className="cursor-pointer select-none text-base font-bold">
+                  このスポット種別の管理({currentTypeLabel})
+                </summary>
+                <section className="mt-2 rounded-xl border border-gray-200 bg-white p-3">
                 <h3 className="mb-2 text-base font-bold">スポット種別の設定</h3>
                 {typeSettingsMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
@@ -1915,12 +1916,16 @@ export default function AdminView({
                     />
                   </label>
                 </div>
-              </section>
+                </section>
+              </details>
             )}
 
-            <h2 className="text-base font-bold">スポットの管理</h2>
-
-            <section className="rounded-xl border border-gray-200 bg-white p-3">
+            <details>
+              <summary className="cursor-pointer select-none text-base font-bold">
+                スポットの管理
+              </summary>
+              <section className="mt-2 rounded-xl border border-gray-200 bg-white p-3">
+              <div>
               <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
                 CSVインポート
                 <HelpTip>
@@ -1931,6 +1936,12 @@ export default function AdminView({
                   上書きし(keyが同じなら改名・座標修正も反映される)、同一ならスキップ、
                   どちらにも一致しなければ新規追加するため、同じCSVを何度アップロードしても
                   重複登録されない(公開以外のスポットに一致した行だけは上書きしない)。
+                  CSV列: {CSV_COLUMNS.join(", ")}(name, lat, lng, region は必須。
+                  region列にはこの種別の地域(
+                  {regionFieldLabel(currentRegionScope)})を入れる。
+                  series/categoriesは自由入力で空でも可。categoriesは1スポットに複数
+                  付けられ、パイプ区切りで書く(例: 自然|夜景|展望)。keyは省略可の
+                  種別内一意な参照キーで、ルートCSVからスポットを指すのに使う)。
                 </HelpTip>
               </h3>
 
@@ -1983,17 +1994,9 @@ export default function AdminView({
                 )}
               </div>
 
-              <p className="mt-2 text-xs text-gray-400">
-                CSV列: {CSV_COLUMNS.join(", ")}(name, lat, lng, region は必須。
-                region列にはこの種別の地域(
-                {regionFieldLabel(currentRegionScope)})を入れる。
-                series/categoriesは自由入力で空でも可。categoriesは1スポットに複数
-                付けられ、パイプ区切りで書く(例: 自然|夜景|展望)。keyは省略可の
-                種別内一意な参照キーで、ルートCSVからスポットを指すのに使う)
-              </p>
-            </section>
+              </div>
 
-            <section className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="mt-3 border-t border-gray-100 pt-3">
               <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
                 travel-log-dataへの還元用エクスポート
                 <HelpTip>
@@ -2020,10 +2023,10 @@ export default function AdminView({
               >
                 {exportingManual ? "エクスポート中…" : "還元用エクスポート"}
               </button>
-            </section>
+              </div>
 
           {isAdmin && (
-            <section className="rounded-xl border border-red-200 bg-white p-3">
+            <div className="mt-3 border-t border-gray-100 pt-3">
               <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold text-red-700">
                 キー一覧を指定して削除
                 <HelpTip>
@@ -2092,11 +2095,11 @@ export default function AdminView({
                   )}
                 </div>
               )}
-            </section>
+            </div>
           )}
 
           {isAdmin && (
-            <section className="rounded-xl border border-red-200 bg-white p-3">
+            <div className="mt-3 border-t border-gray-100 pt-3">
               <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold text-red-700">
                 公開スポットの全削除
                 <HelpTip>
@@ -2153,10 +2156,10 @@ export default function AdminView({
                   対象の公開スポットはありません。
                 </p>
               )}
-            </section>
+            </div>
           )}
 
-            <section className="rounded-xl border border-gray-200 bg-white p-3">
+            <div className="mt-3 border-t border-gray-100 pt-3">
               <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
                 ルート(巡った順の矢印)のインポート
                 <HelpTip>
@@ -2228,7 +2231,96 @@ export default function AdminView({
                   ))}
                 </ul>
               )}
-            </section>
+            </div>
+              </section>
+            </details>
+
+          {isAdmin && (
+            <div>
+              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+                GitHubリポジトリから取り込み
+                <HelpTip>
+                  データリポジトリ(travel-log-data形式)の catalog.json から
+                  スポット種別の一覧を取得して表示する(mainブランチ)。一覧から
+                  種別を選ぶと、そのフォルダの settings.json・spots.csv・
+                  exclude.txt・routes.csv が順に適用される。スポット種別が
+                  無ければ作成し、あれば設定・スポット・ルートを上書きする
+                  (それぞれ個別インポートと同じ差分更新)。exclude.txtによる削除は、
+                  削除件数の確認ダイアログにOKしたときだけ実行される。
+                </HelpTip>
+              </h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <form
+                  onSubmit={handleGithubOpen}
+                  className="flex flex-wrap items-end gap-2"
+                >
+                  <div>
+                    <label className="mb-1 block text-xs font-medium">
+                      リポジトリ(owner/リポジトリ名)
+                    </label>
+                    <input
+                      required
+                      value={githubRepo}
+                      onChange={(e) => {
+                        setGithubRepo(e.target.value);
+                        // 別のリポジトリの一覧が残らないよう、入力を変えたら閉じる
+                        setGithubCatalog(null);
+                      }}
+                      placeholder="rtcode337/travel-log-data"
+                      className="w-64 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={githubOpening || githubImporting}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {githubOpening ? "取得中…" : "開く"}
+                  </button>
+                </form>
+                {githubCatalog && (
+                  <ul className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                    {githubCatalog.map((entry) => (
+                      <li
+                        key={entry.key}
+                        className="flex items-center gap-3 px-3 py-2"
+                      >
+                        <span className="min-w-0 flex-1 text-sm">
+                          {entry.label}{" "}
+                          <span className="text-gray-400">({entry.key})</span>
+                          {spotTypes.some((t) => t.key === entry.key) ? (
+                            <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                              上書き
+                            </span>
+                          ) : (
+                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
+                              新規作成
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={githubImporting}
+                          onClick={() => handleGithubApply(entry)}
+                          className="shrink-0 rounded-lg border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 disabled:opacity-50"
+                        >
+                          適用
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {githubProgress && (
+                  <p className="mt-2 text-sm text-gray-500">{githubProgress}</p>
+                )}
+                {githubMessage && (
+                  <p className="mt-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {githubMessage}
+                  </p>
+                )}
+              </section>
+            </div>
+          )}
 
           {isAdmin && (
             <div>
@@ -2321,19 +2413,22 @@ export default function AdminView({
                   </button>
                 </form>
                 <div className="mt-3 border-t border-gray-100 pt-3">
-                  <p className="mb-2 text-xs text-gray-500">
-                    設定情報込みのJSONファイルからも追加できる
-                    (
-                    <code>{"{ key, label, settings?, series?, categories? }"}</code>
-                    形式。<code>series</code>はそのスポット種別で使えるシリーズの一覧と
-                    表示スタイル(色・縁取り線の色・地図ピンの大きさ・ラベル)の配列で、
-                    省略すると観光地のA〜Eが既定になる。<code>categories</code>は
-                    使うカテゴリの一覧(文字列配列)で、省略すると観光地のカテゴリが
-                    既定になる。<code>settings</code>には
-                    true/falseの設定のほか、対象地域<code>region_scope</code>
-                    ('jp'/国コード/'world')・<code>wikipedia_lang</code>('en'等)も
-                    指定できる。travel-log-dataリポジトリの
-                    各スポットキーフォルダ内の<code>settings.json</code>を参照)。
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                    JSONファイルから種別を追加
+                    <HelpTip>
+                      設定情報込みのJSONファイルからも追加できる
+                      (
+                      <code>{"{ key, label, settings?, series?, categories? }"}</code>
+                      形式。<code>series</code>はそのスポット種別で使えるシリーズの一覧と
+                      表示スタイル(色・縁取り線の色・地図ピンの大きさ・ラベル)の配列で、
+                      省略すると観光地のA〜Eが既定になる。<code>categories</code>は
+                      使うカテゴリの一覧(文字列配列)で、省略すると観光地のカテゴリが
+                      既定になる。<code>settings</code>には
+                      true/falseの設定のほか、対象地域<code>region_scope</code>
+                      ('jp'/国コード/'world')・<code>wikipedia_lang</code>('en'等)も
+                      指定できる。travel-log-dataリポジトリの
+                      各スポットキーフォルダ内の<code>settings.json</code>を参照)。
+                    </HelpTip>
                   </p>
                   <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
                     {importingType ? "追加中…" : "JSONファイルから追加"}
@@ -2350,93 +2445,6 @@ export default function AdminView({
                     />
                   </label>
                 </div>
-              </section>
-            </div>
-          )}
-
-          {isAdmin && (
-            <div>
-              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
-                GitHubリポジトリから取り込み
-                <HelpTip>
-                  データリポジトリ(travel-log-data形式)の catalog.json から
-                  スポット種別の一覧を取得して表示する(mainブランチ)。一覧から
-                  種別を選ぶと、そのフォルダの settings.json・spots.csv・
-                  exclude.txt・routes.csv が順に適用される。スポット種別が
-                  無ければ作成し、あれば設定・スポット・ルートを上書きする
-                  (それぞれ個別インポートと同じ差分更新)。exclude.txtによる削除は、
-                  削除件数の確認ダイアログにOKしたときだけ実行される。
-                </HelpTip>
-              </h2>
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
-                <form
-                  onSubmit={handleGithubOpen}
-                  className="flex flex-wrap items-end gap-2"
-                >
-                  <div>
-                    <label className="mb-1 block text-xs font-medium">
-                      リポジトリ(owner/リポジトリ名)
-                    </label>
-                    <input
-                      required
-                      value={githubRepo}
-                      onChange={(e) => {
-                        setGithubRepo(e.target.value);
-                        // 別のリポジトリの一覧が残らないよう、入力を変えたら閉じる
-                        setGithubCatalog(null);
-                      }}
-                      placeholder="rtcode337/travel-log-data"
-                      className="w-64 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={githubOpening || githubImporting}
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-                  >
-                    {githubOpening ? "取得中…" : "開く"}
-                  </button>
-                </form>
-                {githubCatalog && (
-                  <ul className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-                    {githubCatalog.map((entry) => (
-                      <li
-                        key={entry.key}
-                        className="flex items-center gap-3 px-3 py-2"
-                      >
-                        <span className="min-w-0 flex-1 text-sm">
-                          {entry.label}{" "}
-                          <span className="text-gray-400">({entry.key})</span>
-                          {spotTypes.some((t) => t.key === entry.key) ? (
-                            <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
-                              上書き
-                            </span>
-                          ) : (
-                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
-                              新規作成
-                            </span>
-                          )}
-                        </span>
-                        <button
-                          type="button"
-                          disabled={githubImporting}
-                          onClick={() => handleGithubApply(entry)}
-                          className="shrink-0 rounded-lg border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 disabled:opacity-50"
-                        >
-                          適用
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {githubProgress && (
-                  <p className="mt-2 text-sm text-gray-500">{githubProgress}</p>
-                )}
-                {githubMessage && (
-                  <p className="mt-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                    {githubMessage}
-                  </p>
-                )}
               </section>
             </div>
           )}
