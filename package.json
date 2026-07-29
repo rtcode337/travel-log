@@ -13,11 +13,11 @@
     "maplibre-gl": "^5.0.0",
     "next": "^15.5.0",
     "pg": "^8.13.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.11.0",
     "@types/react": "^19.1.0",
