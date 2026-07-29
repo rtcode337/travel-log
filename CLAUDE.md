@@ -170,13 +170,17 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 ### キー一覧を指定しての削除
 
-`/[type]/admin`のadmin専用セクション「キー一覧を指定して削除」(`app/api/spots/delete-by-keys/route.ts`、POST `?type=`+ボディ`{ keys: string[], dryRun?: boolean }`)。`spots.key`を1行1つ書いたテキストファイルをアップロードすると、クライアント側(`AdminView`の`handleDeleteKeysFile`)がファイル本文をキー一覧にパースし、一致する**公開スポットのみ**を削除する。travel-log-data側で「場所ではない記事」等をCSVから外した際に、その`key`の一覧(`<スポットキー>/*_excluded_candidates/exclude.txt`)をそのままアップロードしてDB側も追随させるための機能 — **CSVインポートは差分更新でCSVに無い行に触らないため、行を消しただけではDBから消えない**。exclude.txtをコピペせずファイルとして渡せるよう、テキストエリア貼り付けではなくファイルアップロードにしている(スポット種別JSONの反映と同じUI)。
+`/[type]/admin`のadmin専用セクション「キー一覧を指定して削除」(`app/api/spots/delete-by-keys/route.ts`、POST `?type=`+ボディ`{ keys: string[], dryRun?: boolean }`)。`spots.key`を1行1つ書いたテキストファイルをアップロードすると、クライアント側(`AdminView`の`handleDeleteKeysFile`)がファイル本文をキー一覧にパースし、一致する**公開スポットのみ**を削除する。travel-log-data側で「場所ではない記事」等をCSVから外した際に、その`key`の一覧(`<スポットキー>/excluded_candidates/exclude.txt`)をそのままアップロードしてDB側も追随させるための機能 — **CSVインポートは差分更新でCSVに無い行に触らないため、行を消しただけではDBから消えない**。exclude.txtをコピペせずファイルとして渡せるよう、テキストエリア貼り付けではなくファイルアップロードにしている(スポット種別JSONの反映と同じUI)。
 
 - 空行と`#`で始まる行(除外リストのコメント)はクライアント側で読み飛ばす
 - **一致しないキーはエラーにせず`notFoundKeys`として返すだけ**。除外リストは追記していく運用で、既に消したキーが毎回含まれるため(毎回ファイル全体を貼れる)
 - 一致は`key`が第一だが、**keyが未設定(null)の既存行に限り`name`の完全一致でも拾う**。keyを振る前に取り込んだデータ(観光地の初回投入分など)をキー一覧だけで掃除できるようにするための後方互換で、travel-log-data側のkeyは「スポット名(重複時のみ連番サフィックス)」の規則のため名前で引ける
 - `dryRun: true`で件数・該当なしキー・対象名のサンプル20件だけを返す。UIはファイルを選んだ時点でこのdryRunを自動実行し、その結果(削除対象の件数)を確認してからでないと削除ボタンを出さない
 - 全削除(purge)と同様、他ユーザーの訪問記録・写真を巻き込むためadmin専用(spot_adminは不可)。写真ファイルもvisitsがカスケードで消える前に集めて削除する
+
+### GitHubリポジトリからの一括取り込み
+
+`/[type]/admin`のadmin専用セクション「GitHubリポジトリから取り込み」(`AdminView`の`handleGithubOpen`/`handleGithubApply`)。リポジトリ(`owner/リポジトリ名`、既定`rtcode337/travel-log-data`)を入力して「開く」を押すと、`raw.githubusercontent.com`(mainブランチ固定、CORS可)からブラウザが直接リポジトリ直下の`catalog.json`(`{ "spot_types": [ { "key", "label" }, ... ] }`形式のスポット種別カタログ)を取得して一覧表示する(既存種別かどうかを「上書き」「新規作成」バッジで示す)。一覧から種別を選んで「適用」すると、そのフォルダの `<キー>/settings.json`・`<キー>/spots.csv`・`<キー>/excluded_candidates/exclude.txt`・`<キー>/routes.csv` を取得し、この順に適用する。settings.jsonだけは必須(無ければ中止)で、他は無ければスキップ。種別が無ければ作成し、あればlabel・設定・シリーズ・カテゴリを上書きする(`applyTypeDefinition`。settings.jsonのkeyとフォルダ名の不一致は中止)。spots.csv・routes.csvは個別インポートと同じ差分更新ロジックを共通関数(`runSpotsCsvImport`/`runRouteCsvImport` — 個別インポートのハンドラもこれらの薄いラッパー)で対象種別に対して実行し、exclude.txtは「キー一覧を指定して削除」と同じAPIで削除件数の確認ダイアログにOKしたときだけ実行する(キャンセルしても後続のroutes.csvは続行)。routes.csvの検証用スポットはspots.csv適用後に取り直す。バックエンドに専用エンドポイントは無く、既存APIの組み合わせのみ。
 
 ### 登録経路(`spots.origin`)とtravel-log-dataへの還元用エクスポート
 

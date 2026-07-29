@@ -155,6 +155,17 @@ export default function AdminView({
   const [typeMessage, setTypeMessage] = useState<string | null>(null);
   const [importingType, setImportingType] = useState(false);
   const [applyingTypeJson, setApplyingTypeJson] = useState(false);
+  // GitHubリポジトリからの一括取り込み(admin専用)。repoは「owner/リポジトリ名」。
+  // 「開く」でリポジトリ直下のcatalog.json(スポット種別の一覧)を取得して表示し、
+  // 一覧から選んだ種別を適用する
+  const [githubRepo, setGithubRepo] = useState("rtcode337/travel-log-data");
+  const [githubCatalog, setGithubCatalog] = useState<
+    { key: string; label: string }[] | null
+  >(null);
+  const [githubOpening, setGithubOpening] = useState(false);
+  const [githubImporting, setGithubImporting] = useState(false);
+  const [githubProgress, setGithubProgress] = useState<string | null>(null);
+  const [githubMessage, setGithubMessage] = useState<string | null>(null);
   const [defaultTypeMessage, setDefaultTypeMessage] = useState<string | null>(
     null
   );
@@ -713,15 +724,39 @@ export default function AdminView({
     origin: "csv";
   }
 
-  const handleCsvFile = async (file: File) => {
-    setImporting(true);
-    setMessage(null);
-    try {
-      const text = await file.text();
+  /**
+   * 一括インポートのAPI呼び出しをリトライ付きで実行する。一時的な失敗
+   * (開発サーバーの再コンパイル・瞬間的なネットワーク断など)が1回あるだけで
+   * 数千件のインポート全体が中断してしまうのを防ぐ。少し待って計3回まで試し、
+   * それでも失敗したら最後のエラーを返す(差分インポートは同じ内容を再送しても
+   * 二重登録にならないため、成否不明のまま再送しても安全)
+   */
+  const withRetry = async <T,>(
+    run: () => Promise<{ data: T | null; error: { message: string } | null }>
+  ): Promise<{ data: T | null; error: { message: string } | null }> => {
+    let last = await run();
+    for (const delay of [500, 2000]) {
+      if (!last.error) return last;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      last = await run();
+    }
+    return last;
+  };
+
+  /**
+   * スポットCSV(テキスト)を種別targetKeyへ差分インポートする共通処理。
+   * このページのCSVインポートとGitHubリポジトリからの取り込みの両方から使う。
+   * 検証エラー・途中失敗はErrorをthrowし、成功時は結果メッセージを返す
+   */
+  const runSpotsCsvImport = async (
+    text: string,
+    targetKey: string,
+    existingSpots: Spot[],
+    onProgress: (done: number, total: number) => void
+  ): Promise<string> => {
       const rows = parseCsv(text);
       if (rows.length < 2) {
-        setMessage("CSVにデータ行がありません。");
-        return;
+        throw new Error("CSVにデータ行がありません。");
       }
       const header = rows[0].map((h) => h.trim());
       // categories列を持たないCSVは「カテゴリを指定していない」だけなので、
@@ -732,18 +767,16 @@ export default function AdminView({
       ) as Record<(typeof CSV_COLUMNS)[number], number>;
       for (const required of ["name", "lat", "lng", "region"] as const) {
         if (idx[required] === -1) {
-          setMessage(`CSVヘッダーに ${required} 列がありません。`);
-          return;
+          throw new Error(`CSVヘッダーに ${required} 列がありません。`);
         }
       }
       const unknownColumns = unknownCsvColumns(header, CSV_COLUMNS);
       if (unknownColumns.length > 0) {
-        setMessage(
+        throw new Error(
           `CSVヘッダーに未対応の列があります: ${unknownColumns.join(", ")}\n` +
             `使える列は ${CSV_COLUMNS.join(", ")} です。` +
             `(rank・category は series・categories に改名されています)`
         );
-        return;
       }
 
       const records: CsvSpotRecord[] = [];
@@ -781,19 +814,18 @@ export default function AdminView({
           });
       }
       if (errors.length > 0) {
-        setMessage(
+        throw new Error(
           `エラーがあるためインポートを中止しました:\n` + errors.join("\n")
         );
-        return;
       }
 
       // key列はDB側で種別内一意のため、CSV内の重複だけは事前に検出して中止する
       // (どちらの行を正とすべきか決められないため)
       const existingByDiffKey = new Map(
-        spots.map((s) => [spotDiffKey(s.name, s.lat, s.lng), s])
+        existingSpots.map((s) => [spotDiffKey(s.name, s.lat, s.lng), s])
       );
       const existingByKey = new Map(
-        spots.filter((s) => s.key).map((s) => [s.key as string, s])
+        existingSpots.filter((s) => s.key).map((s) => [s.key as string, s])
       );
       const seenCsvKeys = new Set<string>();
       const keyErrors: string[] = [];
@@ -805,10 +837,9 @@ export default function AdminView({
         seenCsvKeys.add(record.key);
       }
       if (keyErrors.length > 0) {
-        setMessage(
+        throw new Error(
           `エラーがあるためインポートを中止しました:\n` + keyErrors.join("\n")
         );
-        return;
       }
 
       // 差分更新: 既存行との同一判定はkey一致を最優先し(改名・座標修正もCSVから
@@ -853,41 +884,39 @@ export default function AdminView({
       }
 
       if (newRecords.length === 0 && updates.length === 0) {
-        setMessage(
-          `追加・変更はありませんでした(${unchangedCount}件は既存と同一のためスキップ)。`
-        );
-        return;
+        return `追加・変更はありませんでした(${unchangedCount}件は既存と同一のためスキップ)。`;
       }
 
       // 1000件ずつ順番に送信し、進捗を表示する(大量データで1リクエストが
       // タイムアウトするのも避けられる)
       const totalCount = newRecords.length + updates.length;
       let insertedCount = 0;
-      setImportProgress({ done: 0, total: totalCount });
+      onProgress(0, totalCount);
       for (
         let offset = 0;
         offset < newRecords.length;
         offset += CSV_IMPORT_CHUNK_SIZE
       ) {
         const chunk = newRecords.slice(offset, offset + CSV_IMPORT_CHUNK_SIZE);
-        const { error } = await api.spots.createMany(chunk, typeKey);
+        const { error } = await withRetry(() =>
+          api.spots.createMany(chunk, targetKey)
+        );
         if (error) {
-          setMessage(
+          throw new Error(
             `${insertedCount}件追加した時点でインポートに失敗しました: ` +
               error.message
           );
-          load();
-          return;
         }
         insertedCount += chunk.length;
-        setImportProgress({ done: insertedCount, total: totalCount });
+        onProgress(insertedCount, totalCount);
       }
 
       // 既存スポットの上書き更新(1件ずつPATCH)。CSVにkeyが無い行は既存のkeyを
       // 消さないよう、keyフィールド自体を送らない(PATCH側が未指定時は維持する)
       let updatedCount = 0;
       for (const { spot, record } of updates) {
-        const { error } = await api.spots.update(spot.id, {
+        const { error } = await withRetry(() =>
+          api.spots.update(spot.id, {
           name: record.name,
           name_kana: record.name_kana,
           lat: record.lat,
@@ -900,31 +929,46 @@ export default function AdminView({
           description: record.description,
           ...(record.key !== null ? { key: record.key } : {}),
           origin: record.origin,
-        });
+          })
+        );
         if (error) {
-          setMessage(
+          throw new Error(
             `${insertedCount}件追加・${updatedCount}件更新した時点で失敗しました: ` +
               error.message
           );
-          load();
-          return;
         }
         updatedCount++;
-        setImportProgress({ done: insertedCount + updatedCount, total: totalCount });
+        onProgress(insertedCount + updatedCount, totalCount);
       }
 
-      setMessage(
+      return (
         `${insertedCount}件追加・${updatedCount}件更新しました` +
-          (unchangedCount > 0 ? `(${unchangedCount}件は既存と同一のためスキップ)` : "") +
-          (untouchableCount > 0
-            ? `(${untouchableCount}件は公開以外のスポットのため未変更)`
-            : "") +
-          "。"
+        (unchangedCount > 0 ? `(${unchangedCount}件は既存と同一のためスキップ)` : "") +
+        (untouchableCount > 0
+          ? `(${untouchableCount}件は公開以外のスポットのため未変更)`
+          : "") +
+        "。"
       );
-      load();
+  };
+
+  const handleCsvFile = async (file: File) => {
+    setImporting(true);
+    setMessage(null);
+    try {
+      const result = await runSpotsCsvImport(
+        await file.text(),
+        typeKey,
+        spots,
+        (done, total) => setImportProgress({ done, total })
+      );
+      setMessage(result);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setImporting(false);
       setImportProgress(null);
+      // 途中まで追加された場合もあるため、成否によらず一覧を取り直す
+      load();
     }
   };
 
@@ -1029,15 +1073,20 @@ export default function AdminView({
     }
   };
 
-  const handleRouteCsvFile = async (file: File) => {
-    setImportingRoutes(true);
-    setRouteMessage(null);
-    try {
-      const text = await file.text();
+  /**
+   * ルートCSV(テキスト)を種別targetKeyへ差分インポートする共通処理。
+   * このページのルートCSVインポートとGitHubリポジトリからの取り込みの両方から使う。
+   * 検証エラー・失敗はErrorをthrowし、成功時は結果メッセージを返す
+   */
+  const runRouteCsvImport = async (
+    text: string,
+    targetKey: string,
+    targetSpots: Spot[],
+    existingRoutes: SpotRoute[]
+  ): Promise<string> => {
       const rows = parseCsv(text);
       if (rows.length < 2) {
-        setRouteMessage("CSVにデータ行がありません。");
-        return;
+        throw new Error("CSVにデータ行がありません。");
       }
       const header = rows[0].map((h) => h.trim());
       const idx = Object.fromEntries(
@@ -1045,22 +1094,20 @@ export default function AdminView({
       ) as Record<(typeof ROUTE_CSV_COLUMNS)[number], number>;
       for (const required of ["route", "seq", "spot_key"] as const) {
         if (idx[required] === -1) {
-          setRouteMessage(`CSVヘッダーに ${required} 列がありません。`);
-          return;
+          throw new Error(`CSVヘッダーに ${required} 列がありません。`);
         }
       }
       const unknownColumns = unknownCsvColumns(header, ROUTE_CSV_COLUMNS);
       if (unknownColumns.length > 0) {
-        setRouteMessage(
+        throw new Error(
           `CSVヘッダーに未対応の列があります: ${unknownColumns.join(", ")}\n` +
             `使える列は ${ROUTE_CSV_COLUMNS.join(", ")} です。`
         );
-        return;
       }
 
       // spot_keyはスポットのkey列(種別内一意)を指す。先に全行を検証してから送る
       const spotsByKey = new Map(
-        spots.filter((s) => s.key).map((s) => [s.key as string, s])
+        targetSpots.filter((s) => s.key).map((s) => [s.key as string, s])
       );
       const errors: string[] = [];
       const grouped = new Map<
@@ -1124,10 +1171,9 @@ export default function AdminView({
         }
       }
       if (errors.length > 0) {
-        setRouteMessage(
+        throw new Error(
           `エラーがあるためインポートを中止しました:\n` + errors.join("\n")
         );
-        return;
       }
 
       // 差分更新: 既存ルートとシリーズ・説明・経由地(区間の説明含む)の並びが完全一致する
@@ -1138,7 +1184,7 @@ export default function AdminView({
         points: { spot_id: string; description: string | null }[]
       ) => JSON.stringify(points.map((p) => [p.spot_id, p.description ?? null]));
       const existingByName = new Map(
-        routes.map((r) => [
+        existingRoutes.map((r) => [
           r.name,
           {
             series: r.series,
@@ -1181,26 +1227,340 @@ export default function AdminView({
         });
       }
       if (changed.length === 0) {
-        setRouteMessage(
-          `変更はありませんでした(${unchangedCount}本は既存と同一のためスキップ)。`
-        );
-        return;
+        return `変更はありませんでした(${unchangedCount}本は既存と同一のためスキップ)。`;
       }
 
-      const { error } = await api.routes.replace(typeKey, changed);
+      const { error } = await withRetry(() =>
+        api.routes.replace(targetKey, changed)
+      );
       if (error) {
-        setRouteMessage("インポートに失敗しました: " + error.message);
-        return;
+        throw new Error("インポートに失敗しました: " + error.message);
       }
-      setRouteMessage(
+      return (
         `${changed.length}本のルートを追加・更新しました` +
-          (unchangedCount > 0
-            ? `(${unchangedCount}本は既存と同一のためスキップ)。`
-            : "。")
+        (unchangedCount > 0
+          ? `(${unchangedCount}本は既存と同一のためスキップ)。`
+          : "。")
+      );
+  };
+
+  const handleRouteCsvFile = async (file: File) => {
+    setImportingRoutes(true);
+    setRouteMessage(null);
+    try {
+      setRouteMessage(
+        await runRouteCsvImport(await file.text(), typeKey, spots, routes)
       );
       loadRoutes();
+    } catch (err) {
+      setRouteMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setImportingRoutes(false);
+    }
+  };
+
+  /**
+   * GitHubリポジトリの生ファイルを取得する。無いファイル(404)はnull、
+   * それ以外の失敗はErrorをthrowする。ブランチはリポジトリの既定を仮定してmain固定
+   */
+  const fetchGithubFile = async (
+    repo: string,
+    path: string
+  ): Promise<string | null> => {
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://raw.githubusercontent.com/${repo}/main/${path}`
+      );
+    } catch {
+      throw new Error(`${path} の取得に失敗しました(ネットワークエラー)。`);
+    }
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`${path} の取得に失敗しました(HTTP ${res.status})。`);
+    }
+    return await res.text();
+  };
+
+  /**
+   * settings.json(パース済みJSON)をスポット種別へ適用する。keyと一致する種別が
+   * 無ければ作成し、あればlabel・設定・シリーズ・カテゴリを上書きする(GitHub取り込み用)
+   */
+  const applyTypeDefinition = async (
+    json: unknown,
+    folderKey: string
+  ): Promise<{ label: string; created: boolean }> => {
+    const parsed = parseSpotTypeDefinition(json);
+    if ("error" in parsed) {
+      throw new Error("settings.json の内容が不正です: " + parsed.error);
+    }
+    const { key, label, settings, series, categories } = parsed.data;
+    // フォルダ名と食い違うJSONを黙って適用すると別の種別を上書きしてしまうため中止する
+    if (key !== folderKey) {
+      throw new Error(
+        `settings.json のkey(${key})がフォルダ名(${folderKey})と一致しません。`
+      );
+    }
+
+    const settingsToApply: Record<string, boolean | string> = {};
+    for (const [k, v] of Object.entries(settings ?? {})) {
+      if (v !== undefined) settingsToApply[k] = v;
+    }
+    if (series) {
+      settingsToApply[SERIES_STYLES_SETTING_KEY] = JSON.stringify(series);
+    }
+    if (categories) {
+      settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
+    }
+
+    // この画面を開いた後に作られた種別も拾えるよう、最新の一覧から探す
+    const { data: types, error: listError } = await withRetry(() =>
+      api.spotTypes.list()
+    );
+    if (listError) {
+      throw new Error("種別一覧の取得に失敗しました: " + listError.message);
+    }
+    const existing = (types ?? []).find((t) => t.key === folderKey);
+    if (existing) {
+      const { error } = await withRetry(() =>
+        api.spotTypes.applySettings(existing.id, settingsToApply, label)
+      );
+      if (error) throw new Error("設定の反映に失敗しました: " + error.message);
+      return { label, created: false };
+    }
+    // 作成のリトライは「1回目が実は成功していた」場合に2回目がキー重複エラーに
+    // なり得るため、リトライ後も失敗していたら既存を引き直して救済する
+    const { data: created, error: createError } = await withRetry(() =>
+      api.spotTypes.create(key, label)
+    );
+    let typeId = created?.id ?? null;
+    if (createError || !typeId) {
+      const { data: retryTypes } = await api.spotTypes.list();
+      typeId = (retryTypes ?? []).find((t) => t.key === folderKey)?.id ?? null;
+      if (!typeId) {
+        throw new Error(
+          "種別の作成に失敗しました: " + (createError?.message ?? "")
+        );
+      }
+    }
+    if (Object.keys(settingsToApply).length > 0) {
+      const { error } = await withRetry(() =>
+        api.spotTypes.applySettings(typeId, settingsToApply)
+      );
+      if (error) {
+        throw new Error(
+          `種別「${label}」は作成しましたが、設定の反映に失敗しました: ` +
+            error.message
+        );
+      }
+    }
+    return { label, created: true };
+  };
+
+  /**
+   * exclude.txt(削除キー一覧)を種別targetKeyへ適用する(GitHub取り込み用)。
+   * 「キー一覧を指定して削除」と同じAPIで、削除前に件数を確認ダイアログで確かめる
+   */
+  const applyExcludeKeys = async (
+    text: string,
+    targetKey: string,
+    targetLabel: string
+  ): Promise<string> => {
+    const keys = parseDeleteKeys(text);
+    if (keys.length === 0) return "キーが1件も無いためスキップ。";
+    const { data: preview, error } = await withRetry(() =>
+      api.spots.deleteByKeysPreview(targetKey, keys)
+    );
+    if (error) throw new Error("削除対象の確認に失敗しました: " + error.message);
+    if (!preview || preview.matchedCount === 0) {
+      return "該当する公開スポットが無いためスキップ。";
+    }
+    if (
+      !confirm(
+        `exclude.txt に基づき「${targetLabel}」(${targetKey})の公開スポット` +
+          `${preview.matchedCount}件を削除します。` +
+          `紐づく訪問記録・訪問予定・口コミ・写真も全ユーザー分削除されます。` +
+          `よろしいですか?(キャンセルしても他のファイルの適用は続行します)`
+      )
+    ) {
+      return "削除はキャンセルされました。";
+    }
+    const { data, error: applyError } = await withRetry(() =>
+      api.spots.deleteByKeysApply(targetKey, keys)
+    );
+    if (applyError) {
+      throw new Error("削除に失敗しました: " + applyError.message);
+    }
+    return (
+      `${data?.deletedCount ?? 0}件削除しました` +
+      (data?.notFoundKeys.length
+        ? `(${data.notFoundKeys.length}件のキーは該当なしのため無視)。`
+        : "。")
+    );
+  };
+
+  /** リポジトリ直下のcatalog.json(スポット種別の一覧)を取得して表示する */
+  const handleGithubOpen = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const repo = githubRepo.trim();
+    if (!repo) return;
+    setGithubOpening(true);
+    setGithubMessage(null);
+    setGithubCatalog(null);
+    try {
+      const text = await fetchGithubFile(repo, "catalog.json");
+      if (text === null) {
+        throw new Error(
+          "catalog.json がリポジトリに見つかりません(travel-log-data形式のリポジトリか確認してください)。"
+        );
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error("catalog.json の読み込みに失敗しました(構文エラー)。");
+      }
+      const spotTypesRaw = (json as { spot_types?: unknown }).spot_types;
+      const entries = Array.isArray(spotTypesRaw)
+        ? spotTypesRaw.filter(
+            (t): t is { key: string; label: string } =>
+              !!t &&
+              typeof (t as { key?: unknown }).key === "string" &&
+              typeof (t as { label?: unknown }).label === "string"
+          )
+        : [];
+      if (entries.length === 0) {
+        throw new Error("catalog.json にスポット種別が1件もありません。");
+      }
+      setGithubCatalog(entries);
+    } catch (err) {
+      setGithubMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGithubOpening(false);
+    }
+  };
+
+  /**
+   * カタログで選んだスポット種別のフォルダから settings.json・spots.csv・
+   * exclude.txt・routes.csv を取得して順に適用する。種別が無ければ作成、あれば上書き。
+   * 途中で失敗してもそこまでの結果を表示する
+   */
+  const handleGithubApply = async (entry: { key: string; label: string }) => {
+    const repo = githubRepo.trim();
+    const key = entry.key;
+    if (
+      !confirm(
+        `「${repo}」から「${entry.label}」(${key})のデータを取得して適用します。` +
+          `スポット種別が無ければ作成し、あれば設定・スポット・ルートを上書きします。` +
+          `よろしいですか?`
+      )
+    )
+      return;
+    setGithubImporting(true);
+    setGithubMessage(null);
+    const lines: string[] = [];
+    try {
+      setGithubProgress("リポジトリからファイルを取得中…");
+      const [settingsText, spotsText, excludeText, routesText] =
+        await Promise.all([
+          fetchGithubFile(repo, `${key}/settings.json`),
+          fetchGithubFile(repo, `${key}/spots.csv`),
+          // exclude.txt の置き場所は travel-log-data の規則(excluded_candidates/)
+          fetchGithubFile(repo, `${key}/excluded_candidates/exclude.txt`),
+          fetchGithubFile(repo, `${key}/routes.csv`),
+        ]);
+      if (!settingsText) {
+        throw new Error(
+          `${key}/settings.json がリポジトリに見つかりません。`
+        );
+      }
+
+      // 1. settings.json → 種別の作成または設定の上書き
+      setGithubProgress("スポット種別の設定を適用中…");
+      let settingsJson: unknown;
+      try {
+        settingsJson = JSON.parse(settingsText);
+      } catch {
+        throw new Error("settings.json の読み込みに失敗しました(構文エラー)。");
+      }
+      const { label, created } = await applyTypeDefinition(settingsJson, key);
+      lines.push(
+        created
+          ? `settings.json: 種別「${label}」を作成しました。`
+          : `settings.json: 種別「${label}」の設定を上書きしました。`
+      );
+
+      // 2. spots.csv → 差分インポート(対象種別の既存全件と突き合わせる)
+      if (spotsText) {
+        setGithubProgress("spots.csv を適用中…");
+        const { data: existing, error: listError } = await withRetry(() =>
+          api.spots.list(undefined, { type: key })
+        );
+        if (listError) {
+          throw new Error(
+            "既存スポットの取得に失敗しました: " + listError.message
+          );
+        }
+        lines.push(
+          "spots.csv: " +
+            (await runSpotsCsvImport(spotsText, key, existing ?? [], (done, total) =>
+              setGithubProgress(`spots.csv を適用中… ${done}/${total}件`)
+            ))
+        );
+      } else {
+        lines.push("spots.csv: リポジトリに無いためスキップ。");
+      }
+
+      // 3. exclude.txt → CSVから外したスポットの削除(件数確認あり)
+      if (excludeText) {
+        setGithubProgress("exclude.txt を適用中…");
+        lines.push(
+          "exclude.txt: " + (await applyExcludeKeys(excludeText, key, label))
+        );
+      } else {
+        lines.push("exclude.txt: リポジトリに無いためスキップ。");
+      }
+
+      // 4. routes.csv → スポット取り込み後の最新のkeyで検証してから適用
+      if (routesText) {
+        setGithubProgress("routes.csv を適用中…");
+        const [{ data: freshSpots, error: spotsError }, { data: existingRoutes, error: routesError }] =
+          await Promise.all([
+            withRetry(() => api.spots.list(undefined, { type: key })),
+            withRetry(() => api.routes.list(key)),
+          ]);
+        if (spotsError || routesError) {
+          throw new Error(
+            "ルート検証用のデータ取得に失敗しました: " +
+              (spotsError?.message ?? routesError?.message ?? "")
+          );
+        }
+        lines.push(
+          "routes.csv: " +
+            (await runRouteCsvImport(
+              routesText,
+              key,
+              freshSpots ?? [],
+              existingRoutes ?? []
+            ))
+        );
+      } else {
+        lines.push("routes.csv: リポジトリに無いためスキップ。");
+      }
+
+      setGithubMessage("取り込みが完了しました。\n" + lines.join("\n"));
+    } catch (err) {
+      lines.push(err instanceof Error ? err.message : String(err));
+      setGithubMessage("取り込みを中断しました:\n" + lines.join("\n"));
+    } finally {
+      setGithubImporting(false);
+      setGithubProgress(null);
+      // 現在表示中の種別へ取り込んだ場合はこの画面の一覧にも反映する
+      loadSpotTypes();
+      if (key === typeKey) {
+        load();
+        loadRoutes();
+      }
     }
   };
 
@@ -1990,6 +2350,93 @@ export default function AdminView({
                     />
                   </label>
                 </div>
+              </section>
+            </div>
+          )}
+
+          {isAdmin && (
+            <div>
+              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+                GitHubリポジトリから取り込み
+                <HelpTip>
+                  データリポジトリ(travel-log-data形式)の catalog.json から
+                  スポット種別の一覧を取得して表示する(mainブランチ)。一覧から
+                  種別を選ぶと、そのフォルダの settings.json・spots.csv・
+                  exclude.txt・routes.csv が順に適用される。スポット種別が
+                  無ければ作成し、あれば設定・スポット・ルートを上書きする
+                  (それぞれ個別インポートと同じ差分更新)。exclude.txtによる削除は、
+                  削除件数の確認ダイアログにOKしたときだけ実行される。
+                </HelpTip>
+              </h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <form
+                  onSubmit={handleGithubOpen}
+                  className="flex flex-wrap items-end gap-2"
+                >
+                  <div>
+                    <label className="mb-1 block text-xs font-medium">
+                      リポジトリ(owner/リポジトリ名)
+                    </label>
+                    <input
+                      required
+                      value={githubRepo}
+                      onChange={(e) => {
+                        setGithubRepo(e.target.value);
+                        // 別のリポジトリの一覧が残らないよう、入力を変えたら閉じる
+                        setGithubCatalog(null);
+                      }}
+                      placeholder="rtcode337/travel-log-data"
+                      className="w-64 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={githubOpening || githubImporting}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {githubOpening ? "取得中…" : "開く"}
+                  </button>
+                </form>
+                {githubCatalog && (
+                  <ul className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                    {githubCatalog.map((entry) => (
+                      <li
+                        key={entry.key}
+                        className="flex items-center gap-3 px-3 py-2"
+                      >
+                        <span className="min-w-0 flex-1 text-sm">
+                          {entry.label}{" "}
+                          <span className="text-gray-400">({entry.key})</span>
+                          {spotTypes.some((t) => t.key === entry.key) ? (
+                            <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                              上書き
+                            </span>
+                          ) : (
+                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
+                              新規作成
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={githubImporting}
+                          onClick={() => handleGithubApply(entry)}
+                          className="shrink-0 rounded-lg border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 disabled:opacity-50"
+                        >
+                          適用
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {githubProgress && (
+                  <p className="mt-2 text-sm text-gray-500">{githubProgress}</p>
+                )}
+                {githubMessage && (
+                  <p className="mt-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {githubMessage}
+                  </p>
+                )}
               </section>
             </div>
           )}
