@@ -2238,7 +2238,7 @@ export default function AdminView({
           {isAdmin && (
             <div>
               <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
-                GitHubリポジトリから取り込み
+                GitHubリポジトリからスポット種別取り込み
                 <HelpTip>
                   データリポジトリ(travel-log-data形式)の catalog.json から
                   スポット種別の一覧を取得して表示する(mainブランチ)。一覧から
