@@ -163,9 +163,11 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 ### ルート・経路をGoogle マップで開く
 
-ルート・訪問順の経路・訪問予定リストのような「巡る順に並んだスポット列」は、Google マップの経路検索(Maps URLs の`dir`)にそのまま渡して開ける(`lib/googleMaps.ts`の`buildGoogleMapsRouteUrl`+`components/GoogleMapsRouteLink.tsx`)。**先頭が出発地(origin)、最後が目的地(destination)、間が経由地(waypoints)**になる。置き場所は地図のルート・経路の詳細モーダル(`MapView`の`routeDetailView`。ルートCSVのルート/訪問順の経路/訪問予定リストの経路すべて)と、訪問予定リストの詳細(`VisitPlanListDetailModal`。`/[type]/spots`とスポット詳細の「訪問予定」から開くもの)。
+ルート・訪問順の経路・訪問予定リストのような「巡る順に並んだスポット列」は、Google マップの経路検索(Maps URLs の`dir`)にそのまま渡して開ける(`lib/googleMaps.ts`の`buildGoogleMapsRouteUrl`+`components/GoogleMapsRouteLink.tsx`)。**出発地(origin)は現在地**で、スポットは**最後の1件が目的地(destination)、それ以外が経由地(waypoints)**になる。置き場所は地図のルート・経路の詳細モーダル(`MapView`の`routeDetailView`。ルートCSVのルート/訪問順の経路/訪問予定リストの経路すべて)と、訪問予定リストの詳細(`VisitPlanListDetailModal`。`/[type]/spots`とスポット詳細の「訪問予定」から開くもの)。かつては先頭のスポットを出発地にしていたが、今いる場所からそこまでの経路が出ず使い物にならないため現在地に変えた。
 
-Maps URLsの`waypoints`は9件までのため、それを超える経路は**並び順のまま等間隔に間引いて**渡し(出発地・目的地は必ず残す)、省いた件数をリンクの下に注記する(黙って切り捨てない)。2地点未満は経路にならないためリンク自体を出さない。座標のみを渡し、スポット名は渡さない(名前で検索されて別の場所に解決されるのを防ぐため)。
+現在地は`lib/useRouteOrigin.ts`の`useRouteOrigin`(スポット詳細の単一スポットへの経路リンクと共通)で取る。**位置情報の権限が既に許可されているときだけ**`getCurrentPosition`する — モーダルを開いただけで権限ダイアログを出さないため。取れなければ`origin`を付けずに開き、Google マップ側の判断(多くの場合は現在地)に委ねる。
+
+Maps URLsの`waypoints`は9件までのため、それを超える経路は**並び順のまま等間隔に間引いて**渡し(最初と最後のスポットは必ず残る=間引きの添字が両端を含むため)、省いた件数をリンクの下に注記する(黙って切り捨てない)。スポット0件のときはリンク自体を出さない(現在地が出発地のため、**1件だけでも経路になる**)。座標のみを渡し、スポット名は渡さない(名前で検索されて別の場所に解決されるのを防ぐため)。
 
 ### 別スポット種別の重ね表示(地図)
 

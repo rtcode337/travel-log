@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
+import { useRouteOrigin } from "@/lib/useRouteOrigin";
 import {
   countedVisits,
   formatVisitedOn,
@@ -172,40 +173,8 @@ export default function SpotDetailModal({
   const [moderating, setModerating] = useState(false);
   // 訪問履歴のサムネイルをタップしたときに拡大表示する写真のURL
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  // 「Google マップで経路を表示」のorigin(出発地)に使う現在地([lat, lng])。
-  // originを指定しないとGoogle マップ側が最後に開いていた地点等を出発地にして
-  // しまうことがあるため、現在地が分かるときは明示的に渡す。ただし位置情報の
-  // 権限が既に許可されている場合のみ取得する(スポット詳細を開いただけで権限
-  // ダイアログを出さないため)。取れないときはoriginなし=従来の挙動に落とす
-  const [routeOrigin, setRouteOrigin] = useState<[number, number] | null>(null);
-
-  useEffect(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const status = await navigator.permissions.query({ name: "geolocation" });
-        if (cancelled || status.state !== "granted") return;
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            if (!cancelled) {
-              setRouteOrigin([pos.coords.latitude, pos.coords.longitude]);
-            }
-          },
-          () => {
-            // 取得失敗(タイムアウト等)はoriginなしのままにする
-          },
-          // 地図の現在地表示(GeolocateControl)が直近に取った位置があればそれで足りる
-          { maximumAge: 60_000, timeout: 10_000 }
-        );
-      } catch {
-        // permissions APIが無い環境では従来どおりoriginなし
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // 「Google マップで経路を表示」のorigin(出発地)に使う現在地
+  const routeOrigin = useRouteOrigin();
 
   // 拡大表示中はEscキーでも閉じられるようにする
   useEffect(() => {
@@ -615,7 +584,7 @@ export default function SpotDetailModal({
                     `${spot.lat},${spot.lng}`
                   )}${
                     routeOrigin
-                      ? `&origin=${encodeURIComponent(`${routeOrigin[0]},${routeOrigin[1]}`)}`
+                      ? `&origin=${encodeURIComponent(`${routeOrigin.lat},${routeOrigin.lng}`)}`
                       : ""
                   }`}
                   target="_blank"

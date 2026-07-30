@@ -4,6 +4,7 @@ import {
   buildGoogleMapsRouteUrl,
   GOOGLE_MAPS_MAX_WAYPOINTS,
 } from "@/lib/googleMaps";
+import { useRouteOrigin } from "@/lib/useRouteOrigin";
 
 /** 経路案内アイコン(Google Material Symbols「directions」、Apache License 2.0) */
 export function DirectionsIcon({ className }: { className?: string }) {
@@ -16,9 +17,10 @@ export function DirectionsIcon({ className }: { className?: string }) {
 
 /**
  * スポットの並び(ルート・訪問順の経路・訪問予定リスト)全体を、Google マップの
- * 経路検索で開くリンク。先頭が出発地、最後が目的地、間が経由地になる。
- * 2地点未満のときは経路にならないため何も描かない。Google マップ側の経由地の
- * 上限を超えた分は間引かれるため、そのときは省いた件数を注記する。
+ * 経路検索で開くリンク。**出発地は現在地**で、最後のスポットが目的地、
+ * それ以外のスポットが経由地になる。スポットが無いときは何も描かない。
+ * Google マップ側の経由地の上限を超えた分は間引かれるため、そのときは
+ * 省いた件数を注記する。
  */
 export default function GoogleMapsRouteLink({
   points,
@@ -28,7 +30,8 @@ export default function GoogleMapsRouteLink({
   points: { lat: number; lng: number }[];
   label?: string;
 }) {
-  const route = buildGoogleMapsRouteUrl(points);
+  const origin = useRouteOrigin();
+  const route = buildGoogleMapsRouteUrl(points, origin);
   if (!route) return null;
   return (
     <div>
@@ -44,7 +47,8 @@ export default function GoogleMapsRouteLink({
       {route.omittedCount > 0 && (
         <p className="mt-1 text-xs text-gray-500">
           Google マップの経由地は{GOOGLE_MAPS_MAX_WAYPOINTS}件までのため、途中の
-          {route.omittedCount}件は省いています(出発地と目的地は変わりません)。
+          {route.omittedCount}件は省いています(現在地から出発し、最初と最後の
+          スポットは変わりません)。
         </p>
       )}
     </div>
