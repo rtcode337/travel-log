@@ -123,6 +123,13 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(spot),
       }),
+    // CSVインポートの上書き更新用の一括PATCH(公開スポットのみ・spot_admin/admin専用)。
+    // 実際に更新できた行だけを返す
+    updateMany: (spots: unknown[], type: string) =>
+      request<Spot[]>(`/api/spots/bulk-update?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+        body: JSON.stringify(spots),
+      }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/spots/${id}`, { method: "DELETE" }),
     setStatus: (id: string, status: "published" | "rejected" | "pending") =>

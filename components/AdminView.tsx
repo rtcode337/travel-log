@@ -911,25 +911,36 @@ export default function AdminView({
         onProgress(insertedCount, totalCount);
       }
 
-      // 既存スポットの上書き更新(1件ずつPATCH)。CSVにkeyが無い行は既存のkeyを
-      // 消さないよう、keyフィールド自体を送らない(PATCH側が未指定時は維持する)
+      // 既存スポットの上書き更新も新規と同じく1000件ずつの一括送信
+      // (POST /api/spots/bulk-update)。1件ずつのPATCHはGitHub取り込みのような
+      // 大量更新でラウンドトリップの積み重ねが重すぎた。CSVにkeyが無い行は既存の
+      // keyを消さないよう、keyフィールド自体を送らない(API側が未指定時は維持する)
       let updatedCount = 0;
-      for (const { spot, record } of updates) {
-        const { error } = await withRetry(() =>
-          api.spots.update(spot.id, {
-          name: record.name,
-          name_kana: record.name_kana,
-          lat: record.lat,
-          lng: record.lng,
-          region: record.region,
-          series: record.series,
-          ...(record.categories !== null
-            ? { categories: record.categories }
-            : {}),
-          description: record.description,
-          ...(record.key !== null ? { key: record.key } : {}),
-          origin: record.origin,
-          })
+      for (
+        let offset = 0;
+        offset < updates.length;
+        offset += CSV_IMPORT_CHUNK_SIZE
+      ) {
+        const chunk = updates.slice(offset, offset + CSV_IMPORT_CHUNK_SIZE);
+        const { data: updatedRows, error } = await withRetry(() =>
+          api.spots.updateMany(
+            chunk.map(({ spot, record }) => ({
+              id: spot.id,
+              name: record.name,
+              name_kana: record.name_kana,
+              lat: record.lat,
+              lng: record.lng,
+              region: record.region,
+              series: record.series,
+              ...(record.categories !== null
+                ? { categories: record.categories }
+                : {}),
+              description: record.description,
+              ...(record.key !== null ? { key: record.key } : {}),
+              origin: record.origin,
+            })),
+            targetKey
+          )
         );
         if (error) {
           throw new Error(
@@ -937,7 +948,9 @@ export default function AdminView({
               error.message
           );
         }
-        updatedCount++;
+        // 事前読み込み後に消えた・公開でなくなった行はAPI側でスキップされるため、
+        // 実際に更新できた件数で数える
+        updatedCount += updatedRows?.length ?? chunk.length;
         onProgress(insertedCount + updatedCount, totalCount);
       }
 
