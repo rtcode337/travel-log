@@ -10,7 +10,10 @@ const nextConfig: NextConfig = {
   // Postgresの実データ(db/data)と訪問写真(photos)はプロジェクト直下にbind
   // マウントされるため、既定のままだとDB書き込みのたびにnext devのファイル監視が
   // 再コンパイルを走らせてしまう(再コンパイル中は処理中のAPIリクエストが壊れる
-  // ことがあり、CSVインポートのような連続リクエストが途中で失敗する)
+  // ことがあり、CSVインポートのような連続リクエストが途中で失敗する)。
+  // Next.js 16の既定バンドラーのTurbopackにはwatchOptions.ignored相当の設定が
+  // 無いため、この除外を維持する目的でdev/buildとも--webpackを明示している
+  // (package.jsonのscripts参照。Turbopack移行はこの除外の代替手段ができてから)
   webpack: (config, { dev }) => {
     if (dev) {
       config.watchOptions = {

@@ -1,7 +1,7 @@
 /**
  * HMAC署名付きの自前セッションCookie。
- * DBアクセスを必要としないため Edge Middleware でも Node のRoute Handlerでも
- * 同じロジックで検証できる(Web Crypto API のみ使用)。
+ * DBアクセスを必要とせずWeb Crypto APIのみ使用のため、proxy.tsでも
+ * Route Handlerでも同じロジックで検証できる(実行ランタイムを選ばない)。
  */
 
 export const SESSION_COOKIE = "session";

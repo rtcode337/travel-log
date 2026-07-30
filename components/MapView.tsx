@@ -13,7 +13,7 @@ import {
   savePlanListDraft,
   type PlanListDraft,
 } from "@/lib/planListDraft";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { api } from "@/lib/api-client";
 import {
@@ -1718,7 +1718,7 @@ export default function MapView({
     };
 
     // 青丸は初回測位時に生成されるため、geolocate イベントで初めて子要素として差し込む
-    const handleGeolocate = (e: GeolocationPosition) => {
+    const handleGeolocate = (e: maplibregl.GeolocatePositionEvent) => {
       // 訪問予定リストの経路の始点(現在地→先頭スポットの線)に使う現在地を覚える。
       // 測位のたびの微小な揺れで再レンダーしないよう、約1m未満の変化は無視する
       const { longitude, latitude } = e.coords;

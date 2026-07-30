@@ -6,7 +6,7 @@ import { LAST_SPOT_TYPE_COOKIE } from "@/lib/last-spot-type";
 
 /**
  * ログイン後にどのスポット種別の地図を開くかは、最後に開いていた種別のCookie
- * (middleware.tsが書き込む。lib/last-spot-type.ts参照)を最優先し、無い・
+ * (proxy.tsが書き込む。lib/last-spot-type.ts参照)を最優先し、無い・
  * 開けない(種別の削除や非公開化・ロール変更後など)場合は管理画面で設定した
  * app_settings.active_spot_type_id(既定はtourist。アプリ初期化時に必ず存在する)に
  * フォールバックする。切替がすぐ反映されるよう、ビルド時に静的化せず常に
