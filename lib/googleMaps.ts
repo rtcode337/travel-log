@@ -12,16 +12,23 @@ export const GOOGLE_MAPS_MAX_WAYPOINTS = 9;
 
 /**
  * スポットの並び(ルート・経路)をGoogle マップの経路検索で開くURLを作る。
- * 先頭を出発地(origin)、最後を目的地(destination)、間を経由地(waypoints)にする。
+ *
+ * **出発地(origin)は現在地**で、スポットは最後の1件が目的地(destination)、
+ * それ以外が経由地(waypoints)になる(先頭のスポットを出発地にすると、
+ * 今いる場所からそこまでの経路が出ないため)。originがnull=現在地が
+ * 取れなかったときはoriginを付けずに開き、Google マップ側の判断
+ * (多くの場合は「現在地」)に委ねる。
+ *
  * 経由地が上限(GOOGLE_MAPS_MAX_WAYPOINTS)を超えるときは、経路の形をなるべく
  * 保つよう並び順のまま等間隔に間引き、省いた件数をomittedCountで返す
- * (呼び出し側が注記を出す)。2点未満は経路にならないためnull
+ * (呼び出し側が注記を出す)。スポットが0件のときは経路にならないためnull
  */
 export function buildGoogleMapsRouteUrl(
-  points: { lat: number; lng: number }[]
+  points: { lat: number; lng: number }[],
+  origin?: { lat: number; lng: number } | null
 ): { url: string; omittedCount: number } | null {
-  if (points.length < 2) return null;
-  const middle = points.slice(1, -1);
+  if (points.length < 1) return null;
+  const middle = points.slice(0, -1);
   const waypoints =
     middle.length <= GOOGLE_MAPS_MAX_WAYPOINTS
       ? middle
@@ -37,9 +44,11 @@ export function buildGoogleMapsRouteUrl(
   const fmt = (p: { lat: number; lng: number }) => `${p.lat},${p.lng}`;
   const params = new URLSearchParams({
     api: "1",
-    origin: fmt(points[0]),
     destination: fmt(points[points.length - 1]),
   });
+  if (origin) {
+    params.set("origin", fmt(origin));
+  }
   if (waypoints.length > 0) {
     params.set("waypoints", waypoints.map(fmt).join("|"));
   }
