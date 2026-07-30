@@ -1,10 +1,10 @@
 /**
  * 最後に開いていたスポット種別のキーを覚えておくCookie。
- * middleware.tsがログイン済みユーザーの/[type]/(map|spots|account|admin)への
+ * proxy.tsがログイン済みユーザーの/[type]/(map|spots|account|admin)への
  * アクセス時に書き込み、ルート`/`(app/page.tsx)がリダイレクト先の決定時に
  * app_settings.active_spot_type_id(管理画面で設定する既定)より優先して参照する。
  * 種別の存在・閲覧可否の検証は書き込み時ではなく読み取り時に行う
- * (Edge実行のmiddlewareからはDBを引けないため)。
+ * (全ルートを通るproxyにDBアクセスを持ち込まないため)。
  */
 export const LAST_SPOT_TYPE_COOKIE = "last_spot_type";
 

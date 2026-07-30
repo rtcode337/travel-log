@@ -26,7 +26,7 @@ export default function NavBar() {
       if (!data) {
         // Cookieの署名は有効でも、DBを作り直す等でユーザー自体が
         // 既に存在しない場合はここに来る。Cookieを消してログイン画面に戻す
-        // (消さないとmiddlewareが「署名は正しい」と判断し/loginへ戻れなくなる)
+        // (消さないとproxyが「署名は正しい」と判断し/loginへ戻れなくなる)
         await api.auth.logout();
         router.replace("/login");
         return;
