@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import * as maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import * as maplibregl from "@/lib/maplibre";
 import { osmStyle } from "@/lib/mapStyle";
 import type { Series } from "@/lib/types";
 import { findSeriesStyle, type SeriesStyleDefinition } from "@/lib/seriesStyle";

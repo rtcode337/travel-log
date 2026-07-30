@@ -17,6 +17,8 @@ npm run build                                            # 本番ビルド(型�
 
 `npm run dev`/`npm run build`はどちらも`--webpack`を明示している(Next.js 16の既定バンドラーのTurbopackには、bindマウントされた`db/data`・`photos`をファイル監視から外す`watchOptions.ignored`相当の設定が無いため。`next.config.ts`のコメント参照)。
 
+どちらにも`predev`/`prebuild`で`npm run copy-maplibre-worker`(`scripts/copy-maplibre-worker.mjs`)が付いており、MapLibreのワーカースクリプトを`node_modules`から`public/maplibre-gl/`へコピーする(生成物のためgit管理外。理由は下記「MapLibreのワーカースクリプト」)。`next dev`/`next build`を直接叩くとこのコピーが走らないため、地図が真っ白になったらまず`npm run copy-maplibre-worker`を実行すること。
+
 `docker-compose.yml`(本番用)と`docker-compose.dev.yml`(開発用)はプロジェクト名を分けてある(`travel-log-prod`/`travel-log-dev`)ため、同一ホスト上で両方動かしてもコンテナ・イメージ・ボリュームは衝突しない。
 
 このプロジェクトにテストスイート/テストコマンドは存在しない。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
@@ -85,6 +87,19 @@ NextAuthではなく自前実装。`lib/auth/session.ts`がHMAC-SHA256で署名�
 ### PWA(インストール可能化)
 
 manifest(`app/manifest.ts`、Next.jsのMetadata Files規約で`/manifest.webmanifest`として配信)+アイコン(`public/icons/`のmanifest用3枚と、`app/icon.png`・`app/apple-icon.png`のファビコン/apple-touch-icon)による最小構成のPWA対応で、Service Worker・オフライン対応は意図的に持たない(「デプロイしたのに古い画面が出る」系の問題を避けるため、必要になるまで導入しない方針)。インストール後も中身は同じWebアプリで、認証Cookieもそのまま使われる。iOSはmanifestの`display`/`icons`を見ないため、`app/layout.tsx`の`metadata.appleWebApp`と`app/apple-icon.png`で別途同等の設定をしている。ページ自体のズームは`app/layout.tsx`の`viewport`(`maximumScale: 1`+`userScalable: false`)で無効化してある — 検索窓等への入力フォーカス時の自動ズームで下のタブバーが隠れ、地図表示中はピンチが地図操作に取られてページのズームを戻せなくなるため(地図の拡大縮小はMapLibreのジェスチャなので影響しない)。`/manifest.webmanifest`は`proxy.ts`のガード対象から除外が必要(上記「認証」参照)。アイコンPNGは`scripts/generate-icons.mjs`(sharp使用、依存には含めない)で生成したものをコミットしてあり、デザイン変更時のみ再生成する。iOSのスタンドアロン起動では`target="_blank"`の外部リンクがアプリ内ブラウザ(オーバーレイ)で開かれてしまうため、外部サイトへのリンク(`SpotInfoModal`の「Wikipediaで続きを読む」)はiOS+スタンドアロンのときだけ`x-safari-https://`スキーム(未文書化だがiOSが解釈する)で本物のSafariに切り替えている(`isIosStandalone`)。
+
+### MapLibreのワーカースクリプト(`public/maplibre-gl/`)
+
+地図を作るコンポーネント(`MapView`・`MiniMap`・`SpotRepositionModal`)は`maplibre-gl`を直接importせず、必ず`lib/maplibre.ts`(`export *`での再エクスポート+CSSのimport+ワーカーURLの設定)を経由する。
+
+maplibre-gl 6は、ワーカーURLを指定しない場合`import.meta.url`を起点に`./maplibre-gl-worker.mjs`を解決する実装になった(`src/util/web_worker.ts`の`defaultWorkerUrl`)。ところがwebpackはバンドル時に`import.meta.url`を`"file:///app/node_modules/maplibre-gl/dist/maplibre-gl.mjs"`という文字列へ置き換えるため、`http(s)`で始まらないURLとして弾かれて空文字が返り、`new Worker("", { type: "module" })`=**ページ自身のHTMLをJSモジュールとして読み込む**動作になる。ブラウザは`Failed to load module script: ... non-JavaScript MIME type of "text/html"`で拒否し、ワーカーが起動しないため**タイルもスポットのピンも一切描画されない**(maplibre-gl 5→6の更新で実際に起きた。maplibre-gl 6.0.0時点で上流に修正は無い)。
+
+対策として`scripts/copy-maplibre-worker.mjs`(`predev`/`prebuild`で自動実行)が`maplibre-gl-worker.mjs`と、それが相対importする`maplibre-gl-shared.mjs`を`public/maplibre-gl/`へコピーし、`lib/maplibre.ts`が`setWorkerUrl('/maplibre-gl/maplibre-gl-worker.mjs')`で明示的に渡す。付随して次の2点が要る:
+
+- `proxy.ts`のmatcherが`.mjs`を除外している(認証ガードの`/login`リダイレクトが返るとHTMLをJSモジュールとして読むことになり、同じ症状になるため)
+- `Dockerfile`のprodステージが`public`をコピーしている(`output: standalone`は`.next/static`も`public`もコピーしないため。PWAのアイコン`public/icons/`が本番で404していたのも同じ原因)
+
+バージョン固定でコミットせず毎回`node_modules`からコピーするため、maplibre-glを上げても中身がずれない。Turbopackへ移行する場合は、`import.meta.url`の扱いが変わってこの回避が不要になる可能性があるため再確認すること。
 
 ### ビルド番号
 

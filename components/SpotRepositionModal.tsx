@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import * as maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import * as maplibregl from "@/lib/maplibre";
 import { osmStyle } from "@/lib/mapStyle";
 import { api } from "@/lib/api-client";
 import type { Spot } from "@/lib/types";

@@ -33,6 +33,10 @@ yarn-error.log*
 /photos/*
 !/photos/.gitkeep
 
+# MapLibre GL JSのワーカースクリプト(scripts/copy-maplibre-worker.mjsが
+# node_modulesからコピーする生成物。理由はlib/maplibre.tsのコメント参照)
+/public/maplibre-gl/
+
 # vercel
 .vercel
 
