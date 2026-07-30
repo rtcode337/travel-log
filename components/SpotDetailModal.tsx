@@ -29,6 +29,7 @@ import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
 import AddToPlanListModal from "@/components/AddToPlanListModal";
+import { DirectionsIcon } from "@/components/GoogleMapsRouteLink";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 
@@ -46,15 +47,6 @@ function GoogleMapsIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
       <path d="M19.527 4.799c1.212 2.608.937 5.678-.405 8.173-1.101 2.047-2.744 3.74-4.098 5.614-.619.858-1.244 1.75-1.669 2.727-.141.325-.263.658-.383.992-.121.333-.224.673-.34 1.008-.109.314-.236.684-.627.687h-.007c-.466-.001-.579-.53-.695-.887-.284-.874-.581-1.713-1.019-2.525-.51-.944-1.145-1.817-1.79-2.671L19.527 4.799zM8.545 7.705l-3.959 4.707c.724 1.54 1.821 2.863 2.871 4.18.247.31.494.622.737.936l4.984-5.925-.029.01c-1.741.601-3.691-.291-4.392-1.987a3.377 3.377 0 0 1-.209-.716c-.063-.437-.077-.761-.004-1.198l.001-.007zM5.492 3.149l-.003.004c-1.947 2.466-2.281 5.88-1.117 8.77l4.785-5.689-.058-.05-3.607-3.035zM14.661.436l-3.838 4.563a.295.295 0 0 1 .027-.01c1.6-.551 3.403.15 4.22 1.626.176.319.323.683.377 1.045.068.446.085.773.012 1.22l-.003.016 3.836-4.561A8.382 8.382 0 0 0 14.67.439l-.009-.003zM9.466 5.868L14.162.285l-.047-.012A8.31 8.31 0 0 0 11.986 0a8.439 8.439 0 0 0-6.169 2.766l-.016.018 3.665 3.084z" />
-    </svg>
-  );
-}
-
-/** 経路案内アイコン(Google Material Symbols「directions」、Apache License 2.0) */
-function DirectionsIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M22.43 10.59l-9.01-9.01c-.75-.75-2.07-.76-2.83 0l-9 9c-.78.78-.78 2.04 0 2.82l9 9c.39.39.9.58 1.41.58.51 0 1.02-.19 1.41-.58l8.99-8.99c.79-.76.8-2.02.03-2.82zm-10.42 10.4l-9-9 9-9 9 9-9 9zM8 11v4h2v-3h4v2.5l3.5-3.5L14 7.5V10H9c-.55 0-1 .45-1 1z" />
     </svg>
   );
 }
@@ -87,6 +79,7 @@ export default function SpotDetailModal({
   spots,
   readOnly = false,
   allowVisitRecording = false,
+  allowPlanList = false,
   onClose,
   onVisitChange,
   onVisitRecorded,
@@ -112,6 +105,14 @@ export default function SpotDetailModal({
    *  重ね表示した別種別スポットへ種別を切り替えずに訪問記録し、リストから外すために使う。
    *  スポットの編集・削除や訪問予定/予定リスト追加は readOnly のまま隠す */
   allowVisitRecording?: boolean;
+  /**
+   * readOnly(重ね表示)でも「訪問予定」セクション(訪問予定リストへの追加と、
+   * このスポットを含むリストの一覧)を出す。対象は常に**今開いている地図の種別**
+   * (URLの`[type]`)のリストで、重ねられた側の種別のリストは扱わない
+   * ——リストの経由スポットは種別非依存のため、別種別のスポットも現在の種別の
+   * 旅程に混ぜて入れられる
+   */
+  allowPlanList?: boolean;
   onClose: () => void;
   /** 訪問記録の追加・削除があったときに呼ばれる(呼び出し元の一覧・バッジ更新用) */
   onVisitChange?: () => void;
@@ -243,12 +244,16 @@ export default function SpotDetailModal({
     setReviewsPage(1);
   }, [load]);
 
-  // 訪問予定リストの読み込み(readOnly=重ね表示では予定系を出さないため読まない)
+  // 訪問予定セクション(リストへの追加・所属リストの一覧)を出すか。
+  // readOnly(重ね表示)では既定で出さないが、allowPlanListが立っていれば出す
+  const planListEnabled = !readOnly || allowPlanList;
+
+  // 訪問予定リストの読み込み(セクションを出さないときは読まない)
   const loadPlanLists = useCallback(async () => {
-    if (!typeKey || readOnly) return;
+    if (!typeKey || !planListEnabled) return;
     const { data } = await api.visitPlanLists.list(typeKey);
     setPlanLists(data ?? []);
-  }, [typeKey, readOnly]);
+  }, [typeKey, planListEnabled]);
 
   useEffect(() => {
     loadPlanLists();
@@ -302,9 +307,22 @@ export default function SpotDetailModal({
     () => spotTypes.find((t) => t.id === spot?.spot_type_id) ?? null,
     [spotTypes, spot]
   );
+  // 今開いている地図・一覧の種別(URLの[type])。スポット自身の種別
+  // (currentSpotType)とは、重ね表示から開いたときだけ食い違う
+  const viewingSpotType = useMemo(
+    () => spotTypes.find((t) => t.key === typeKey) ?? null,
+    [spotTypes, typeKey]
+  );
   const seriesStyles = useMemo(
     () => resolveSeriesStyles(currentSpotType),
     [currentSpotType]
+  );
+  // 訪問予定リストは今開いている種別のもので、経由スポットもその種別が主体のため、
+  // リスト詳細のバッジはそちらのシリーズ設定で描く(重ね表示から開いたときだけ
+  // スポット自身の種別と食い違う)
+  const planListSeriesStyles = useMemo(
+    () => resolveSeriesStyles(viewingSpotType ?? currentSpotType),
+    [viewingSpotType, currentSpotType]
   );
   // 複数カテゴリを種別の設定順に並べて表示するために使う
   const categories = useMemo(
@@ -710,7 +728,7 @@ export default function SpotDetailModal({
 
             {/* 訪問予定(訪問予定リスト)。リストへの追加と、このスポットを含む
                 リストの表示。★(訪問予定の単独ブックマーク)はヘッダー右上 */}
-            {!readOnly && (
+            {planListEnabled && (
               <div className="mt-4 border-t border-gray-100 pt-4">
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="font-bold">訪問予定</h3>
@@ -721,6 +739,13 @@ export default function SpotDetailModal({
                     リストに追加
                   </button>
                 </div>
+                {/* 重ね表示から開いた別種別のスポットでも、対象は今開いている地図の
+                    種別のリスト(リストの経由スポットは種別非依存のため混ぜられる) */}
+                {readOnly && viewingSpotType && (
+                  <p className="mb-2 text-xs text-gray-400">
+                    今開いている「{viewingSpotType.label}」の地図の訪問予定リストが対象です。
+                  </p>
+                )}
                 {containingPlanLists.length === 0 ? (
                   <p className="text-sm text-gray-500">
                     このスポットを含む訪問予定リストはありません。
@@ -961,7 +986,7 @@ export default function SpotDetailModal({
         <VisitPlanListDetailModal
           listId={detailListId}
           spotsById={spotsById}
-          seriesStyles={seriesStyles}
+          seriesStyles={planListSeriesStyles}
           onClose={() => setDetailListId(null)}
           onEdit={(list) => {
             setDetailListId(null);
