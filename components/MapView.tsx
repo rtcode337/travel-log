@@ -36,7 +36,12 @@ import type {
   VisitPlanList,
 } from "@/lib/types";
 import { expandSpot, readSpotCacheDb } from "@/lib/spotCacheDb";
-import { autoTextColor, type SeriesStyleDefinition } from "@/lib/seriesStyle";
+import {
+  autoTextColor,
+  resolveSeriesStyles,
+  type SeriesStyleDefinition,
+} from "@/lib/seriesStyle";
+import { resolveCategories } from "@/lib/category";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import {
   downloadSpotCacheFor,
@@ -62,6 +67,7 @@ import SpotDetailModal from "@/components/SpotDetailModal";
 import SpotDownloadDialogs, {
   DownloadProgressDialog,
 } from "@/components/SpotDownloadDialogs";
+import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
 
 const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
@@ -73,27 +79,54 @@ const ROUTE_LINE_LAYER_ID = "spot-routes-line";
 const ROUTE_ARROW_LAYER_ID = "spot-routes-arrow";
 const ROUTE_HIT_LAYER_ID = "spot-routes-hit";
 
-// 別のスポット種別を半透明で重ねて表示するためのsource/layer群(本体と独立)
-const OVERLAY_SOURCE_ID = "overlay-spots";
-const OVERLAY_CLUSTER_LAYER_ID = "overlay-clusters";
-const OVERLAY_CLUSTER_COUNT_LAYER_ID = "overlay-cluster-count";
-const OVERLAY_UNCLUSTERED_LAYER_ID = "overlay-unclustered-point";
-const OVERLAY_ROUTES_SOURCE_ID = "overlay-routes";
-const OVERLAY_ROUTE_LINE_LAYER_ID = "overlay-routes-line";
-const OVERLAY_ROUTE_ARROW_LAYER_ID = "overlay-routes-arrow";
-const OVERLAY_ROUTE_HIT_LAYER_ID = "overlay-routes-hit";
+/**
+ * 別のスポット種別を半透明で重ねて表示するためのsource/layer群(本体と独立)。
+ * **複数の種別を同時に重ねられる**ため、IDは種別キーごとに作る
+ */
+function overlayIds(typeKey: string) {
+  return {
+    source: `overlay-spots:${typeKey}`,
+    cluster: `overlay-clusters:${typeKey}`,
+    clusterCount: `overlay-cluster-count:${typeKey}`,
+    unclustered: `overlay-unclustered-point:${typeKey}`,
+    routeSource: `overlay-routes:${typeKey}`,
+    routeLine: `overlay-routes-line:${typeKey}`,
+    routeArrow: `overlay-routes-arrow:${typeKey}`,
+    routeHit: `overlay-routes-hit:${typeKey}`,
+  };
+}
 
 /** 重ね表示の不透明度(本体のスポットと見分けるための半透明) */
 const OVERLAY_OPACITY = 0.55;
 const OVERLAY_LINE_OPACITY = 0.45;
 
 const MAIN_PIN_LAYERS = [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID];
-const OVERLAY_PIN_LAYERS = [OVERLAY_CLUSTER_LAYER_ID, OVERLAY_UNCLUSTERED_LAYER_ID];
+
+/** 指定した重ね表示種別のピン・クラスタのレイヤーID */
+function overlayPinLayerIds(typeKeys: string[]): string[] {
+  return typeKeys.flatMap((key) => {
+    const ids = overlayIds(key);
+    return [ids.cluster, ids.unclustered];
+  });
+}
+
+/** 指定した重ね表示種別のルートの当たり判定レイヤーID */
+function overlayRouteHitLayerIds(typeKeys: string[]): string[] {
+  return typeKeys.map((key) => overlayIds(key).routeHit);
+}
+
+/**
+ * レイヤー作成済みの重ね表示種別のキーを、描画順(末尾が最上位)で保持するref。
+ * クリックハンドラはレイヤー作成時に一度だけ束縛されるため、そのときどきの
+ * 重ね表示の状態はこのrefを通して読む
+ */
+type OverlayKeysRef = { current: string[] };
 
 /**
  * 指定座標に、指定レイヤー群のいずれかの描画があるか(存在しないレイヤーは無視)。
  * タップの優先順位付けに使う: ①重ね表示のピン・クラスタ ②本体のピン・クラスタ
  * ③重ね表示のルート ④本体のルート の順で、上位が吸ったタップは下位に渡さない
+ * (重ね表示同士は、描画順で上にある種別が優先する)
  */
 function hasFeatureAt(
   map: maplibregl.Map,
@@ -104,6 +137,12 @@ function hasFeatureAt(
   return (
     layers.length > 0 && map.queryRenderedFeatures(point, { layers }).length > 0
   );
+}
+
+/** 描画順で`typeKey`より上に重なっている種別のキー(重ね表示中でなければ空) */
+function higherOverlayKeys(keys: string[], typeKey: string): string[] {
+  const index = keys.indexOf(typeKey);
+  return index < 0 ? [] : keys.slice(index + 1);
 }
 
 /** ルートにシリーズが設定されていない(または種別の一覧に無い)ときの矢印色 */
@@ -172,6 +211,7 @@ function ensureRouteArrowImage(map: maplibregl.Map, color: string): string {
  */
 function ensureRouteLayers(
   map: maplibregl.Map,
+  overlayKeysRef: OverlayKeysRef,
   onSelectRoute: (routeId: string) => void,
   onSelectPath: (kind: "visit" | "plan") => void
 ) {
@@ -231,9 +271,9 @@ function ensureRouteLayers(
     // 重ね表示側が吸う
     if (
       hasFeatureAt(map, e.point, [
-        ...OVERLAY_PIN_LAYERS,
+        ...overlayPinLayerIds(overlayKeysRef.current),
         ...MAIN_PIN_LAYERS,
-        OVERLAY_ROUTE_HIT_LAYER_ID,
+        ...overlayRouteHitLayerIds(overlayKeysRef.current),
       ])
     ) {
       return;
@@ -261,28 +301,34 @@ function ensureRouteLayers(
 }
 
 /**
- * 別種別の重ね表示用のsource/layerを(まだなければ)追加する。冪等。
+ * 別種別の重ね表示用のsource/layerを(まだなければ)その種別のぶんだけ追加する。冪等。
  * 本体のレイヤーの上に置く(タップも重ね表示側が優先)ため、beforeIdは指定せず
  * 最上位へ追加し、以後の描画のたびにmoveOverlayLayersToTopで最上位を維持する。
  * コールバックは初回のレイヤー作成時にしか登録しないため、再レンダーで変わらない
- * 関数(setState)を渡すこと
+ * 関数(setState)を渡すこと(そのときどきの重ね表示の状態はoverlayKeysRefから読む)。
+ *
+ * 重ねるのをやめた種別のレイヤーは削除せず、データを空にして残す
+ * (重ね直しが軽く、クリックハンドラの解除も要らない。空のsourceは描画されない)
  */
 function ensureOverlayLayers(
   map: maplibregl.Map,
+  typeKey: string,
+  overlayKeysRef: OverlayKeysRef,
   onSelectSpot: (id: string) => void,
   onSelectRoute: (routeId: string) => void
 ) {
-  if (map.getSource(OVERLAY_SOURCE_ID)) return;
+  const ids = overlayIds(typeKey);
+  if (map.getSource(ids.source)) return;
 
   // ルート(線・矢印・当たり判定)。重ね表示のピンより下になるよう先に追加する
-  map.addSource(OVERLAY_ROUTES_SOURCE_ID, {
+  map.addSource(ids.routeSource, {
     type: "geojson",
     data: { type: "FeatureCollection", features: [] },
   });
   map.addLayer({
-    id: OVERLAY_ROUTE_LINE_LAYER_ID,
+    id: ids.routeLine,
     type: "line",
-    source: OVERLAY_ROUTES_SOURCE_ID,
+    source: ids.routeSource,
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
       "line-color": ["get", "color"],
@@ -291,9 +337,9 @@ function ensureOverlayLayers(
     },
   });
   map.addLayer({
-    id: OVERLAY_ROUTE_ARROW_LAYER_ID,
+    id: ids.routeArrow,
     type: "symbol",
-    source: OVERLAY_ROUTES_SOURCE_ID,
+    source: ids.routeSource,
     layout: {
       "symbol-placement": "line",
       "symbol-spacing": 70,
@@ -304,14 +350,14 @@ function ensureOverlayLayers(
     paint: { "icon-opacity": OVERLAY_OPACITY },
   });
   map.addLayer({
-    id: OVERLAY_ROUTE_HIT_LAYER_ID,
+    id: ids.routeHit,
     type: "line",
-    source: OVERLAY_ROUTES_SOURCE_ID,
+    source: ids.routeSource,
     layout: { "line-cap": "round", "line-join": "round" },
     paint: { "line-width": 22, "line-opacity": 0 },
   });
 
-  map.addSource(OVERLAY_SOURCE_ID, {
+  map.addSource(ids.source, {
     type: "geojson",
     data: { type: "FeatureCollection", features: [] },
     cluster: true,
@@ -319,9 +365,9 @@ function ensureOverlayLayers(
     clusterRadius: 50,
   });
   map.addLayer({
-    id: OVERLAY_CLUSTER_LAYER_ID,
+    id: ids.cluster,
     type: "circle",
-    source: OVERLAY_SOURCE_ID,
+    source: ids.source,
     filter: ["has", "point_count"],
     paint: {
       // circle-colorは初期値。描画時に重ね先の種別の先頭シリーズの色で上書きされる
@@ -342,9 +388,9 @@ function ensureOverlayLayers(
     },
   });
   map.addLayer({
-    id: OVERLAY_CLUSTER_COUNT_LAYER_ID,
+    id: ids.clusterCount,
     type: "symbol",
-    source: OVERLAY_SOURCE_ID,
+    source: ids.source,
     filter: ["has", "point_count"],
     layout: {
       "text-field": "{point_count_abbreviated}",
@@ -354,9 +400,9 @@ function ensureOverlayLayers(
     paint: { "text-color": "#ffffff", "text-opacity": 0.9 },
   });
   map.addLayer({
-    id: OVERLAY_UNCLUSTERED_LAYER_ID,
+    id: ids.unclustered,
     type: "symbol",
-    source: OVERLAY_SOURCE_ID,
+    source: ids.source,
     filter: ["!", ["has", "point_count"]],
     layout: {
       "icon-image": ["get", "icon"],
@@ -368,13 +414,23 @@ function ensureOverlayLayers(
     paint: { "icon-opacity": OVERLAY_OPACITY },
   });
 
-  map.on("click", OVERLAY_CLUSTER_LAYER_ID, async (e) => {
+  map.on("click", ids.cluster, async (e) => {
+    // 同じ位置で自分より上に重なっている種別のピンがあれば、そちらに譲る
+    if (
+      hasFeatureAt(
+        map,
+        e.point,
+        overlayPinLayerIds(higherOverlayKeys(overlayKeysRef.current, typeKey))
+      )
+    ) {
+      return;
+    }
     const features = map.queryRenderedFeatures(e.point, {
-      layers: [OVERLAY_CLUSTER_LAYER_ID],
+      layers: [ids.cluster],
     });
     const clusterId = features[0]?.properties?.cluster_id;
     if (clusterId == null) return;
-    const source = map.getSource(OVERLAY_SOURCE_ID) as maplibregl.GeoJSONSource;
+    const source = map.getSource(ids.source) as maplibregl.GeoJSONSource;
     const zoom = await source.getClusterExpansionZoom(clusterId);
     map.easeTo({
       center: (features[0].geometry as GeoJSON.Point).coordinates as [
@@ -385,14 +441,32 @@ function ensureOverlayLayers(
     });
   });
 
-  map.on("click", OVERLAY_UNCLUSTERED_LAYER_ID, (e) => {
+  map.on("click", ids.unclustered, (e) => {
+    if (
+      hasFeatureAt(
+        map,
+        e.point,
+        overlayPinLayerIds(higherOverlayKeys(overlayKeysRef.current, typeKey))
+      )
+    ) {
+      return;
+    }
     const id = e.features?.[0]?.properties?.id;
     if (id) onSelectSpot(id);
   });
 
-  map.on("click", OVERLAY_ROUTE_HIT_LAYER_ID, (e) => {
-    // ピン(重ね表示・本体どちらも)と重なった位置のタップはピン側を優先する
-    if (hasFeatureAt(map, e.point, [...OVERLAY_PIN_LAYERS, ...MAIN_PIN_LAYERS])) {
+  map.on("click", ids.routeHit, (e) => {
+    // ピン(重ね表示・本体どちらも)と重なった位置のタップはピン側を優先し、
+    // 自分より上に重なっている種別のルートがあればそちらに譲る
+    if (
+      hasFeatureAt(map, e.point, [
+        ...overlayPinLayerIds(overlayKeysRef.current),
+        ...MAIN_PIN_LAYERS,
+        ...overlayRouteHitLayerIds(
+          higherOverlayKeys(overlayKeysRef.current, typeKey)
+        ),
+      ])
+    ) {
       return;
     }
     const routeId = e.features?.find(
@@ -401,11 +475,7 @@ function ensureOverlayLayers(
     if (routeId) onSelectRoute(routeId);
   });
 
-  for (const layerId of [
-    OVERLAY_CLUSTER_LAYER_ID,
-    OVERLAY_UNCLUSTERED_LAYER_ID,
-    OVERLAY_ROUTE_HIT_LAYER_ID,
-  ]) {
+  for (const layerId of [ids.cluster, ids.unclustered, ids.routeHit]) {
     map.on("mouseenter", layerId, () => {
       map.getCanvas().style.cursor = "pointer";
     });
@@ -417,19 +487,33 @@ function ensureOverlayLayers(
 
 /**
  * 重ね表示のレイヤーを描画順の最上位へ移動する(本体のレイヤーが後から追加されても
- * 「半透明の重ね表示が上・タップも重ね表示優先」を維持するため、描画のたびに呼ぶ)
+ * 「半透明の重ね表示が上・タップも重ね表示優先」を維持するため、描画のたびに呼ぶ)。
+ * 複数種別を重ねているときは、まず全種別のルートを、続けて全種別のピンを
+ * `typeKeys`の順で上げるため、どの種別のピンも全種別のルートより上になり、
+ * 種別同士は配列の後ろにあるものほど上になる
  */
-function moveOverlayLayersToTop(map: maplibregl.Map) {
-  for (const id of [
-    OVERLAY_ROUTE_LINE_LAYER_ID,
-    OVERLAY_ROUTE_ARROW_LAYER_ID,
-    OVERLAY_ROUTE_HIT_LAYER_ID,
-    OVERLAY_CLUSTER_LAYER_ID,
-    OVERLAY_CLUSTER_COUNT_LAYER_ID,
-    OVERLAY_UNCLUSTERED_LAYER_ID,
-  ]) {
+function moveOverlayLayersToTop(map: maplibregl.Map, typeKeys: string[]) {
+  const idsList = typeKeys.map(overlayIds);
+  const ordered = [
+    ...idsList.flatMap((ids) => [ids.routeLine, ids.routeArrow, ids.routeHit]),
+    ...idsList.flatMap((ids) => [ids.cluster, ids.clusterCount, ids.unclustered]),
+  ];
+  for (const id of ordered) {
     if (map.getLayer(id)) map.moveLayer(id);
   }
+}
+
+/** 重ねるのをやめた種別のレイヤーを空にする(レイヤー自体は残す。上記ensure参照) */
+function clearOverlayData(map: maplibregl.Map, typeKey: string) {
+  const empty = {
+    type: "FeatureCollection",
+    features: [],
+  } as GeoJSON.FeatureCollection<GeoJSON.LineString | GeoJSON.Point>;
+  const ids = overlayIds(typeKey);
+  (map.getSource(ids.source) as maplibregl.GeoJSONSource | undefined)?.setData(empty);
+  (map.getSource(ids.routeSource) as maplibregl.GeoJSONSource | undefined)?.setData(
+    empty
+  );
 }
 
 /**
@@ -669,6 +753,7 @@ function buildClusterGeoJSON(
 /** クラスタ用のsource/layerを(まだなければ)追加する。冪等 */
 function ensureClusterLayers(
   map: maplibregl.Map,
+  overlayKeysRef: OverlayKeysRef,
   onSelectSpot: (id: string) => void
 ) {
   if (map.getSource(CLUSTER_SOURCE_ID)) return;
@@ -737,7 +822,8 @@ function ensureClusterLayers(
 
   map.on("click", CLUSTER_LAYER_ID, async (e) => {
     // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
-    if (hasFeatureAt(map, e.point, OVERLAY_PIN_LAYERS)) return;
+    if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
+      return;
     const features = map.queryRenderedFeatures(e.point, {
       layers: [CLUSTER_LAYER_ID],
     });
@@ -756,7 +842,8 @@ function ensureClusterLayers(
 
   map.on("click", UNCLUSTERED_LAYER_ID, (e) => {
     // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
-    if (hasFeatureAt(map, e.point, OVERLAY_PIN_LAYERS)) return;
+    if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
+      return;
     const id = e.features?.[0]?.properties?.id;
     if (id) onSelectSpot(id);
   });
@@ -895,24 +982,43 @@ function saveFilters(typeKey: string, filters: SpotFilters) {
   }
 }
 
-/** 重ね表示する種別の選択も、絞り込み条件と同様に(表示中の)種別ごとに保存・復元する */
+/**
+ * 重ね表示する種別の選択も、絞り込み条件と同様に(表示中の)種別ごとに保存・復元する。
+ * 複数種別を重ねられるようにしたため、値はキーのJSON配列(選んだ順=描画順)で保存する。
+ * 単一種別しか重ねられなかった頃の保存値(生のキー1つ)も読めるようにしてある
+ */
 const OVERLAY_STORAGE_PREFIX = "travel-log:map-overlay:";
 
-function loadSavedOverlayTypeKey(typeKey: string): string | null {
-  if (typeof localStorage === "undefined") return null;
+function loadSavedOverlayTypeKeys(typeKey: string): string[] {
+  if (typeof localStorage === "undefined") return [];
   try {
-    const value = localStorage.getItem(OVERLAY_STORAGE_PREFIX + typeKey);
-    // 自分自身を重ねる設定は不正値として無視する
-    return value && value !== typeKey ? value : null;
+    const raw = localStorage.getItem(OVERLAY_STORAGE_PREFIX + typeKey);
+    if (!raw) return [];
+    let keys: string[];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      keys = Array.isArray(parsed)
+        ? parsed.filter((v): v is string => typeof v === "string")
+        : // JSONとして読めるが配列でない値(旧形式でキーが数字だった等)は単一指定扱い
+          [raw];
+    } catch {
+      // 旧形式(キーをそのまま保存していた頃)
+      keys = [raw];
+    }
+    // 自分自身を重ねる設定・重複は不正値として無視する
+    return keys.filter((k, i) => k !== typeKey && keys.indexOf(k) === i);
   } catch {
-    return null;
+    return [];
   }
 }
 
-function saveOverlayTypeKey(typeKey: string, overlay: string | null) {
+function saveOverlayTypeKeys(typeKey: string, overlays: string[]) {
   try {
-    if (overlay) {
-      localStorage.setItem(OVERLAY_STORAGE_PREFIX + typeKey, overlay);
+    if (overlays.length > 0) {
+      localStorage.setItem(
+        OVERLAY_STORAGE_PREFIX + typeKey,
+        JSON.stringify(overlays)
+      );
     } else {
       localStorage.removeItem(OVERLAY_STORAGE_PREFIX + typeKey);
     }
@@ -1244,8 +1350,9 @@ export default function MapView({
       setEditingPlanList(null);
       // スポット詳細の「訪問予定リストへ追加」→「新しいリストを作成」から来た場合も
       // 同じく同一ページ遷移のため、スポット詳細(とその中の追加モーダル・基本情報
-      // フォーム)を明示的に閉じる
+      // フォーム)を明示的に閉じる。重ね表示スポットの詳細からも同じ操作ができる
       setDetailSpotId(null);
+      setOverlayDetailSpotId(null);
     }
   }, [buildListParam, spotTypeKey]);
 
@@ -1351,16 +1458,25 @@ export default function MapView({
     router.push(`/${spotTypeKey}/spots`);
   }, [spotTypeKey, router]);
 
-  // 別種別の重ね表示。選択種別はこの種別の設定としてlocalStorageへ保存し、
-  // スポットはその種別のダウンロード済みキャッシュ(IndexedDB)から読む。
-  // 絞り込み・ルート表示のオン/オフは、その種別の地図で自分が保存した設定に従う
-  const [overlayTypeKey, setOverlayTypeKeyState] = useState<string | null>(null);
-  const [overlaySpots, setOverlaySpots] = useState<Spot[] | null>(null);
-  const [overlayRoutes, setOverlayRoutes] = useState<SpotRoute[]>([]);
-  const [overlayFilters, setOverlayFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
+  // 別種別の重ね表示(**複数の種別を同時に重ねられる**)。選択種別はこの種別の
+  // 設定としてlocalStorageへ保存し、スポットはその種別のダウンロード済みキャッシュ
+  // (IndexedDB)から読む。絞り込み・ルート表示のオン/オフは種別ごとに、その種別の
+  // 地図で自分が保存した設定に従う
+  const [overlayTypeKeys, setOverlayTypeKeysState] = useState<string[]>([]);
+  /** 重ね表示中の種別ごとの公開スポット・公開ルート(その種別のキャッシュから読む) */
+  const [overlayData, setOverlayData] = useState<
+    Map<string, { spots: Spot[]; routes: SpotRoute[] }>
+  >(new Map());
+  /** 重ね表示中の種別ごとの絞り込み(その種別の地図で保存された内容) */
+  const [overlayFilters, setOverlayFilters] = useState<Map<string, SpotFilters>>(
+    new Map()
+  );
   const [overlayMessage, setOverlayMessage] = useState<string | null>(null);
   // 重ね表示する種別の絞り込みを、種別を切り替えずこの地図の上のモーダルで編集する
-  const [showOverlayFilterModal, setShowOverlayFilterModal] = useState(false);
+  // (編集対象の種別キー。nullならモーダルを出さない)
+  const [overlayFilterTypeKey, setOverlayFilterTypeKey] = useState<string | null>(
+    null
+  );
   // 重ね表示の選択肢(全種別の一覧。/api/spot-typesは閲覧可能な種別のみ返す)
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
   // 左下の種別チップをタップして開く「別の種別へ切り替え」メニューの開閉
@@ -1376,14 +1492,35 @@ export default function MapView({
     null
   );
   const overlayAbortRef = useRef<AbortController | null>(null);
-  // 未ダウンロード時にダウンロード確認を出してよいか。ユーザーがセレクトで選んだ
-  // 直後だけtrueにする(保存済み選択の復元でキャッシュが無かった場合=後から
+  // 未ダウンロードのときにダウンロード確認を出してよい種別。ユーザーが自分で
+  // 選んだ種別だけを入れる(保存済み選択の復元でキャッシュが無かった場合=後から
   // キャッシュを削除した場合は、地図を開いただけで突然ダイアログが出ないよう
   // 従来どおり黙って選択を解除する)
-  const overlayPromptOnMissingRef = useRef(false);
-  // 重ね表示が無効の間は使われない(現在種別の値を返すだけ)
-  const overlaySeriesStyles = useSeriesStyles(overlayTypeKey ?? spotTypeKey);
-  const overlayCategories = useCategories(overlayTypeKey ?? spotTypeKey);
+  const overlayPromptKeysRef = useRef<Set<string>>(new Set());
+  /**
+   * レイヤーのクリックハンドラから読む、現在の重ね表示種別(描画順=末尾が最上位)。
+   * ハンドラはレイヤー生成時に一度だけ束縛されるためstateではなくrefで渡す
+   */
+  const overlayKeysRef = useRef<string[]>([]);
+  useEffect(() => {
+    overlayKeysRef.current = overlayTypeKeys;
+  }, [overlayTypeKeys]);
+  /**
+   * 一度でもレイヤーを作った重ね表示種別。重ねるのをやめた種別のデータを
+   * 空にするために覚えておく(レイヤー自体は作り直しを避けるため消さない)
+   */
+  const createdOverlayKeysRef = useRef<Set<string>>(new Set());
+
+  // 重ね表示側のシリーズ・カテゴリ設定は種別ごとに要るため、hook(useSeriesStyles /
+  // useCategories は1種別ぶん)ではなく取得済みの種別一覧から直接解決する
+  const overlaySeriesStylesOf = useCallback(
+    (key: string) => resolveSeriesStyles(spotTypes.find((t) => t.key === key)),
+    [spotTypes]
+  );
+  const overlayCategoriesOf = useCallback(
+    (key: string) => resolveCategories(spotTypes.find((t) => t.key === key)),
+    [spotTypes]
+  );
 
   // 重ね表示(別種別)のピンのタップ: 作成モード中は本体ピンと同じく追加確認へ回す。
   // それ以外は従来どおり読み取り専用の詳細を開く。ハンドラはレイヤー生成時に一度だけ
@@ -1393,12 +1530,21 @@ export default function MapView({
     else setOverlayDetailSpotId(id);
   }, []);
 
-  // 重ね表示スポットのID→Spot。作成中パネルや追加確認で別種別スポットの名前を解決する
+  // 重ね表示スポットのID→Spot(全種別ぶんをまとめる)。作成中パネルや追加確認で
+  // 別種別スポットの名前を解決する
   const overlaySpotById = useMemo(() => {
     const m = new Map<string, Spot>();
-    if (overlaySpots) for (const s of overlaySpots) m.set(s.id, s);
+    for (const { spots: list } of overlayData.values()) {
+      for (const s of list) m.set(s.id, s);
+    }
     return m;
-  }, [overlaySpots]);
+  }, [overlayData]);
+
+  /** 重ね表示中の全種別のルート(タップされたルートの解決に使う) */
+  const overlayRoutesAll = useMemo(
+    () => [...overlayData.values()].flatMap((d) => d.routes),
+    [overlayData]
+  );
 
   // 作成中パネルに渡す解決用マップ。本体スポットに重ね表示スポットを足したもの
   // (IDが被ったら本体を優先)。これで別種別スポットも名前つきで一覧表示できる
@@ -1434,30 +1580,46 @@ export default function MapView({
     buildFitPendingRef.current = false;
     fitMapToSpots(buildDraftPath);
   }, [buildDraft, buildDraftPath, fitMapToSpots]);
-  // 重ね表示の絞り込み変更をその種別のlocalStorageへ保存しつつstateへ反映する
+  // 重ね表示の絞り込み変更を、その種別のlocalStorageへ保存しつつstateへ反映する
   // (overlayFiltersが変わると重ね表示の描画effectが再実行され、地図に即反映される)
   const setOverlayFiltersAndSave = useCallback(
-    (next: SpotFilters) => {
-      if (overlayTypeKey) saveFilters(overlayTypeKey, next);
-      setOverlayFilters(next);
+    (typeKey: string, next: SpotFilters) => {
+      saveFilters(typeKey, next);
+      setOverlayFilters((prev) => new Map(prev).set(typeKey, next));
     },
-    [overlayTypeKey]
+    []
   );
 
-  const setOverlayTypeKey = useCallback(
-    (next: string | null) => {
-      overlayPromptOnMissingRef.current = true;
-      saveOverlayTypeKey(spotTypeKey, next);
-      setOverlayTypeKeyState(next);
+  /** 重ね表示する種別の増減。選んだ順=描画順(後から選んだものが上)で保持する */
+  const toggleOverlayTypeKey = useCallback(
+    (key: string) => {
+      setOverlayTypeKeysState((prev) => {
+        const next = prev.includes(key)
+          ? prev.filter((k) => k !== key)
+          : [...prev, key];
+        // 自分で選んだ種別が未ダウンロードのときは、黙って外さずダウンロードを確認する
+        if (!prev.includes(key)) overlayPromptKeysRef.current.add(key);
+        else overlayPromptKeysRef.current.delete(key);
+        saveOverlayTypeKeys(spotTypeKey, next);
+        return next;
+      });
       setOverlayMessage(null);
     },
     [spotTypeKey]
   );
 
+  /** 重ね表示をすべて解除する(セクションのリセットボタン) */
+  const clearOverlayTypeKeys = useCallback(() => {
+    overlayPromptKeysRef.current.clear();
+    saveOverlayTypeKeys(spotTypeKey, []);
+    setOverlayTypeKeysState([]);
+    setOverlayMessage(null);
+  }, [spotTypeKey]);
+
   // 重ね表示の選択も、絞り込み条件と同様に保存済みの値を復元する
   useEffect(() => {
-    overlayPromptOnMissingRef.current = false;
-    setOverlayTypeKeyState(loadSavedOverlayTypeKey(spotTypeKey));
+    overlayPromptKeysRef.current.clear();
+    setOverlayTypeKeysState(loadSavedOverlayTypeKeys(spotTypeKey));
     setOverlayMessage(null);
   }, [spotTypeKey]);
 
@@ -1470,47 +1632,63 @@ export default function MapView({
   }, []);
 
   // 重ね表示のデータ読み込み。スポットもルートも、その種別のダウンロード済み
-  // キャッシュ(公開スポットのダウンロード時に公開ルートも一緒に保存される)から読む
+  // キャッシュ(公開スポットのダウンロード時に公開ルートも一緒に保存される)から読む。
+  // 選択が外れた種別のデータ・絞り込みはここで一緒に捨てる
   useEffect(() => {
-    if (!overlayTypeKey) {
-      setOverlaySpots(null);
-      setOverlayRoutes([]);
-      return;
-    }
     let cancelled = false;
-    setOverlayFilters(loadSavedFilters(overlayTypeKey));
+    setOverlayFilters(
+      new Map(overlayTypeKeys.map((key) => [key, loadSavedFilters(key)]))
+    );
     (async () => {
-      const stored = await readSpotCacheDb(overlayTypeKey);
-      if (cancelled) return;
-      if (!stored) {
-        if (overlayPromptOnMissingRef.current) {
-          // セレクトで選んだ直後なら、その場でダウンロードするか確認する
-          // (選択は保持したまま。キャンセル・失敗時にハンドラ側で解除する)
-          setOverlayDownloadPrompt(overlayTypeKey);
+      const loaded: [string, { spots: Spot[]; routes: SpotRoute[] }][] = [];
+      const missing: string[] = [];
+      for (const key of overlayTypeKeys) {
+        const stored = await readSpotCacheDb(key);
+        if (cancelled) return;
+        if (stored) {
+          loaded.push([
+            key,
+            { spots: stored.spots.map(expandSpot), routes: stored.routes ?? [] },
+          ]);
         } else {
-          // 保存済み選択の復元でキャッシュが無かった場合(後からキャッシュを
-          // 削除した場合)は、突然ダイアログを出さず黙って選択を解除する
-          setOverlayMessage(
-            "選んだ種別の公開スポットが未ダウンロードのため重ねられません。もう一度選ぶとダウンロードできます。"
-          );
-          setOverlayTypeKeyState(null);
-          saveOverlayTypeKey(spotTypeKey, null);
+          missing.push(key);
         }
-        return;
       }
-      setOverlaySpots(stored.spots.map(expandSpot));
-      setOverlayRoutes(stored.routes ?? []);
+      setOverlayData(new Map(loaded));
+      if (missing.length === 0) return;
+      // 自分で選んだ直後の種別は、その場でダウンロードするか確認する
+      // (選択は保持したまま。キャンセル・失敗時にハンドラ側で解除する)
+      const prompt = missing.find((key) => overlayPromptKeysRef.current.has(key));
+      // 保存済み選択の復元でキャッシュが無かった場合(後からキャッシュを削除した
+      // 場合)は、突然ダイアログを出さず黙ってその種別だけ選択を解除する
+      const silent = missing.filter((key) => key !== prompt);
+      if (silent.length > 0) {
+        setOverlayMessage(
+          `${silent
+            .map((key) => `「${spotTypes.find((t) => t.key === key)?.label ?? key}」`)
+            .join("")}の公開スポットが未ダウンロードのため重ねられません。もう一度選ぶとダウンロードできます。`
+        );
+        setOverlayTypeKeysState((prev) => {
+          const next = prev.filter((key) => !silent.includes(key));
+          saveOverlayTypeKeys(spotTypeKey, next);
+          return next;
+        });
+      }
+      if (prompt) setOverlayDownloadPrompt(prompt);
     })();
     return () => {
       cancelled = true;
     };
-  }, [overlayTypeKey, spotTypeKey]);
+    // spotTypesはメッセージの表示名にしか使わないため、依存に入れて読み直す必要はない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayTypeKeys, spotTypeKey]);
 
-  /** ダウンロード確認の「キャンセル」: 重ね表示の選択ごと解除する */
+  /** ダウンロード確認の「キャンセル」: その種別の重ね表示の選択を解除する */
   const cancelOverlayDownloadPrompt = useCallback(() => {
+    const typeKey = overlayDownloadPrompt;
     setOverlayDownloadPrompt(null);
-    setOverlayTypeKey(null);
-  }, [setOverlayTypeKey]);
+    if (typeKey) toggleOverlayTypeKey(typeKey);
+  }, [overlayDownloadPrompt, toggleOverlayTypeKey]);
 
   /**
    * ダウンロード確認の「ダウンロード」: その種別の公開スポット+ルートを取得して
@@ -1528,15 +1706,16 @@ export default function MapView({
     try {
       const entry = await downloadSpotCacheFor(typeKey, controller, setOverlayProgress);
       if (!entry) {
-        // キャンセル時は選択も解除する
-        setOverlayTypeKey(null);
+        // キャンセル時はその種別の選択も解除する
+        toggleOverlayTypeKey(typeKey);
         return;
       }
-      setOverlaySpots(entry.spots);
-      setOverlayRoutes(entry.routes);
+      setOverlayData((prev) =>
+        new Map(prev).set(typeKey, { spots: entry.spots, routes: entry.routes })
+      );
     } catch (err) {
-      // setOverlayTypeKey(null)がoverlayMessageを消すため、メッセージは解除の後に出す
-      setOverlayTypeKey(null);
+      // toggleOverlayTypeKeyがoverlayMessageを消すため、メッセージは解除の後に出す
+      toggleOverlayTypeKey(typeKey);
       setOverlayMessage(
         `ダウンロードに失敗しました${err instanceof Error && err.message ? `: ${err.message}` : ""}`
       );
@@ -1545,7 +1724,7 @@ export default function MapView({
       setOverlayDownloading(false);
       setOverlayProgress(null);
     }
-  }, [overlayDownloadPrompt, setOverlayTypeKey]);
+  }, [overlayDownloadPrompt, toggleOverlayTypeKey]);
 
   const [loading, setLoading] = useState(true);
 
@@ -1625,6 +1804,8 @@ export default function MapView({
     });
     mapReadyRef.current = false;
     pendingMapReadyRef.current = [];
+    // 地図ごと作り直されるとレイヤーも消えるため、作成済みの記録もリセットする
+    createdOverlayKeysRef.current.clear();
     map.on("styledata", () => {
       if (mapReadyRef.current) return;
       mapReadyRef.current = true;
@@ -2134,7 +2315,7 @@ export default function MapView({
         );
 
     const renderSpots = async () => {
-      ensureClusterLayers(map, handleSpotSelect);
+      ensureClusterLayers(map, overlayKeysRef, handleSpotSelect);
       showClusterLayers(map);
       // 使われるピン画像(シリーズ×訪問済み×非公開)を先に登録してからデータを流し込む
       // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
@@ -2155,7 +2336,7 @@ export default function MapView({
         | undefined;
       source?.setData(buildClusterGeoJSON(filteredSpots, visitedIds, seriesStyles));
       // 本体のレイヤーを重ね表示より後に作った場合でも、重ね表示を上に保つ
-      moveOverlayLayersToTop(map);
+      moveOverlayLayersToTop(map, overlayKeysRef.current);
     };
     runWhenMapReady(() => {
       renderSpots();
@@ -2202,7 +2383,7 @@ export default function MapView({
         : buildPlanListPath(planLists, filters, planPathSpotById);
 
     runWhenMapReady(() => {
-      ensureRouteLayers(map, openRouteDetail, openPathDetail);
+      ensureRouteLayers(map, overlayKeysRef, openRouteDetail, openPathDetail);
       const source = map.getSource(ROUTES_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
@@ -2256,10 +2437,6 @@ export default function MapView({
     let cancelled = false;
 
     runWhenMapReady(() => {
-      const emptyData = {
-        type: "FeatureCollection",
-        features: [],
-      } as GeoJSON.FeatureCollection<GeoJSON.LineString | GeoJSON.Point>;
       // 「これだけを表示」中の扱い。visit(訪問順の経路)は本体種別だけが対象のため
       // 重ね表示は全部消す。plan(訪問予定リスト)はリストに別種別のスポットを混ぜられる
       // ため、そのリストのメンバーだけ残す(絞り込み・ルートは無視して membership で判定)
@@ -2270,78 +2447,98 @@ export default function MapView({
               planLists.find((l) => l.id === filters.planListId)?.spot_ids ?? []
             )
           : null;
-      if (!overlaySpots || isolate === "visit") {
-        // 解除時はデータを空にする(レイヤー自体は残しても害がない)
-        (map.getSource(OVERLAY_SOURCE_ID) as maplibregl.GeoJSONSource | undefined)?.setData(emptyData);
-        (map.getSource(OVERLAY_ROUTES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined)?.setData(emptyData);
-        return;
+      const active = isolate === "visit" ? [] : overlayTypeKeys;
+      // 選択が外れた(・注視で消した)種別は、作成済みレイヤーのデータを空にする
+      // (レイヤー自体は残しても害がない。ensureOverlayLayers参照)
+      for (const key of createdOverlayKeysRef.current) {
+        if (!active.includes(key)) clearOverlayData(map, key);
       }
-      const overlaySpotById = new Map(overlaySpots.map((s) => [s.id, s]));
-      // plan の「これだけを表示」中は重ね表示のルートも隠す(注視中のリストだけの地図にする)
-      const visibleRoutes = isolateListIds
-        ? []
-        : filterVisibleRoutes(
-            overlayRoutes,
-            overlayFilters,
-            overlaySeriesStyles,
-            overlaySpotById
+
+      const render = async () => {
+        for (const typeKey of active) {
+          const data = overlayData.get(typeKey);
+          // キャッシュ読み込み前・ダウンロード確認中の種別は、まだ何も描かない
+          if (!data) {
+            if (createdOverlayKeysRef.current.has(typeKey)) {
+              clearOverlayData(map, typeKey);
+            }
+            continue;
+          }
+          ensureOverlayLayers(
+            map,
+            typeKey,
+            overlayKeysRef,
+            handleOverlaySpotSelect,
+            setOverlayDetailRouteId
           );
-      const routeMemberIds = new Set(
-        visibleRoutes.flatMap((route) => route.points.map((p) => p.spot_id))
-      );
-      // 非表示スポットは重ね表示側でも除外する(スポットIDによるユーザーごとの
-      // 設定のため種別をまたいで共通に効く)。リストの注視(membership)は本体と
-      // 同じく免除する
-      const filtered = overlaySpots.filter((spot) =>
-        isolateListIds
-          ? isolateListIds.has(spot.id)
-          : !hiddenIds.has(spot.id) &&
-            (passesFilters(
-              overlayFilters,
-              spot.series,
-              spot.categories,
-              visitedIds.has(spot.id)
-            ) ||
-              (routeMemberIds.has(spot.id) &&
-                passesFilters(
-                  { ...overlayFilters, series: [], categories: [] },
+          createdOverlayKeysRef.current.add(typeKey);
+
+          const ids = overlayIds(typeKey);
+          const styles = overlaySeriesStylesOf(typeKey);
+          const typeFilters = overlayFilters.get(typeKey) ?? DEFAULT_FILTERS;
+          const spotById = new Map(data.spots.map((s) => [s.id, s]));
+          // plan の「これだけを表示」中は重ね表示のルートも隠す
+          // (注視中のリストだけの地図にする)
+          const visibleRoutes = isolateListIds
+            ? []
+            : filterVisibleRoutes(data.routes, typeFilters, styles, spotById);
+          const routeMemberIds = new Set(
+            visibleRoutes.flatMap((route) => route.points.map((p) => p.spot_id))
+          );
+          // 非表示スポットは重ね表示側でも除外する(スポットIDによるユーザーごとの
+          // 設定のため種別をまたいで共通に効く)。リストの注視(membership)は本体と
+          // 同じく免除する
+          const filtered = data.spots.filter((spot) =>
+            isolateListIds
+              ? isolateListIds.has(spot.id)
+              : !hiddenIds.has(spot.id) &&
+                (passesFilters(
+                  typeFilters,
                   spot.series,
                   spot.categories,
                   visitedIds.has(spot.id)
-                )))
-      );
+                ) ||
+                  (routeMemberIds.has(spot.id) &&
+                    passesFilters(
+                      { ...typeFilters, series: [], categories: [] },
+                      spot.series,
+                      spot.categories,
+                      visitedIds.has(spot.id)
+                    )))
+          );
 
-      const render = async () => {
-        ensureOverlayLayers(map, handleOverlaySpotSelect, setOverlayDetailRouteId);
-        // クラスタは重ね先の種別の先頭シリーズの色で塗り、本体の青いクラスタと
-        // 見分けられるようにする(シリーズ設定が空の種別は未知シリーズのピンと同系のグレー)
-        const clusterColor = overlaySeriesStyles[0]?.color ?? "#9ca3af";
-        map.setPaintProperty(OVERLAY_CLUSTER_LAYER_ID, "circle-color", clusterColor);
-        map.setPaintProperty(
-          OVERLAY_CLUSTER_COUNT_LAYER_ID,
-          "text-color",
-          autoTextColor(clusterColor)
-        );
-        // キャッシュには公開スポットしか入らないため、非公開(破線)のピンは不要
-        await Promise.all(
-          filtered.map((spot) =>
-            ensurePinImage(
-              map,
-              spot.series,
-              visitedIds.has(spot.id),
-              false,
-              overlaySeriesStyles
+          // クラスタは重ね先の種別の先頭シリーズの色で塗り、本体の青いクラスタや
+          // 他の重ね先と見分けられるようにする(シリーズ設定が空の種別は未知シリーズの
+          // ピンと同系のグレー)
+          const clusterColor = styles[0]?.color ?? "#9ca3af";
+          map.setPaintProperty(ids.cluster, "circle-color", clusterColor);
+          map.setPaintProperty(
+            ids.clusterCount,
+            "text-color",
+            autoTextColor(clusterColor)
+          );
+          // キャッシュには公開スポットしか入らないため、非公開(破線)のピンは不要
+          await Promise.all(
+            filtered.map((spot) =>
+              ensurePinImage(
+                map,
+                spot.series,
+                visitedIds.has(spot.id),
+                false,
+                styles
+              )
             )
-          )
-        );
+          );
+          if (cancelled) return;
+          (
+            map.getSource(ids.source) as maplibregl.GeoJSONSource | undefined
+          )?.setData(buildClusterGeoJSON(filtered, visitedIds, styles));
+          (
+            map.getSource(ids.routeSource) as maplibregl.GeoJSONSource | undefined
+          )?.setData(buildRouteGeoJSON(map, visibleRoutes, styles, []));
+        }
         if (cancelled) return;
-        (map.getSource(OVERLAY_SOURCE_ID) as maplibregl.GeoJSONSource | undefined)?.setData(
-          buildClusterGeoJSON(filtered, visitedIds, overlaySeriesStyles)
-        );
-        (map.getSource(OVERLAY_ROUTES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined)?.setData(
-          buildRouteGeoJSON(map, visibleRoutes, overlaySeriesStyles, [])
-        );
-        moveOverlayLayersToTop(map);
+        moveOverlayLayersToTop(map, active);
       };
       render();
     });
@@ -2349,10 +2546,10 @@ export default function MapView({
       cancelled = true;
     };
   }, [
-    overlaySpots,
-    overlayRoutes,
+    overlayTypeKeys,
+    overlayData,
     overlayFilters,
-    overlaySeriesStyles,
+    overlaySeriesStylesOf,
     visitedIds,
     hiddenIds,
     runWhenMapReady,
@@ -2393,7 +2590,7 @@ export default function MapView({
   const detailRoute =
     (detailRouteId ? routes.find((r) => r.id === detailRouteId) : undefined) ??
     (overlayDetailRouteId
-      ? overlayRoutes.find((r) => r.id === overlayDetailRouteId)
+      ? overlayRoutesAll.find((r) => r.id === overlayDetailRouteId)
       : undefined) ??
     null;
   // ルート・訪問順の経路・訪問予定リストの経路を、同じ詳細モーダルで出すための共通形。
@@ -2769,60 +2966,65 @@ export default function MapView({
               </div>
             )}
 
-            {spotTypes.filter((t) => t.key !== spotTypeKey).length > 0 &&
-              (() => {
-                const overlayType = spotTypes.find(
-                  (t) => t.key === overlayTypeKey
-                );
-                return (
-                  <div className="border-t border-gray-100 pt-3">
-                    <div className="mb-1 flex items-center justify-between gap-2">
-                      <p className="flex items-center gap-1.5 text-sm font-medium">
-                        別の種別を重ねて表示
-                        <HelpTip>
-                          選んだ種別の公開スポットとルートを半透明で重ねて表示します(未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは、その種別の地図で自分が設定した内容に従います。
-                        </HelpTip>
-                      </p>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {/* 種別を切り替えず、この地図の上のモーダルで重ね表示側の絞り込みを
-                            編集する(変更はその種別のlocalStorageへ保存され、描画にも即反映) */}
-                        {overlayTypeKey && overlaySpots && overlayType && (
-                          <button
-                            type="button"
-                            onClick={() => setShowOverlayFilterModal(true)}
-                            className="shrink-0 text-sm text-blue-600 underline"
-                          >
-                            絞り込みを編集
-                          </button>
-                        )}
-                        {/* このセクションだけのリセット(「重ねない」へ戻す) */}
-                        <SectionResetButton
-                          disabled={overlayTypeKey === null}
-                          onClick={() => setOverlayTypeKey(null)}
-                        />
-                      </div>
-                    </div>
-                    <select
-                      aria-label="重ねて表示する種別"
-                      value={overlayTypeKey ?? ""}
-                      onChange={(e) => setOverlayTypeKey(e.target.value || null)}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
-                    >
-                      <option value="">重ねない</option>
-                      {spotTypes
-                        .filter((t) => t.key !== spotTypeKey)
-                        .map((t) => (
-                          <option key={t.key} value={t.key}>
-                            {t.label}
-                          </option>
-                        ))}
-                    </select>
-                    {overlayMessage && (
-                      <p className="mt-1 text-xs text-red-600">{overlayMessage}</p>
-                    )}
-                  </div>
-                );
-              })()}
+            {/* 別の種別を重ねて表示(複数選択可)。選んだ順に上へ重なり、
+                種別ごとに絞り込みを編集できる */}
+            {spotTypes.filter((t) => t.key !== spotTypeKey).length > 0 && (
+              <div className="border-t border-gray-100 pt-3">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p className="flex items-center gap-1.5 text-sm font-medium">
+                    別の種別を重ねて表示
+                    <HelpTip>
+                      選んだ種別の公開スポットとルートを半透明で重ねて表示します(複数選べます。未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは種別ごとに、その種別の地図で自分が設定した内容に従います。
+                    </HelpTip>
+                  </p>
+                  {/* このセクションだけのリセット(すべて「重ねない」へ戻す) */}
+                  <SectionResetButton
+                    disabled={overlayTypeKeys.length === 0}
+                    onClick={clearOverlayTypeKeys}
+                  />
+                </div>
+                <ul className="max-h-56 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
+                  {spotTypes
+                    .filter((t) => t.key !== spotTypeKey)
+                    .map((t) => {
+                      const selected = overlayTypeKeys.includes(t.key);
+                      return (
+                        <li
+                          key={t.key}
+                          className="flex items-center justify-between gap-2 px-2.5 py-1.5"
+                        >
+                          <label className="flex min-w-0 flex-1 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => toggleOverlayTypeKey(t.key)}
+                              className="size-4 shrink-0 accent-blue-600"
+                            />
+                            <span className="min-w-0 truncate text-sm">
+                              {t.label}
+                            </span>
+                          </label>
+                          {/* 種別を切り替えず、この地図の上のモーダルで重ね表示側の
+                              絞り込みを編集する(変更はその種別のlocalStorageへ
+                              保存され、描画にも即反映) */}
+                          {selected && overlayData.has(t.key) && (
+                            <button
+                              type="button"
+                              onClick={() => setOverlayFilterTypeKey(t.key)}
+                              className="shrink-0 text-xs text-blue-600 underline"
+                            >
+                              絞り込みを編集
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                </ul>
+                {overlayMessage && (
+                  <p className="mt-1 text-xs text-red-600">{overlayMessage}</p>
+                )}
+              </div>
+            )}
 
             <div className="border-t border-gray-100 pt-3">
               <p className="mb-1 text-sm font-medium">公開スポットのダウンロード</p>
@@ -2875,15 +3077,17 @@ export default function MapView({
 
       {/* 重ね表示する種別の絞り込みを、種別を切り替えずこの地図の上で編集するモーダル。
           変更はその種別のlocalStorageへ保存し、重ね表示の描画にも即反映される */}
-      {showOverlayFilterModal &&
-        overlayTypeKey &&
-        overlaySpots &&
+      {overlayFilterTypeKey &&
+        overlayData.has(overlayFilterTypeKey) &&
         (() => {
-          const overlayType = spotTypes.find((t) => t.key === overlayTypeKey);
+          const typeKey = overlayFilterTypeKey;
+          const overlayType = spotTypes.find((t) => t.key === typeKey);
+          const data = overlayData.get(typeKey)!;
+          const typeFilters = overlayFilters.get(typeKey) ?? DEFAULT_FILTERS;
           return (
             <div
               className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-              onClick={() => setShowOverlayFilterModal(false)}
+              onClick={() => setOverlayFilterTypeKey(null)}
             >
               <div
                 onClick={(e) => e.stopPropagation()}
@@ -2891,16 +3095,16 @@ export default function MapView({
               >
                 <div className="flex items-center justify-between gap-2">
                   <h2 className="font-bold">
-                    「{overlayType?.label ?? overlayTypeKey}」の絞り込み
+                    「{overlayType?.label ?? typeKey}」の絞り込み
                   </h2>
                   <div className="flex items-center gap-3">
                     <FilterResetButton
-                      filters={overlayFilters}
-                      onChange={setOverlayFiltersAndSave}
+                      filters={typeFilters}
+                      onChange={(next) => setOverlayFiltersAndSave(typeKey, next)}
                     />
                     <button
                       type="button"
-                      onClick={() => setShowOverlayFilterModal(false)}
+                      onClick={() => setOverlayFilterTypeKey(null)}
                       aria-label="閉じる"
                       className="text-xl leading-none text-gray-400"
                     >
@@ -2909,17 +3113,17 @@ export default function MapView({
                   </div>
                 </div>
                 <p className="text-xs text-gray-500">
-                  重ねて表示している「{overlayType?.label ?? overlayTypeKey}」の
+                  重ねて表示している「{overlayType?.label ?? typeKey}」の
                   絞り込み・ルート表示です。ここでの変更はこの種別の地図にも保存されます。
                 </p>
                 <FilterBar
-                  spots={overlaySpots}
-                  filters={overlayFilters}
-                  onChange={setOverlayFiltersAndSave}
+                  spots={data.spots}
+                  filters={typeFilters}
+                  onChange={(next) => setOverlayFiltersAndSave(typeKey, next)}
                   showReset={false}
-                  seriesStyles={overlaySeriesStyles}
-                  categories={overlayCategories}
-                  showRouteToggle={overlayRoutes.length > 0}
+                  seriesStyles={overlaySeriesStylesOf(typeKey)}
+                  categories={overlayCategoriesOf(typeKey)}
+                  showRouteToggle={data.routes.length > 0}
                 />
               </div>
             </div>
@@ -3200,6 +3404,11 @@ export default function MapView({
                   {routeDetailView.pointNoun}
                   {routeDetailView.points.length}件。スポット名をタップすると、その位置に地図を移動します。
                 </p>
+                {/* 経路全体をGoogle マップの経路検索で開く(先頭が出発地、
+                    途中が経由地、最後が目的地) */}
+                <div className="pt-2">
+                  <GoogleMapsRouteLink points={routeDetailView.points} />
+                </div>
               </div>
             )}
           </div>
@@ -3221,14 +3430,21 @@ export default function MapView({
         />
       )}
 
-      {/* 重ね表示スポットの詳細モーダル(読み取り専用。訪問記録・編集等の更新系は出さない) */}
+      {/* 重ね表示スポットの詳細モーダル(読み取り専用。スポットの編集・削除等の
+          更新系は出さないが、訪問記録と、今開いている種別の訪問予定リストへの
+          追加はできる) */}
       {overlayDetailSpotId && (
         <SpotDetailModal
           spotId={overlayDetailSpotId}
           readOnly
           allowVisitRecording
+          allowPlanList
           onClose={() => setOverlayDetailSpotId(null)}
+          onVisitChange={loadVisits}
           onVisitRecorded={handleVisitRecorded}
+          // 重ね表示スポットを現在の種別のリストへ追加したら、経路表示中のリストの
+          // 線にも反映されるようリスト一覧を取り直す
+          onPlanListChange={loadPlanLists}
         />
       )}
 

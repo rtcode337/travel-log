@@ -6,6 +6,7 @@ import { formatPlanDateRange } from "@/lib/planListDraft";
 import type { Spot, VisitPlanList } from "@/lib/types";
 import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
 import SeriesBadge from "@/components/SeriesBadge";
+import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
 
 /**
  * 訪問予定リスト(旅程)の詳細モーダル。タイトル・説明・訪問予定期間と、
@@ -170,6 +171,17 @@ export default function VisitPlanListDetailModal({
                 </li>
               )}
             </ol>
+
+            {/* リスト全体をGoogle マップの経路検索で開く(途中のスポットは経由地、
+                最後のスポットは目的地になる)。読み込めていないスポットは飛ばす */}
+            <div className="mt-3">
+              <GoogleMapsRouteLink
+                points={list.spot_ids.flatMap((id) => {
+                  const spot = spotsById.get(id) ?? extraSpots.get(id);
+                  return spot ? [{ lat: spot.lat, lng: spot.lng }] : [];
+                })}
+              />
+            </div>
 
             {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
             <button
