@@ -472,24 +472,34 @@ export default function SpotDetailModal({
                   </p>
                 </div>
               </div>
-              {/* 閉じるのはモーダル外側のタップで足りるため×ボタンは置かず、
-                  その位置に訪問予定のブックマーク風★トグル(塗り=予定あり)を置く */}
-              {!readOnly && (
+              {/* ×ボタンと、その左に訪問予定のブックマーク風★トグル(塗り=予定あり)。
+                  一時期×を外して外側タップだけにしていたが、このモーダルは画面の
+                  ほぼ全体を占めるため外側の余白が狭すぎて閉じにくく、復活させた */}
+              <div className="flex shrink-0 items-center gap-1">
+                {!readOnly && (
+                  <button
+                    onClick={toggleVisitPlan}
+                    disabled={planUpdating}
+                    aria-label={planned ? "訪問予定をはずす" : "訪問予定にする"}
+                    title={planned ? "訪問予定をはずす" : "訪問予定にする"}
+                    aria-pressed={planned}
+                    className={`rounded p-1 disabled:opacity-50 ${
+                      planned
+                        ? "text-amber-400 hover:bg-amber-50"
+                        : "text-gray-400 hover:bg-gray-50"
+                    }`}
+                  >
+                    <StarIcon filled={planned} className="size-6" />
+                  </button>
+                )}
                 <button
-                  onClick={toggleVisitPlan}
-                  disabled={planUpdating}
-                  aria-label={planned ? "訪問予定をはずす" : "訪問予定にする"}
-                  title={planned ? "訪問予定をはずす" : "訪問予定にする"}
-                  aria-pressed={planned}
-                  className={`shrink-0 rounded p-1 disabled:opacity-50 ${
-                    planned
-                      ? "text-amber-400 hover:bg-amber-50"
-                      : "text-gray-400 hover:bg-gray-50"
-                  }`}
+                  onClick={onClose}
+                  className="rounded-full px-2 text-xl leading-none text-gray-400"
+                  aria-label="閉じる"
                 >
-                  <StarIcon filled={planned} className="size-6" />
+                  ×
                 </button>
-              )}
+              </div>
             </div>
 
             {spot.description && (
