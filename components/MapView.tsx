@@ -13,8 +13,7 @@ import {
   savePlanListDraft,
   type PlanListDraft,
 } from "@/lib/planListDraft";
-import * as maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import * as maplibregl from "@/lib/maplibre";
 import { api } from "@/lib/api-client";
 import {
   osmStyle,

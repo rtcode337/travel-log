@@ -26,5 +26,9 @@ ARG BUILD_NUMBER=""
 ENV BUILD_NUMBER=$BUILD_NUMBER
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# output: standaloneは.next/staticとpublicをコピーしないため別途持ち込む。
+# publicにはPWAのアイコン(public/icons)と、MapLibreのワーカースクリプト
+# (public/maplibre-gl。builderのprebuildが生成する。lib/maplibre.ts参照)が入る
+COPY --from=builder /app/public ./public
 EXPOSE 3000
 CMD ["node", "server.js"]

@@ -49,7 +49,9 @@ export const config = {
   matcher: [
     // manifest.webmanifest(app/manifest.ts)を除外しているのは、ブラウザのmanifest取得が
     // 既定でCookieなしで行われるため。ガード対象のままだと/loginリダイレクトが返り
-    // PWAとしてインストールできなくなる
-    "/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // PWAとしてインストールできなくなる。
+    // .mjsはpublic/maplibre-gl/のワーカースクリプト(lib/maplibre.ts参照)。リダイレクトが
+    // 返るとHTMLをJSモジュールとして読むことになり地図が動かないため、静的配信に任せる
+    "/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mjs)$).*)",
   ],
 };
