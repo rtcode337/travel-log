@@ -41,6 +41,11 @@ import {
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
 import { resolveCategories } from "@/lib/category";
+import {
+  findPinShape,
+  resolveCategoryStyles,
+  type CategoryStyleDefinition,
+} from "@/lib/categoryStyle";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import {
   downloadSpotCacheFor,
@@ -51,6 +56,7 @@ import {
 } from "@/lib/useSpotCache";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useCategories } from "@/lib/useCategories";
+import { useCategoryStyles } from "@/lib/useCategoryStyles";
 import FilterBar, {
   DEFAULT_FILTERS,
   FilterResetButton,
@@ -727,7 +733,8 @@ type ClusterFeatureProps = {
 function buildClusterGeoJSON(
   spots: Spot[],
   visitedIds: Set<string>,
-  seriesStyles: SeriesStyleDefinition[]
+  seriesStyles: SeriesStyleDefinition[],
+  categoryStyles: CategoryStyleDefinition[]
 ): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
   return {
     type: "FeatureCollection",
@@ -742,7 +749,8 @@ function buildClusterGeoJSON(
           spot.series,
           visitedIds.has(spot.id),
           spot.status === "private",
-          seriesStyles
+          seriesStyles,
+          findPinShape(spot.categories, categoryStyles)
         ),
       },
     })),
@@ -1114,6 +1122,8 @@ export default function MapView({
   const seriesStyles = useSeriesStyles(spotTypeKey);
   // 種別のカテゴリ設定。絞り込みチップの並び順に使う
   const categories = useCategories(spotTypeKey);
+  // カテゴリごとのピンの形。設定が無い種別では空配列(=すべて既定の丸)
+  const categoryStyles = useCategoryStyles(spotTypeKey);
   // 種別の対象地域スコープ。地名検索の対象国と、初回表示時の挙動
   // (日本=現在地へズーム、それ以外=スポット全体にフィット)に使う
   const regionScope = useRegionScope(spotTypeKey);
@@ -1518,6 +1528,10 @@ export default function MapView({
   );
   const overlayCategoriesOf = useCallback(
     (key: string) => resolveCategories(spotTypes.find((t) => t.key === key)),
+    [spotTypes]
+  );
+  const overlayCategoryStylesOf = useCallback(
+    (key: string) => resolveCategoryStyles(spotTypes.find((t) => t.key === key)),
     [spotTypes]
   );
 
@@ -2316,7 +2330,7 @@ export default function MapView({
     const renderSpots = async () => {
       ensureClusterLayers(map, overlayKeysRef, handleSpotSelect);
       showClusterLayers(map);
-      // 使われるピン画像(シリーズ×訪問済み×非公開)を先に登録してからデータを流し込む
+      // 使われるピン画像(シリーズ×訪問済み×非公開×形)を先に登録してからデータを流し込む
       // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
       await Promise.all(
         filteredSpots.map((spot) =>
@@ -2325,7 +2339,8 @@ export default function MapView({
             spot.series,
             visitedIds.has(spot.id),
             spot.status === "private",
-            seriesStyles
+            seriesStyles,
+            findPinShape(spot.categories, categoryStyles)
           )
         )
       );
@@ -2333,7 +2348,9 @@ export default function MapView({
       const source = map.getSource(CLUSTER_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
-      source?.setData(buildClusterGeoJSON(filteredSpots, visitedIds, seriesStyles));
+      source?.setData(
+        buildClusterGeoJSON(filteredSpots, visitedIds, seriesStyles, categoryStyles)
+      );
       // 本体のレイヤーを重ね表示より後に作った場合でも、重ね表示を上に保つ
       moveOverlayLayersToTop(map, overlayKeysRef.current);
     };
@@ -2355,6 +2372,7 @@ export default function MapView({
     filters,
     runWhenMapReady,
     seriesStyles,
+    categoryStyles,
     routes,
   ]);
 
@@ -2474,6 +2492,7 @@ export default function MapView({
 
           const ids = overlayIds(typeKey);
           const styles = overlaySeriesStylesOf(typeKey);
+          const catStyles = overlayCategoryStylesOf(typeKey);
           const typeFilters = overlayFilters.get(typeKey) ?? DEFAULT_FILTERS;
           const spotById = new Map(data.spots.map((s) => [s.id, s]));
           // plan の「これだけを表示」中は重ね表示のルートも隠す
@@ -2524,14 +2543,15 @@ export default function MapView({
                 spot.series,
                 visitedIds.has(spot.id),
                 false,
-                styles
+                styles,
+                findPinShape(spot.categories, catStyles)
               )
             )
           );
           if (cancelled) return;
           (
             map.getSource(ids.source) as maplibregl.GeoJSONSource | undefined
-          )?.setData(buildClusterGeoJSON(filtered, visitedIds, styles));
+          )?.setData(buildClusterGeoJSON(filtered, visitedIds, styles, catStyles));
           (
             map.getSource(ids.routeSource) as maplibregl.GeoJSONSource | undefined
           )?.setData(buildRouteGeoJSON(map, visibleRoutes, styles, []));
@@ -2549,6 +2569,7 @@ export default function MapView({
     overlayData,
     overlayFilters,
     overlaySeriesStylesOf,
+    overlayCategoryStylesOf,
     visitedIds,
     hiddenIds,
     runWhenMapReady,

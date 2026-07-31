@@ -1,13 +1,17 @@
 import type * as maplibregl from "maplibre-gl";
 import type { Series } from "./types";
 import { autoTextColor, findSeriesStyle, isImageLabel, type SeriesStyleDefinition } from "./seriesStyle";
+import { DEFAULT_PIN_SHAPE, type PinShape } from "./categoryStyle";
 
 /**
- * 地図ピン(下が三角にとんがった吹き出し型)の画像をcanvasで生成し、
+ * 地図ピン(下がとんがった吹き出し型)の画像をcanvasで生成し、
  * MapLibreのスタイル画像として登録する。とんがりの先端が画像の下端中央に
  * 来るように描くので、symbolレイヤー側は `icon-anchor: "bottom"` で使う。
  * 縁取り線は常に描き、非公開スポットだけ破線にする(色・大きさ・ラベルは
  * シリーズのまま変えない)。
+ *
+ * 頭の形(丸 / 角丸四角)はカテゴリで切り替わる(lib/categoryStyle.ts)。色・大きさ・
+ * ラベルをシリーズが握っているので、カテゴリに渡せる直交したチャネルが形しかないため。
  */
 
 const PIXEL_RATIO = 2;
@@ -46,10 +50,13 @@ export function pinIconId(
   series: Series | null,
   visited: boolean,
   isPrivate: boolean,
-  seriesStyles: SeriesStyleDefinition[]
+  seriesStyles: SeriesStyleDefinition[],
+  /** 頭の形(カテゴリ由来)。**IDに混ぜないと、形を変えても既存の画像が使われ続ける** */
+  shape: PinShape = DEFAULT_PIN_SHAPE
 ): string {
   const sig = styleSignature(findSeriesStyle(series, seriesStyles));
-  return `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}-${sig}-${series ?? "__null__"}`;
+  const base = `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}`;
+  return `${base}-${sig}-${shape}-${series ?? "__null__"}`;
 }
 
 /** data URL画像をHTMLImageElementとして読み込む(base64は同期的に近いが、確実性のためdecode()を待つ) */
@@ -67,9 +74,11 @@ export async function ensurePinImage(
   visited: boolean,
   /** 自分だけの非公開スポット。公開スポットと見分けられるよう破線で縁取る */
   isPrivate: boolean,
-  seriesStyles: SeriesStyleDefinition[]
+  seriesStyles: SeriesStyleDefinition[],
+  /** 頭の形(カテゴリ由来。lib/categoryStyle.ts の findPinShape で解決したもの) */
+  shape: PinShape = DEFAULT_PIN_SHAPE
 ): Promise<string> {
-  const id = pinIconId(series, visited, isPrivate, seriesStyles);
+  const id = pinIconId(series, visited, isPrivate, seriesStyles, shape);
   if (map.hasImage(id)) return id;
 
   const style = findSeriesStyle(series, seriesStyles);
@@ -95,10 +104,31 @@ export async function ensurePinImage(
   const cy = PIN_ICON_PAD + r; // 頭(円)の中心
   const tipY = h - PIN_ICON_PAD; // とんがりの先端(画像下端中央)
 
-  // 円の下側±45°の2点からとんがりの先端へ直線を引いた吹き出し型
+  // 頭ととんがりを1つのパスとして描く(塗りと縁取りを一度に済ませるため)
   ctx.beginPath();
-  ctx.arc(cx, cy, r, (3 * Math.PI) / 4, Math.PI / 4);
-  ctx.lineTo(cx, tipY);
+  if (shape === "rounded-square") {
+    // 角丸四角。円と同じ幅に収め、下辺の左右から先端へ引く。
+    // 下辺は角丸の分だけ内側から始まるので、とんがりの付け根も同じ位置に合わせる
+    const k = r * 0.42; // 角丸の半径
+    const left = cx - r;
+    const right = cx + r;
+    const top = cy - r;
+    const bottom = cy + r;
+    ctx.moveTo(left + k, top);
+    ctx.lineTo(right - k, top);
+    ctx.quadraticCurveTo(right, top, right, top + k);
+    ctx.lineTo(right, bottom - k);
+    ctx.quadraticCurveTo(right, bottom, right - k, bottom);
+    ctx.lineTo(cx, tipY); // 右下の角からとんがりの先端へ
+    ctx.lineTo(left + k, bottom);
+    ctx.quadraticCurveTo(left, bottom, left, bottom - k);
+    ctx.lineTo(left, top + k);
+    ctx.quadraticCurveTo(left, top, left + k, top);
+  } else {
+    // 円の下側±45°の2点からとんがりの先端へ直線を引いた吹き出し型
+    ctx.arc(cx, cy, r, (3 * Math.PI) / 4, Math.PI / 4);
+    ctx.lineTo(cx, tipY);
+  }
   ctx.closePath();
   // shadow系プロパティはscale()の影響を受けないため実ピクセルで指定する
   ctx.shadowColor = "rgba(0,0,0,0.35)";
