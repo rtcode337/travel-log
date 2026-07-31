@@ -111,7 +111,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 画面は`/[type]/map`のように`spot_types.key`をURLの動的セグメントとして持ち、種別ごとに独立してアクセスする(ルート`/`アクセス時のリダイレクト先は、最後に開いていた種別のCookie `last_spot_type` — `lib/last-spot-type.ts`。`proxy.ts`が`/[type]/(map|spots|account|admin)`アクセス時に書き込み、`app/page.tsx`が読み取り時に`canViewSpotType`で検証する — を最優先し、無い・開けない場合に`app_settings.active_spot_type_id`の既定へフォールバックする。どちらも他の種別を隠すものではない)。種別の切り替えは`/[type]/map`の**左下の種別チップ(`MapView`。現在の種別名を表示し、タップすると他の種別の一覧メニューが上向きに開き、選ぶと`/[別種別]/map`へ遷移する)**から行う(かつてはアカウントタブ`AccountView`の「別のスポットを見る」一覧だったが、地図から直接切り替えられるよう移した。アカウントタブは現在のモード表示のみ残す)。他の種別が無いときはチップはタップしても何も起きない(現在名の表示だけ)。`public_visible=false`の種別はAPI(`api.spotTypes.list`)がadmin/spot_admin以外には返さないため、一般ユーザーのメニューには公開種別のみ並ぶ。種別ごとの公開範囲は`spot_type_settings`の`public_visible`設定(既定false=admin/spot_admin限定)で制御し、`lib/spot-type-access.ts`の`canViewSpotType`で判定する(`/[type]/admin`だけは`public_visible`に関わらず常にアクセス可)。かつてあった`spot_types.visibility`列(`public`/`admin_only`/`disabled`の3値)は廃止し、`disabled`(誰にも見せない)相当は種別自体の削除で代替するようにした。
 
-新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, series?, categories? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/series/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/series/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。
+新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, series?, categories?, category_styles? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/series/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/series/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。
 
 `spots.series`(1スポットに1つ・nullable text)/`spots.categories`(1スポットに複数・`text[]`)はどちらも自由入力で、`spot_type = 'tourist'`のときのみtravel-log-data/README.mdに記載のシリーズ基準(A〜E)が意味を持つ(既定値の一覧は`lib/seriesStyle.ts`の`DEFAULT_SERIES_STYLES`と`lib/category.ts`の`DEFAULT_CATEGORIES`、およびそのコメントを参照)。
 
@@ -134,6 +134,38 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 ### スポット種別ごとのON/OFF設定(EAV: `spot_type_settings`)
 
 `reviews_enabled`/`wikipedia_enabled`/`public_visible`は`spot_types`に列を持たず、EAV形式の`spot_type_settings`テーブル(`spot_type_id, key, value` — boolean設定は`'true'`/`'false'`の文字列。同じテーブルに`series_styles`・`region_scope`・`wikipedia_lang`・`categories`のような文字列値のキーも同居する)に保存する。新しい設定を増やす際にDBマイグレーションが要らないようにするための設計で、キー・既定値・表示名は`lib/types.ts`の`SPOT_TYPE_SETTING_DEFAULTS`/`SPOT_TYPE_SETTING_LABELS`に登録するだけでよい(行が存在しないキーは設定ごとの既定値扱い、`getSpotTypeSetting`参照)。`public_visible`は既定`false`(=種別追加当初は非公開・admin/spot_admin限定)で、他2つは既定`true`。`app/api/spot-types/[id]/route.ts`のPATCHは`{ settings: { key: boolean, ... } }`を受け取り`spot_type_settings`へupsertする汎用エンドポイントで、設定を増やしてもAPI自体の変更は不要。`SpotType`型の`settings`フィールド(`key→value`の文字列マップ)は`lib/spot-types-query.ts`の`SPOT_TYPE_SELECT`(`spot_type_settings`をjsonbに集約するSELECT共通部品)を使うクエリでのみ埋まる点に注意(`select * from spot_types`だけでは`settings`は付与されない)。
+
+### カテゴリごとの地図ピンの形(`category_styles`)
+
+**カテゴリに握らせる見た目は「形」だけ**にしてある(`lib/categoryStyle.ts`)。色・大きさ・
+ラベルはシリーズが、塗りの上書き(緑+✓)は訪問済みが、破線の縁取りは非公開スポットが
+すでに使っており、そこへカテゴリを重ねるとどちらが効いているのか読めない見た目になるため。
+形はそれらと直交していて、最小のピン(size 12)でも見分けられる。用途は「その場所が
+どういう種類か」ではなく、**シリーズとは別の軸をひと目で見せたいとき**(観光地の
+`じっくり` = 立ち寄るのに手間がかかる、など)。
+
+`spot_type_settings`の`category_styles`キー(`CATEGORY_STYLES_SETTING_KEY`)に
+JSON文字列(`CategoryStyleDefinition[]` = `{ category, shape }`の配列)を保存する。
+`shape`は`PIN_SHAPES`(`circle` / `rounded-square`)のいずれか。**シリーズと違い既定は
+空配列**(=すべて既定の丸)で、使いたい種別だけが設定するもの。取得は
+`useCategoryStyles(typeKey)`フック(`useSeriesStyles`のカテゴリ版)。
+
+**1スポットは複数カテゴリを持てるので、設定の配列順で最初に一致したものを採用する**
+(`findPinShape`)。シリーズの配列順が並び順を決めているのと同じ考え方。
+
+実装で踏みやすい点が2つある:
+
+- **`pinIconId`に`shape`を混ぜること。** `ensurePinImage`は`map.hasImage(id)`で早期
+  returnするため、IDに形が入っていないと**形を変えても古い画像が使われ続ける**
+  (`styleSignature`をIDに混ぜているのと同じ理由)
+- **重ね表示(別種別を同じ地図に出す経路)にも配線すること。** 本体は
+  `useCategoryStyles`フック、重ね表示は`spotTypes`から直接解決する
+  (`overlayCategoryStylesOf`)別系統になっている。片方だけ直すと、本体は形が変わるのに
+  重ね表示は丸のまま、というちぐはぐになる
+
+PATCH `/api/spot-types/[id]`は`series_styles`・`categories`と同じく、保存前に
+`parseCategoryStyles`で妥当性を検証する(検証しないと、壊れたJSONが保存されて
+黙って「すべて丸」にフォールバックし、設定したつもりで効いていない状態になる)。
 
 ### シリーズ(`series`)とその見た目(`series_styles`)
 
@@ -204,7 +236,7 @@ Maps URLsの`waypoints`は9件までのため、それを超える経路は**並
 
 ### GitHubリポジトリからの一括取り込み
 
-`/[type]/admin`のadmin専用セクション「GitHubリポジトリからスポット種別取り込み」(`AdminView`の`handleGithubOpen`/`handleGithubApply`)。リポジトリ(`owner/リポジトリ名`、既定`rtcode337/travel-log-data`)を入力して「開く」を押すと、`raw.githubusercontent.com`(mainブランチ固定、CORS可)からブラウザが直接リポジトリ直下の`catalog.json`(`{ "spot_types": [ { "key", "label" }, ... ] }`形式のスポット種別カタログ)を取得して一覧表示する(既存種別かどうかを「上書き」「新規作成」バッジで示す)。一覧から種別を選んで「適用」すると、そのフォルダの `<キー>/settings.json`・`<キー>/spots.csv`・`<キー>/excluded_candidates/exclude.txt`・`<キー>/routes.csv` を取得し、この順に適用する。settings.jsonだけは必須(無ければ中止)で、他は無ければスキップ。種別が無ければ作成し、あればlabel・設定・シリーズ・カテゴリを上書きする(`applyTypeDefinition`。settings.jsonのkeyとフォルダ名の不一致は中止)。spots.csv・routes.csvは個別インポートと同じ差分更新ロジックを共通関数(`runSpotsCsvImport`/`runRouteCsvImport` — 個別インポートのハンドラもこれらの薄いラッパー)で対象種別に対して実行し、exclude.txtは「キー一覧を指定して削除」と同じAPIで削除件数の確認ダイアログにOKしたときだけ実行する(キャンセルしても後続のroutes.csvは続行)。routes.csvの検証用スポットはspots.csv適用後に取り直す。バックエンドに専用エンドポイントは無く、既存APIの組み合わせのみ。
+`/[type]/admin`のadmin専用セクション「GitHubリポジトリからスポット種別取り込み」(`AdminView`の`handleGithubOpen`/`handleGithubApply`)。リポジトリ(`owner/リポジトリ名`、既定`rtcode337/travel-log-data`)を入力して「開く」を押すと、`raw.githubusercontent.com`(mainブランチ固定、CORS可)からブラウザが直接リポジトリ直下の`catalog.json`(`{ "spot_types": [ { "key", "label" }, ... ] }`形式のスポット種別カタログ)を取得して一覧表示する(既存種別かどうかを「上書き」「新規作成」バッジで示す)。一覧から種別を選んで「適用」すると、そのフォルダの `<キー>/settings.json`・`<キー>/spots.csv`・`<キー>/excluded_candidates/exclude.txt`・`<キー>/routes.csv` を取得し、この順に適用する。settings.jsonだけは必須(無ければ中止)で、他は無ければスキップ。種別が無ければ作成し、あればlabel・設定・シリーズ・カテゴリ・カテゴリの見た目を上書きする(`applyTypeDefinition`。settings.jsonのkeyとフォルダ名の不一致は中止)。**settings.jsonを読む経路は3つある**(GitHub取り込みの`applyTypeDefinition`、JSONアップロードでの新規作成`handleCreateTypeFromJson`、既存種別への反映`handleApplyTypeFromJson`)ので、`parseSpotTypeDefinition`が返すフィールドを増やしたら3つとも`settingsToApply`へ積むこと。取り出し忘れても取り込みは成功扱いのまま進み、その設定だけが黙って落ちる(`category_styles`追加時に実際に踏んだ)。spots.csv・routes.csvは個別インポートと同じ差分更新ロジックを共通関数(`runSpotsCsvImport`/`runRouteCsvImport` — 個別インポートのハンドラもこれらの薄いラッパー)で対象種別に対して実行し、exclude.txtは「キー一覧を指定して削除」と同じAPIで削除件数の確認ダイアログにOKしたときだけ実行する(キャンセルしても後続のroutes.csvは続行)。routes.csvの検証用スポットはspots.csv適用後に取り直す。バックエンドに専用エンドポイントは無く、既存APIの組み合わせのみ。
 
 ### 登録経路(`spots.origin`)とtravel-log-dataへの還元用エクスポート
 

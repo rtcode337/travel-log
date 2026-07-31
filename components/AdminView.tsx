@@ -7,6 +7,7 @@ import HelpTip from "@/components/HelpTip";
 import { api } from "@/lib/api-client";
 import { buildCsv, parseCsv } from "@/lib/csv";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
+import { CATEGORY_STYLES_SETTING_KEY } from "@/lib/categoryStyle";
 import {
   CATEGORIES_SETTING_KEY,
   formatCategoryList,
@@ -604,7 +605,8 @@ export default function AdminView({
         setTypeMessage("JSONの内容が不正です: " + parsed.error);
         return;
       }
-      const { key, label, settings, series, categories } = parsed.data;
+      const { key, label, settings, series, categories, category_styles } =
+        parsed.data;
 
       const { data: created, error } = await api.spotTypes.create(key, label);
       if (error || !created) {
@@ -624,6 +626,10 @@ export default function AdminView({
       }
       if (categories) {
         settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
+      }
+      if (category_styles) {
+        settingsToApply[CATEGORY_STYLES_SETTING_KEY] =
+          JSON.stringify(category_styles);
       }
 
       if (Object.keys(settingsToApply).length > 0) {
@@ -665,7 +671,8 @@ export default function AdminView({
         setTypeSettingsMessage("JSONの内容が不正です: " + parsed.error);
         return;
       }
-      const { key, label, settings, series, categories } = parsed.data;
+      const { key, label, settings, series, categories, category_styles } =
+        parsed.data;
       // キーが変わると種別を差し替えたのと同じ扱いになり影響が大きいため、
       // 一致しない場合は何も反映せずエラーにする(labelは反映してよい)
       if (key !== currentType.key) {
@@ -684,6 +691,10 @@ export default function AdminView({
       }
       if (categories) {
         settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
+      }
+      if (category_styles) {
+        settingsToApply[CATEGORY_STYLES_SETTING_KEY] =
+          JSON.stringify(category_styles);
       }
 
       const { error: settingsError } = await api.spotTypes.applySettings(
@@ -1297,7 +1308,8 @@ export default function AdminView({
 
   /**
    * settings.json(パース済みJSON)をスポット種別へ適用する。keyと一致する種別が
-   * 無ければ作成し、あればlabel・設定・シリーズ・カテゴリを上書きする(GitHub取り込み用)
+   * 無ければ作成し、あればlabel・設定・シリーズ・カテゴリ(と、その見た目)を
+   * 上書きする(GitHub取り込み用)
    */
   const applyTypeDefinition = async (
     json: unknown,
@@ -1307,7 +1319,8 @@ export default function AdminView({
     if ("error" in parsed) {
       throw new Error("settings.json の内容が不正です: " + parsed.error);
     }
-    const { key, label, settings, series, categories } = parsed.data;
+    const { key, label, settings, series, categories, category_styles } =
+      parsed.data;
     // フォルダ名と食い違うJSONを黙って適用すると別の種別を上書きしてしまうため中止する
     if (key !== folderKey) {
       throw new Error(
@@ -1324,6 +1337,10 @@ export default function AdminView({
     }
     if (categories) {
       settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
+    }
+    if (category_styles) {
+      settingsToApply[CATEGORY_STYLES_SETTING_KEY] =
+        JSON.stringify(category_styles);
     }
 
     // この画面を開いた後に作られた種別も拾えるよう、最新の一覧から探す

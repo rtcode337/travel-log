@@ -1,5 +1,10 @@
 import { isValidSeriesStyle, type SeriesStyleDefinition } from "./seriesStyle";
 import { isValidCategoryList } from "./category";
+import {
+  isValidCategoryStyle,
+  PIN_SHAPES,
+  type CategoryStyleDefinition,
+} from "./categoryStyle";
 
 /**
  * series/categoriesはスポットの「種別(SpotType)」ごとに意味が異なりうるため、
@@ -192,6 +197,8 @@ export interface SpotTypeDefinitionFile {
   settings?: Partial<Record<string, boolean | string>>;
   series?: SeriesStyleDefinition[];
   categories?: Category[];
+  /** カテゴリごとの地図ピンの形(省略時はすべて既定の丸)。lib/categoryStyle.ts */
+  category_styles?: CategoryStyleDefinition[];
 }
 
 /** JSONをparseした後の値がSpotTypeDefinitionFileとして使える形か検証する */
@@ -233,6 +240,18 @@ export function parseSpotTypeDefinition(
       error: "categoriesは空でない文字列の配列である必要があります。",
     };
   }
+  if (obj.category_styles !== undefined) {
+    if (
+      !Array.isArray(obj.category_styles) ||
+      !obj.category_styles.every(isValidCategoryStyle)
+    ) {
+      return {
+        error:
+          `category_stylesは { category, shape } の配列である必要があります` +
+          `(shapeは ${PIN_SHAPES.join(" / ")} のいずれか)。`,
+      };
+    }
+  }
   return {
     data: {
       key: obj.key.trim(),
@@ -242,6 +261,9 @@ export function parseSpotTypeDefinition(
         | undefined,
       series: obj.series as SeriesStyleDefinition[] | undefined,
       categories: obj.categories as Category[] | undefined,
+      category_styles: obj.category_styles as
+        | CategoryStyleDefinition[]
+        | undefined,
     },
   };
 }
