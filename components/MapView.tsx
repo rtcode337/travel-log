@@ -3539,11 +3539,13 @@ export default function MapView({
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
           onClick={() => setStackSpotIds(null)}
         >
+          {/* 横幅は一覧に必要な分だけ。件数が多いと縦に伸びるので、画面の高さいっぱいまで
+              使い、はみ出す分だけ一覧側をスクロールさせる */}
           <div
-            className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-xl"
+            className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
               <h2 className="text-sm font-semibold">
                 この地点のスポット({stackSpotIds.length}件)
               </h2>
@@ -3556,7 +3558,7 @@ export default function MapView({
                 ✕
               </button>
             </div>
-            <ul className="max-h-80 divide-y overflow-y-auto">
+            <ul className="min-h-0 flex-1 divide-y overflow-y-auto">
               {stackSpotIds.map((id) => {
                 const spot = spotById.get(id);
                 if (!spot) return null;
