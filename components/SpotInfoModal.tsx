@@ -142,6 +142,7 @@ export default function SpotInfoModal({
   spotName,
   region,
   lang,
+  primaryTitle,
   onClose,
 }: {
   spotName: string;
@@ -149,6 +150,13 @@ export default function SpotInfoModal({
   region: string;
   /** 参照するWikipediaの言語版(サブドメイン)。例: 'ja'、'en' */
   lang: string;
+  /**
+   * スポット名より先に完全一致で探すタイトル(種別の`wikipedia_title_source`が
+   * `series`のときのシリーズ名)。**完全一致したときだけ**使い、記事が無ければ
+   * 従来どおりスポット名で探し直す。検索まで許すと、記事にならない
+   * シリーズ名(「マンガ・アニメ施設」など)で無関係な記事を拾ってしまうため
+   */
+  primaryTitle?: string | null;
   onClose: () => void;
 }) {
   const [summary, setSummary] = useState<WikiSummary | null>(null);
@@ -159,7 +167,12 @@ export default function SpotInfoModal({
     let cancelled = false;
     (async () => {
       try {
+        const primary = primaryTitle
+          ? await resolveExactTitle(lang, primaryTitle)
+          : null;
+        if (cancelled) return;
         const title =
+          primary ??
           (await resolveExactTitle(lang, spotName)) ??
           (await searchWikiTitle(lang, spotName));
         if (cancelled) return;
@@ -169,7 +182,7 @@ export default function SpotInfoModal({
         }
         let data = await fetchWikiSummary(lang, title);
         // 曖昧さ回避ページに当たった場合は、所在地が一致するリンク先に差し替える
-        if (!cancelled && data.type === "disambiguation") {
+        if (!cancelled && data.type === "disambiguation" && !primary) {
           const resolvedTitle = await resolveDisambiguation(
             lang,
             title,
@@ -190,7 +203,7 @@ export default function SpotInfoModal({
     return () => {
       cancelled = true;
     };
-  }, [spotName, region, lang]);
+  }, [spotName, region, lang, primaryTitle]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

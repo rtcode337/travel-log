@@ -23,6 +23,33 @@ export const DEFAULT_REGION_SCOPE = "jp";
 export const WIKIPEDIA_LANG_SETTING_KEY = "wikipedia_lang";
 export const DEFAULT_WIKIPEDIA_LANG = "ja";
 
+/**
+ * スポット詳細のWikipedia検索が「何の名前」で記事を探すかの設定。
+ * - 'name'(既定): 従来どおりスポット名で探す
+ * - 'series': そのスポットのシリーズ名で探す。アニメの聖地のように
+ *   **1つの作品が各地に複数のスポットを持ち、開きたい記事は場所ではなく作品**
+ *   という種別向け。シリーズ名の記事が見つからないときはスポット名にフォールバックする
+ *   (作品に紐づかない施設のような、シリーズ名が記事にならない行があるため)
+ */
+export const WIKIPEDIA_TITLE_SOURCE_SETTING_KEY = "wikipedia_title_source";
+export const DEFAULT_WIKIPEDIA_TITLE_SOURCE = "name";
+export const WIKIPEDIA_TITLE_SOURCES = ["name", "series"] as const;
+export type WikipediaTitleSource = (typeof WIKIPEDIA_TITLE_SOURCES)[number];
+
+export function isValidWikipediaTitleSource(value: string): boolean {
+  return (WIKIPEDIA_TITLE_SOURCES as readonly string[]).includes(value);
+}
+
+/** 種別のsettingsからWikipedia検索の起点を解決する。未設定・不正な値は'name' */
+export function resolveWikipediaTitleSource(
+  type: Pick<SpotType, "settings"> | null | undefined
+): WikipediaTitleSource {
+  const raw = type?.settings?.[WIKIPEDIA_TITLE_SOURCE_SETTING_KEY];
+  if (raw === undefined || !isValidWikipediaTitleSource(raw))
+    return DEFAULT_WIKIPEDIA_TITLE_SOURCE;
+  return raw as WikipediaTitleSource;
+}
+
 export function isValidRegionScope(value: string): boolean {
   return value === "world" || /^[a-z]{2}$/.test(value);
 }

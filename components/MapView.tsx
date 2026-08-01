@@ -78,6 +78,8 @@ const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
 const CLUSTER_COUNT_LAYER_ID = "spots-cluster-count";
 const UNCLUSTERED_LAYER_ID = "spots-unclustered-point";
+/** 同じ座標に複数のスポットが重なっているピンに出す「+N」バッジ */
+const STACK_BADGE_LAYER_ID = "spots-stack-badge";
 
 const ROUTES_SOURCE_ID = "spot-routes";
 const ROUTE_LINE_LAYER_ID = "spot-routes-line";
@@ -728,7 +730,17 @@ type ClusterFeatureProps = {
   visited: boolean;
   /** ensurePinImageで登録済みのピン画像ID */
   icon: string;
+  /** 同じ座標にあるスポットの数(1なら重なりなし)。「+N」バッジの表示に使う */
+  stack: number;
 };
+
+/**
+ * 同じ座標のスポットをまとめるためのキー。座標は小数第6位(約0.1m)まで見る。
+ * これより粗くすると、隣接する別の建物まで同一地点にまとめてしまう
+ */
+function stackKey(spot: Pick<Spot, "lat" | "lng">): string {
+  return `${spot.lat.toFixed(6)},${spot.lng.toFixed(6)}`;
+}
 
 function buildClusterGeoJSON(
   spots: Spot[],
@@ -736,6 +748,13 @@ function buildClusterGeoJSON(
   seriesStyles: SeriesStyleDefinition[],
   categoryStyles: CategoryStyleDefinition[]
 ): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
+  // クラスタが解ける拡大率(clusterMaxZoom)より先では座標が同じピンが完全に
+  // 重なってしまい、下のピンはタップも目視もできなくなる。件数を持たせておく
+  const stacks = new Map<string, number>();
+  for (const spot of spots) {
+    const k = stackKey(spot);
+    stacks.set(k, (stacks.get(k) ?? 0) + 1);
+  }
   return {
     type: "FeatureCollection",
     features: spots.map((spot) => ({
@@ -752,6 +771,7 @@ function buildClusterGeoJSON(
           seriesStyles,
           findPinShape(spot.categories, categoryStyles)
         ),
+        stack: stacks.get(stackKey(spot)) ?? 1,
       },
     })),
   };
@@ -761,7 +781,9 @@ function buildClusterGeoJSON(
 function ensureClusterLayers(
   map: maplibregl.Map,
   overlayKeysRef: OverlayKeysRef,
-  onSelectSpot: (id: string) => void
+  onSelectSpot: (id: string) => void,
+  /** 同じ地点に複数のスポットが重なっていたときに、選択用の一覧を開く */
+  onSelectStack: (ids: string[]) => void
 ) {
   if (map.getSource(CLUSTER_SOURCE_ID)) return;
 
@@ -827,6 +849,29 @@ function ensureClusterLayers(
     },
   });
 
+  // 座標が同じスポットが2件以上あるピンの右肩に「+N」(Nは隠れている件数)を出す。
+  // これが無いと、下に重なっているスポットの存在に気づけない
+  map.addLayer({
+    id: STACK_BADGE_LAYER_ID,
+    type: "symbol",
+    source: CLUSTER_SOURCE_ID,
+    filter: ["all", ["!", ["has", "point_count"]], [">", ["get", "stack"], 1]],
+    layout: {
+      "text-field": ["concat", "+", ["to-string", ["-", ["get", "stack"], 1]]],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 11,
+      "text-anchor": "bottom",
+      "text-offset": [1.3, -1.6],
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+    },
+    paint: {
+      "text-color": "#ffffff",
+      "text-halo-color": "#1f2937",
+      "text-halo-width": 2,
+    },
+  });
+
   map.on("click", CLUSTER_LAYER_ID, async (e) => {
     // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
     if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
@@ -851,8 +896,17 @@ function ensureClusterLayers(
     // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
     if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
       return;
-    const id = e.features?.[0]?.properties?.id;
-    if (id) onSelectSpot(id);
+    // タップ位置に複数のピンが重なっているときは、どれを開くか選ばせる
+    // (e.featuresには重なっている分がすべて入る。上のピンだけ開くと下は永久に開けない)
+    const ids = Array.from(
+      new Set(
+        (e.features ?? [])
+          .map((f) => f.properties?.id)
+          .filter((id): id is string => typeof id === "string")
+      )
+    );
+    if (ids.length > 1) onSelectStack(ids);
+    else if (ids.length === 1) onSelectSpot(ids[0]);
   });
 
   for (const layerId of [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID]) {
@@ -870,6 +924,7 @@ function showClusterLayers(map: maplibregl.Map) {
     CLUSTER_LAYER_ID,
     CLUSTER_COUNT_LAYER_ID,
     UNCLUSTERED_LAYER_ID,
+    STACK_BADGE_LAYER_ID,
   ]) {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible");
   }
@@ -1304,6 +1359,8 @@ export default function MapView({
   // 何らかの絞り込みが掛かっているか(絞り込みボタンの見た目に使う。ルート表示のオン/オフは含めない)
   const filtersActive = hasActiveFilters(filters);
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
+  /** 同じ地点に重なっているスポットの選択一覧(nullなら非表示) */
+  const [stackSpotIds, setStackSpotIds] = useState<string[] | null>(null);
   // タップされたルート(ルート詳細モーダルの表示対象)
   const [detailRouteId, setDetailRouteId] = useState<string | null>(null);
   // 訪問順の経路(緑)・訪問予定リストの経路(紫)の線をタップしたときに開く詳細の対象
@@ -1406,6 +1463,11 @@ export default function MapView({
   const handleSpotSelect = useCallback((id: string) => {
     if (buildModeRef.current) setAddCandidate(id);
     else setDetailSpotId(id);
+  }, []);
+
+  // 同じ地点に複数のピンが重なっていたときは、どれを開くかを選ばせる
+  const handleStackSelect = useCallback((ids: string[]) => {
+    setStackSpotIds(ids);
   }, []);
 
   const updateBuildDraft = useCallback(
@@ -2328,7 +2390,7 @@ export default function MapView({
         );
 
     const renderSpots = async () => {
-      ensureClusterLayers(map, overlayKeysRef, handleSpotSelect);
+      ensureClusterLayers(map, overlayKeysRef, handleSpotSelect, handleStackSelect);
       showClusterLayers(map);
       // 使われるピン画像(シリーズ×訪問済み×非公開×形)を先に登録してからデータを流し込む
       // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
@@ -3469,6 +3531,65 @@ export default function MapView({
       )}
 
       {/* スポット詳細モーダル */}
+      {/* 同じ座標にスポットが重なっているときの選択一覧。ピンは完全に重なって
+          しまい下のスポットを開く手段が無くなるため、タップでここに列挙する
+          (ピン側には「+N」バッジを出して重なりの存在を知らせている) */}
+      {stackSpotIds && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+          onClick={() => setStackSpotIds(null)}
+        >
+          <div
+            className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <h2 className="text-sm font-semibold">
+                この地点のスポット({stackSpotIds.length}件)
+              </h2>
+              <button
+                type="button"
+                className="text-slate-400 hover:text-slate-600"
+                aria-label="閉じる"
+                onClick={() => setStackSpotIds(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <ul className="max-h-80 divide-y overflow-y-auto">
+              {stackSpotIds.map((id) => {
+                const spot = spotById.get(id);
+                if (!spot) return null;
+                return (
+                  <li key={id}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50"
+                      onClick={() => {
+                        setStackSpotIds(null);
+                        handleSpotSelect(id);
+                      }}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">{spot.name}</span>
+                        {spot.series && (
+                          <span className="block truncate text-xs text-slate-500">
+                            {spot.series}
+                          </span>
+                        )}
+                      </span>
+                      {visitedIds.has(id) && (
+                        <span className="shrink-0 text-xs text-green-600">✓訪問済み</span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {detailSpotId && (
         <SpotDetailModal
           spotId={detailSpotId}
