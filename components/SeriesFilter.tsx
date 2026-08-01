@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo, useState } from "react";
+
 import type { Series } from "@/lib/types";
 import {
   autoTextColor,
@@ -41,27 +43,17 @@ export default function SeriesFilter({
 }) {
   if (series.length === 0) return null;
 
-  // selectになるほど選択肢が多い種別(放送回番号等)では、HTMLの複数選択リスト
-  // (ctrl/cmdクリックが要る・常に数行分の高さを取る)より、見慣れた単一選択の
-  // プルダウンの方が使いやすいため、この場合だけ単一選択にする。横幅に余裕がある
-  // ため、labelではなくseriesそのもの(短い略称ではなく完全な値)を選択肢に出す
+  // ボタンを並べきれない種別(放送回番号・作品名など)は、検索できる一覧にする。
+  // かつては単一選択のプルダウンだったが、アニメ聖地のようにシリーズが数百ある
+  // 種別では目当ての値を探せず、複数選択もできなかった
   if (series.length > SERIES_FILTER_BUTTONS_MAX) {
-    const ALL_VALUE = "";
     return (
-      <select
-        value={selected.length === 1 ? selected[0] : ALL_VALUE}
-        onChange={(e) =>
-          onChange(e.target.value === ALL_VALUE ? [] : [e.target.value as Series])
-        }
-        className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
-      >
-        <option value={ALL_VALUE}>すべて</option>
-        {series.map((r) => (
-          <option key={r} value={r}>
-            {r}
-          </option>
-        ))}
-      </select>
+      <SearchableSeriesFilter
+        series={series}
+        selected={selected}
+        onChange={onChange}
+        seriesStyles={seriesStyles}
+      />
     );
   }
 
@@ -112,6 +104,115 @@ export default function SeriesFilter({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** 一覧に一度に描く最大件数(数百件の種別で描画が重くならないようにする) */
+const SEARCH_RESULT_LIMIT = 60;
+
+/**
+ * 選択肢が多い種別向けの、検索できるシリーズ絞り込み。
+ * 選択中のシリーズをチップで出し、検索欄で絞った候補をタップでトグルする。
+ */
+function SearchableSeriesFilter({
+  series,
+  selected,
+  onChange,
+  seriesStyles,
+}: {
+  series: Series[];
+  selected: Series[];
+  onChange: (series: Series[]) => void;
+  seriesStyles: SeriesStyleDefinition[];
+}) {
+  const [query, setQuery] = useState("");
+  const matched = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return series;
+    return series.filter((r) => r.toLowerCase().includes(q));
+  }, [series, query]);
+  const shown = matched.slice(0, SEARCH_RESULT_LIMIT);
+
+  return (
+    <div className="rounded-lg border border-gray-300 bg-white">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1 border-b border-gray-100 p-2">
+          {selected.map((r) => {
+            const style = findSeriesStyle(r, seriesStyles);
+            return (
+              <button
+                key={r}
+                type="button"
+                onClick={() => onChange(selected.filter((v) => v !== r))}
+                style={{
+                  backgroundColor: style.color,
+                  color: style.textColor ?? autoTextColor(style.color),
+                }}
+                className="max-w-full truncate rounded-full px-2 py-0.5 text-xs font-medium"
+                title={`${r} を外す`}
+              >
+                {r} ✕
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="rounded-full px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100"
+          >
+            すべて解除
+          </button>
+        </div>
+      )}
+      <div className="p-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={`シリーズを検索(${series.length}件)`}
+          autoComplete="off"
+          className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+        />
+      </div>
+      <ul className="max-h-56 overflow-y-auto border-t border-gray-100">
+        {shown.map((r) => {
+          const style = findSeriesStyle(r, seriesStyles);
+          const active = selected.includes(r);
+          return (
+            <li key={r}>
+              <button
+                type="button"
+                onClick={() => onChange(toggleSelection(selected, r))}
+                className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm ${
+                  active ? "bg-blue-50 font-medium" : "hover:bg-gray-50"
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className="size-3 shrink-0 rounded-full border"
+                  style={{
+                    backgroundColor: style.color,
+                    borderColor: style.borderColor,
+                  }}
+                />
+                <span className="min-w-0 flex-1 truncate">{r}</span>
+                {active && <span className="shrink-0 text-blue-600">✓</span>}
+              </button>
+            </li>
+          );
+        })}
+        {shown.length === 0 && (
+          <li className="px-2 py-3 text-center text-sm text-gray-500">
+            該当するシリーズがありません
+          </li>
+        )}
+      </ul>
+      {matched.length > shown.length && (
+        <p className="border-t border-gray-100 px-2 py-1.5 text-xs text-gray-500">
+          ほか{matched.length - shown.length}件。検索で絞り込んでください
+        </p>
+      )}
     </div>
   );
 }
