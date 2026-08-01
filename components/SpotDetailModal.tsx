@@ -23,7 +23,10 @@ import { formatPlanDateRange } from "@/lib/planListDraft";
 import SeriesBadge from "@/components/SeriesBadge";
 import MiniMap from "@/components/MiniMap";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
-import { resolveWikipediaLang } from "@/lib/region";
+import {
+  resolveWikipediaLang,
+  resolveWikipediaTitleSource,
+} from "@/lib/region";
 import { formatCategoriesForDisplay, resolveCategories } from "@/lib/category";
 import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
@@ -315,6 +318,12 @@ export default function SpotDetailModal({
   // 参照するWikipediaの言語版(種別ごとのwikipedia_lang設定、既定'ja')
   const wikipediaLang = useMemo(
     () => resolveWikipediaLang(currentSpotType),
+    [currentSpotType]
+  );
+  // 記事を「何の名前」で探すか(種別ごとのwikipedia_title_source設定、既定'name')。
+  // 'series'の種別ではシリーズ名(アニメ聖地なら作品名)の記事を優先して開く
+  const wikipediaTitleSource = useMemo(
+    () => resolveWikipediaTitleSource(currentSpotType),
     [currentSpotType]
   );
 
@@ -877,6 +886,9 @@ export default function SpotDetailModal({
           spotName={spot.name}
           region={spot.region}
           lang={wikipediaLang}
+          primaryTitle={
+            wikipediaTitleSource === "series" ? spot.series : null
+          }
           onClose={() => setShowInfo(false)}
         />
       )}

@@ -15,6 +15,8 @@ import {
   isValidWikipediaLang,
   REGION_SCOPE_SETTING_KEY,
   WIKIPEDIA_LANG_SETTING_KEY,
+  WIKIPEDIA_TITLE_SOURCE_SETTING_KEY,
+  isValidWikipediaTitleSource,
 } from "@/lib/region";
 
 export async function PATCH(
@@ -111,6 +113,17 @@ export async function PATCH(
     ) {
       return NextResponse.json(
         { error: `${WIKIPEDIA_LANG_SETTING_KEY}は 'ja'・'en' のような言語コードである必要があります。` },
+        { status: 400 }
+      );
+    }
+    if (
+      key === WIKIPEDIA_TITLE_SOURCE_SETTING_KEY &&
+      (typeof value !== "string" || !isValidWikipediaTitleSource(value))
+    ) {
+      return NextResponse.json(
+        {
+          error: `${WIKIPEDIA_TITLE_SOURCE_SETTING_KEY}は 'name'・'series' のいずれかである必要があります。`,
+        },
         { status: 400 }
       );
     }
