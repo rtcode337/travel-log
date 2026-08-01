@@ -265,7 +265,7 @@ Maps URLsの`waypoints`は9件までのため、それを超える経路は**並
 
 地図上での右クリック追加、`/[type]/admin`の追加フォーム、CSVインポート(`lib/csv.ts`+`/[type]/admin`)いずれも`app/api/spots/route.ts`の同じ挿入ロジックを通る。status未指定時の既定はroleにより`user`は`private`、それ以外(moderator/spot_admin/admin)は`pending`(`ALLOWED_STATUS_BY_ROLE`が許す範囲でstatusを明示すれば`published`等も選べる)。CSVインポートは`/[type]/admin`(spot_admin/admin専用)からのみ行える経路のため、`AdminView`側で常に`status: 'published'`を明示し、承認待ちを経由せず即座に公開する。それ以外の経路(右クリック追加・追加フォームでの既定)は引き続き承認待ちを通り、承認・却下は`/[type]/admin`側の別ステップで行う。
 
-地図の長押し/右クリックメニューには「ここにスポットを追加」に加えて**「探訪スポットを追加」**がある(`MapView`の`visitSpotAt`)。後者は`AddSpotModal`を`withVisit`で開き、名前とよみがなの間に訪問記録の入力欄(訪問日時・写真・メモ。口コミは無し)を出し、**スポット作成後にそのスポットへ訪問記録を1件(`api.visits.create`)つける**。訪問記録欄は`VisitFormModal`と共通の`VisitFields`コンポーネント(写真の縮小・Exif撮影日時取得は`lib/visitPhoto.ts`/`lib/exif.ts`)で、スポットの状態(公開範囲)は通常のスポット追加と同じ選択肢。
+地図の長押し/右クリックメニューには「ここにスポットを追加」に加えて「**探訪スポットを追加**」がある(`MapView`の`visitSpotAt`)。後者は`AddSpotModal`を`withVisit`で開き、名前とよみがなの間に訪問記録の入力欄(訪問日時・写真・メモ。口コミは無し)を出し、**スポット作成後にそのスポットへ訪問記録を1件(`api.visits.create`)つける**。訪問記録欄は`VisitFormModal`と共通の`VisitFields`コンポーネント(写真の縮小・Exif撮影日時取得は`lib/visitPhoto.ts`/`lib/exif.ts`)で、スポットの状態(公開範囲)は通常のスポット追加と同じ選択肢。
 
 **非公開スポットは`SpotDetailModal`の「位置を修正」から座標をドラッグで直せる**(`SpotRepositionModal`)。ドラッグできる赤マーカーの付いた地図を出し、保存でPATCHする(座標以外は既存値をそのまま送る — PATCHは`name/lat/lng/region/series/description`を無条件に上書きするため、送らないとnullで消える)。公開スポットは編集フォームの緯度経度欄で直す(この機能は非公開のみ)。
 
