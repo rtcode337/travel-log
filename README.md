@@ -89,6 +89,26 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 既存のメールアカウントと同じメールアドレスでGoogleログインした場合は自動的に紐付く。
 自由なサインアップはできず、管理者が作成したアカウントのみログインできる。
 
+**リバースプロキシ(HTTPS終端)の背後で動かす場合**、アプリが受け取るリクエストは
+プロキシからのプレーンHTTPになる。リダイレクトURIのスキームは`X-Forwarded-Proto` /
+`X-Forwarded-Host`から判断しているため、これらを送らないプロキシ(NAS内蔵の
+リバースプロキシ機能など、設定項目が無いものもある)ではリダイレクトURIが
+`http://`で組まれ、Googleコンソールに登録した`https://`のURIと一致せず認証に失敗する。
+その場合は`PUBLIC_BASE_URL`に公開URLを設定する(設定するとヘッダより優先される)。
+
+```
+PUBLIC_BASE_URL=https://travel.example.com
+```
+
+- `.env`(Docker Compose)/ `.env.local`(Dockerを使わない場合)/
+  `docker-compose.standalone.yml`冒頭の`x-public-base-url` のいずれかに書く
+- パス部分は使わず、スキーム・ホスト・ポートだけを見る
+- `https://`を設定するとセッションCookieに`Secure`属性が付く。同じインスタンスに
+  LAN内から`http://<ホスト>:3000`で直接アクセスしてもログインできなくなる点に注意
+  (公開URL経由でアクセスすること)
+- 直接`http://<ホスト>:3000`で使う場合や、`X-Forwarded-*`を送るプロキシ(nginx等で
+  設定済み)の場合は設定不要
+
 </details>
 
 ### 本番運用
@@ -106,6 +126,15 @@ echo "SESSION_SECRET=$(openssl rand -base64 32)" >> .env
 docker compose pull && docker compose up -d
 ```
 
+- Composeのプロジェクト名は本番・開発・standaloneとも`travel-log`。以前は
+  `travel-log-prod`/`travel-log-dev`に分けていたため、**それ以前から動かしている
+  ホストでは初回だけ旧スタックを止めてから起動すること**(止めずに`up`すると、
+  同じ`db/data`とポート3000を奪い合う新旧2つのスタックが並ぶ)
+
+  ```bash
+  docker compose -p travel-log-prod down          # 開発機では -p travel-log-dev -f docker-compose.dev.yml
+  docker compose pull && docker compose up -d
+  ```
 - 公開されるイメージは2つ。`ghcr.io/rtcode337/travel-log`(アプリ本体)と
   `ghcr.io/rtcode337/travel-log-db-init`(DBの準備とマイグレーション適用)
 - **DBスキーマの更新は自動**。`docker compose up`すると`db-migrate`サービスが未適用の
@@ -127,6 +156,17 @@ docker compose pull && docker compose up -d
   イメージに埋め込み、管理画面`/[種別キー]/admin`の見出し横に表示する。今動いている
   イメージがいつのどのコミットのものか、pull後の反映確認に使える(ローカル開発時など
   埋め込みが無い場合は「開発ビルド」と表示される)
+
+#### リポジトリを置けない環境(NASのコンテナマネージャー等)
+
+`.env`もクローンも置けず、管理画面にYAMLを貼り付けて起動するタイプの環境向けに
+[docker-compose.standalone.yml](docker-compose.standalone.yml)を用意している。
+`${...}`を使わず値を直書きし、bindマウントを絶対パスで書いたもの(サービス構成・
+起動順は`docker-compose.yml`と同じ)。冒頭の「ここだけ編集」——3つの置き場
+(`db` / `db/data` / `photos`)の絶対パスと`SESSION_SECRET`——を書き換えて貼り付ければ起動する。
+
+`SESSION_SECRET`は空のままだとログイン時に`SESSION_SECRET is not set`で失敗するので、
+必ず32バイト程度のランダム文字列を入れること。
 
 ## 画面
 

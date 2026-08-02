@@ -1,4 +1,4 @@
-name: travel-log-prod
+name: travel-log
 
 services:
   # dbの起動前に、bindマウント先(./db/data)の作成と所有者調整を行う
@@ -62,6 +62,10 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required (openssl rand -base64 32)}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # 公開URL(任意)。リバースプロキシがX-Forwarded-Proto/Hostを送らない構成では
+      # これを設定しないとGoogleログインのリダイレクトURIがhttp://で組まれる
+      # (lib/auth/request-url.ts)。例: https://travel.example.com
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       NODE_ENV: production
     volumes:
       # 訪問記録の写真ファイル置き場(lib/photos.ts)。DBには相対パスのみ保存される

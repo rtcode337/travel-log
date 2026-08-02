@@ -1,0 +1,127 @@
+# `.env` を置けず、リポジトリのクローンもできない実行環境向けの単体定義。
+# (NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプの環境を想定)
+#
+# docker-compose.yml との違いは2点だけ:
+#   1. `${...}` を使わず、値をYAMLに直接書く(`.env`もシェルの環境変数も無い前提のため)
+#   2. bindマウントを相対パス(./db・./photos)ではなく絶対パスで書く
+#      (管理画面から登録する環境では相対パスの基準が分かりにくいため)
+# サービス構成・起動順(db-init → db → db-migrate → app)は本番用と同じ。
+#
+# 使い方:
+#   1. 「ここだけ編集」の置き場を、そのホストの絶対パスに書き換える
+#   2. SESSION_SECRET に32バイト程度のランダム文字列を設定する(必須)
+#   3. その内容を管理画面に貼り付けて起動する
+#   4. http://<ホスト>:3000/ を開く(初回アクセス時のセットアップで管理者アカウントを作る)
+#
+# 更新は管理画面の「イメージを最新にして再作成」相当の操作(`docker compose pull` +
+# `up -d`)だけでよい。未適用のマイグレーションは db-migrate が自動で当てる。
+# 特定時点に戻したいときは、下の2つの image のタグを `latest` から
+# `sha-xxxxxxx`(Actionsが付けるコミットSHAタグ)に変える —— ただしマイグレーションは
+# 前進のみで巻き戻せないため、スキーマ変更を伴うリリースを戻すにはDBのリストアが要る。
+#
+# 通常の(リポジトリを配置できる)環境では docker-compose.yml を使う
+# ——こちらは値の直書きぶん古くなりやすい。
+
+name: travel-log
+
+# ---- ここだけ編集: データの置き場(すべてホストの絶対パス) ----
+# db     … db-init が中に data/ を作る親ディレクトリ
+# db-data… Postgresの実データ。**必ず db の直下の data にすること**
+#          (db-init が /db/data を作って postgres(uid/gid 70)に chown するため)
+# photos … 訪問記録の写真。DBには相対パスだけが入るので、DBと一緒にバックアップする
+# いずれも無ければDockerが自動作成するが、先に作っておくのが確実。
+x-db-dir: &db-dir "/path/to/travel-log/db"
+x-db-data-dir: &db-data-dir "/path/to/travel-log/db/data"
+x-photos-dir: &photos-dir "/path/to/travel-log/photos"
+
+# ---- ここだけ編集: アプリの設定(.env の代わり) ----
+# セッションCookieの署名鍵(必須)。32バイト程度のランダム文字列を入れる
+# (生成例: openssl rand -base64 32)。空のままだとログイン時に
+# "SESSION_SECRET is not set" で失敗する。変更すると既存のログインセッションは
+# すべて無効になる(再ログインすれば直る)。
+x-session-secret: &session-secret ""
+# Googleでログイン(任意)。空のままならメールログインのみ。
+# 取得方法・リダイレクトURIの設定はREADMEの「Googleログインの設定」参照
+x-google-client-id: &google-client-id ""
+x-google-client-secret: &google-client-secret ""
+# 公開URL(任意。例: "https://travel.example.com")。
+# リバースプロキシ越し(HTTPS終端あり)で使う場合、プロキシが X-Forwarded-Proto /
+# X-Forwarded-Host を送らない構成だと、Googleログインのリダイレクトが http:// で
+# 組まれて認証に失敗する。そのときはここに公開URLを書いて明示する。
+# 直接 http://<ホスト>:3000 で使うなら空のままでよい。
+x-public-base-url: &public-base-url ""
+
+services:
+  # dbの起動前に、bindマウント先(db/data)の作成と所有者調整を行うワンショット
+  # (詳細は db/entrypoint.sh の prepare 関数のコメント参照)。
+  db-init:
+    image: ghcr.io/rtcode337/travel-log-db-init:latest
+    user: root
+    volumes:
+      - type: bind
+        source: *db-dir
+        target: /db
+    command: ["prepare"]
+    restart: "no"
+
+  db:
+    image: postgres:16-alpine
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      # ホストにポート公開しないコンテナ間だけの接続。変えるなら db-migrate の
+      # PG* と app の DATABASE_URL も同じ値に揃えること
+      POSTGRES_USER: travel_log
+      POSTGRES_PASSWORD: travel_log
+      POSTGRES_DB: travel_log
+    volumes:
+      # db/init はマウントしない。スキーマ本体(01_schema.sql)は db-migrate が流す
+      - type: bind
+        source: *db-data-dir
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U travel_log"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # スキーマ本体(/init/01_schema.sql)と未適用のマイグレーション(/migrations/*.sql)を
+  # 順に適用するワンショット。適用済みリビジョンは schema_migrations テーブルに記録され、
+  # 2回目以降は何もせず終了する。app はこれが正常終了するまで起動しない
+  # (古いスキーマのままアプリが動くのを防ぐ)。
+  db-migrate:
+    image: ghcr.io/rtcode337/travel-log-db-init:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: travel_log
+      PGPASSWORD: travel_log
+      PGDATABASE: travel_log
+    restart: "no"
+
+  app:
+    image: ghcr.io/rtcode337/travel-log:latest
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
+      # 値は冒頭の「ここだけ編集」にまとめてある
+      SESSION_SECRET: *session-secret
+      GOOGLE_CLIENT_ID: *google-client-id
+      GOOGLE_CLIENT_SECRET: *google-client-secret
+      PUBLIC_BASE_URL: *public-base-url
+      NODE_ENV: production
+    volumes:
+      # 訪問記録の写真ファイル置き場(lib/photoStorage.ts)。DBには相対パスのみ保存される
+      - type: bind
+        source: *photos-dir
+        target: /app/photos
+    ports:
+      # host:container。LAN内からのみ見える状態にしておくこと
+      - "3000:3000"
+    restart: unless-stopped

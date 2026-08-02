@@ -1,4 +1,4 @@
-name: travel-log-dev
+name: travel-log
 
 services:
   db:
@@ -49,6 +49,9 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-local-dev-secret-change-me}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # 公開URL(任意)。本番と同じ挙動を手元で試したいときだけ設定する
+      # (lib/auth/request-url.ts)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       NODE_ENV: development
     ports:
       - "3000:3000"
