@@ -15,7 +15,9 @@ npm run build                                            # 本番ビルド(型�
 
 どちらにも`predev`/`prebuild`で`npm run copy-maplibre-worker`(`scripts/copy-maplibre-worker.mjs`)が付いており、MapLibreのワーカースクリプトを`node_modules`から`public/maplibre-gl/`へコピーする(生成物のためgit管理外。理由は下記「MapLibreのワーカースクリプト」)。`next dev`/`next build`を直接叩くとこのコピーが走らないため、地図が真っ白になったらまず`npm run copy-maplibre-worker`を実行すること。
 
-`docker-compose.yml`(本番用)と`docker-compose.dev.yml`(開発用)はプロジェクト名を分けてある(`travel-log-prod`/`travel-log-dev`)ため、同一ホスト上で両方動かしてもコンテナ・イメージ・ボリュームは衝突しない。
+3つのcomposeファイル(`docker-compose.yml`=本番用 / `docker-compose.dev.yml`=開発用 / `docker-compose.standalone.yml`)はどれもプロジェクト名を`travel-log`に揃えてある。同じホスト上で本番用と開発用を**同時に**は動かせない(元々ポート3000も`db/data`も共有しているため、名前を分けても同時起動はできなかった)。切り替えるときは先に`docker compose -f <今動いている方> down`すること。
+
+`docker-compose.standalone.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。
 
 このプロジェクトにテストスイート/テストコマンドは存在しない。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
 
@@ -79,6 +81,8 @@ Next.jsのRoute Handlersのみで、別立てのAPIサーバーは存在しな�
 ### 認証
 
 NextAuthではなく自前実装。`lib/auth/session.ts`がHMAC-SHA256で署名したCookie(Web Crypto APIのみ使用、外部依存なし)を発行し、`proxy.ts`(Next.js 16で`middleware.ts`から改名されたもの。Node実行)とRoute Handlersの両方で同じロジックにより検証できるようにしている。Cookieには`{ sub: userId, exp }`のみを持たせ、roleは意図的にCookieに含めていない — `lib/auth/current-user.ts`経由で毎リクエストDBから引き直すことで、管理者によるロール変更やDB作り直しが古いCookieのまま反映されない事態を防いでいる。`proxy.ts`は`/login`と`/api/**`、および`/manifest.webmanifest`(ブラウザのmanifest取得は既定でCookieを送らないため、ガードするとPWAとしてインストールできなくなる)以外の全ルートをガードする。
+
+外向きのURL(GoogleログインのリダイレクトURIとCookieの`Secure`属性)は`lib/auth/request-url.ts`が組み立てる。優先順位は`PUBLIC_BASE_URL`(環境変数) → `X-Forwarded-Proto`/`X-Forwarded-Host` → リクエスト自身のURL。リバースプロキシがforwardedヘッダを送らない構成(NAS内蔵のリバースプロキシ等)では、`PUBLIC_BASE_URL`を設定しないとリダイレクトURIが`http://`で組まれてGoogleログインが失敗する。**外向きのURLを組む処理を増やすときは`request.url`を直接使わず、必ずこのモジュール経由にすること**。
 
 ### PWA(インストール可能化)
 
