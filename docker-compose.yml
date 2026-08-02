@@ -9,6 +9,12 @@ services:
     user: root
     volumes:
       - ./db:/db
+    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql/data に何も
+    # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
+    # db-init/db-migrateはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
+    # 使い捨てのtmpfsを当てて抑止する
+    tmpfs:
+      - /var/lib/postgresql/data
     command: ["prepare"]
     restart: "no"
 
@@ -47,6 +53,9 @@ services:
       PGUSER: travel_log
       PGPASSWORD: travel_log
       PGDATABASE: travel_log
+    # 匿名ボリュームの抑止(理由はdb-init参照)
+    tmpfs:
+      - /var/lib/postgresql/data
     restart: "no"
 
   app:
