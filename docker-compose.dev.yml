@@ -60,7 +60,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       NODE_ENV: development
     ports:
-      - "3000:3000"
+      - "7040:7040"
     volumes:
       - .:/app
       - /app/node_modules

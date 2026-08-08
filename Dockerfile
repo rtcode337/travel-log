@@ -6,7 +6,7 @@ RUN npm ci
 # ローカル開発用(docker-compose.dev.yml): next dev + ホットリロード
 FROM deps AS dev
 COPY . .
-EXPOSE 3000
+EXPOSE 7040
 CMD ["npm", "run", "dev"]
 
 # 本番ビルド用の中間ステージ
@@ -30,5 +30,8 @@ COPY --from=builder /app/.next/static ./.next/static
 # publicにはPWAのアイコン(public/icons)と、MapLibreのワーカースクリプト
 # (public/maplibre-gl。builderのprebuildが生成する。lib/maplibre.ts参照)が入る
 COPY --from=builder /app/public ./public
-EXPOSE 3000
+# 待ち受けポート。standaloneのserver.jsはPORT環境変数を読む(next dev/start側は
+# package.jsonのscriptsで-p 7040を指定していて、ここと両方を揃えて変えること)
+ENV PORT=7040
+EXPOSE 7040
 CMD ["node", "server.js"]

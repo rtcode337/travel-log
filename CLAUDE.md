@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## コマンド
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:3000, next dev+ホットリロード)+Postgres。スキーマ作成・未適用マイグレーションはdb-migrateサービスが自動で行う
+docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:7040, next dev+ホットリロード)+Postgres。スキーマ作成・未適用マイグレーションはdb-migrateサービスが自動で行う
 docker compose pull && docker compose up -d            # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。未適用のマイグレーションはdb-migrateサービスが自動で当てる。SESSION_SECRET環境変数が必須(.env可)
 npm run dev                                             # Next.js開発サーバー(ローカルPostgresを直接使う場合のみ)
 npm run build                                            # 本番ビルド(型チェック込み)
@@ -15,7 +15,7 @@ npm run build                                            # 本番ビルド(型�
 
 どちらにも`predev`/`prebuild`で`npm run copy-maplibre-worker`(`scripts/copy-maplibre-worker.mjs`)が付いており、MapLibreのワーカースクリプトを`node_modules`から`public/maplibre-gl/`へコピーする(生成物のためgit管理外。理由は下記「MapLibreのワーカースクリプト」)。`next dev`/`next build`を直接叩くとこのコピーが走らないため、地図が真っ白になったらまず`npm run copy-maplibre-worker`を実行すること。
 
-3つのcomposeファイル(`docker-compose.yml`=本番用 / `docker-compose.dev.yml`=開発用 / `docker-compose.standalone.yml`)はどれもプロジェクト名を`travel-log`に揃えてある。同じホスト上で本番用と開発用を**同時に**は動かせない(元々ポート3000も`db/data`も共有しているため、名前を分けても同時起動はできなかった)。切り替えるときは先に`docker compose -f <今動いている方> down`すること。
+3つのcomposeファイル(`docker-compose.yml`=本番用 / `docker-compose.dev.yml`=開発用 / `docker-compose.standalone.yml`)はどれもプロジェクト名を`travel-log`に揃えてある。同じホスト上で本番用と開発用を**同時に**は動かせない(ポート7040も`db/data`も共有しているため、名前を分けても同時起動はできない)。切り替えるときは先に`docker compose -f <今動いている方> down`すること。
 
 `docker-compose.standalone.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。
 

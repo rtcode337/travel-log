@@ -51,7 +51,7 @@ Node や Postgres をローカルにインストールする必要はない。�
 (`tourist`=観光地、データは空)を作成する。以降スキーマに変更が入った場合も、
 起動するたびに未適用のマイグレーションが自動で当たる。
 
-http://localhost:3000 を開くと `/login` にリダイレクトされる。初回はアカウントが
+http://localhost:7040 を開くと `/login` にリダイレクトされる。初回はアカウントが
 存在しないため「アカウントを作成」フォームが表示されるので、メールアドレスと
 パスワード(8文字以上)を入力して初回アカウントを作成する(自動的に管理者になる)。
 他のユーザーを増やしたい場合は、管理者が`/[type]/admin`の「ユーザー管理」から追加する。
@@ -78,7 +78,7 @@ http://localhost:3000 を開くと `/login` にリダイレクトされる。初
 
 1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) で
    OAuthクライアントID(種類: ウェブアプリケーション)を作成する
-2. 「承認済みのリダイレクトURI」に `http://localhost:3000/api/auth/google/callback`
+2. 「承認済みのリダイレクトURI」に `http://localhost:7040/api/auth/google/callback`
    を追加する(本番環境ではそのドメインのURLも追加する)
 3. 発行された クライアントID / クライアントシークレット を設定する
    - Docker Compose の場合: リポジトリ直下に `.env` ファイルを作成し、
@@ -104,9 +104,9 @@ PUBLIC_BASE_URL=https://travel.example.com
   `docker-compose.standalone.yml`冒頭の`x-public-base-url` のいずれかに書く
 - パス部分は使わず、スキーム・ホスト・ポートだけを見る
 - `https://`を設定するとセッションCookieに`Secure`属性が付く。同じインスタンスに
-  LAN内から`http://<ホスト>:3000`で直接アクセスしてもログインできなくなる点に注意
+  LAN内から`http://<ホスト>:7040`で直接アクセスしてもログインできなくなる点に注意
   (公開URL経由でアクセスすること)
-- 直接`http://<ホスト>:3000`で使う場合や、`X-Forwarded-*`を送るプロキシ(nginx等で
+- 直接`http://<ホスト>:7040`で使う場合や、`X-Forwarded-*`を送るプロキシ(nginx等で
   設定済み)の場合は設定不要
 
 </details>
@@ -129,7 +129,7 @@ docker compose pull && docker compose up -d
 - Composeのプロジェクト名は本番・開発・standaloneとも`travel-log`。以前は
   `travel-log-prod`/`travel-log-dev`に分けていたため、**それ以前から動かしている
   ホストでは初回だけ旧スタックを止めてから起動すること**(止めずに`up`すると、
-  同じ`db/data`とポート3000を奪い合う新旧2つのスタックが並ぶ)
+  同じ`db/data`を奪い合う新旧2つのスタックが並ぶ)
 
   ```bash
   docker compose -p travel-log-prod down          # 開発機では -p travel-log-dev -f docker-compose.dev.yml

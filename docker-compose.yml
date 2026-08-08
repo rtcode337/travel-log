@@ -80,5 +80,5 @@ services:
       # 訪問記録の写真ファイル置き場(lib/photos.ts)。DBには相対パスのみ保存される
       - ./photos:/app/photos
     ports:
-      - "3000:3000"
+      - "7040:7040"
     restart: unless-stopped
