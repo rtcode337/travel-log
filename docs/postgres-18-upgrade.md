@@ -24,7 +24,7 @@ docker compose down
 mv db/data db/data.pg16
 
 # 3. 新しい定義とイメージに更新して DB だけ起動する
-#    (db/data は db-init が作り直し、18 の空クラスタが db/data/18/docker に初期化される)
+#    (db/data は Docker が作り直し、18 の空クラスタが db/data/18/docker に初期化される)
 git pull
 docker compose pull
 docker compose up -d db
@@ -32,7 +32,7 @@ docker compose up -d db
 # 4. ダンプを流し込む(db が healthy になるのを待ってから)
 docker compose exec -T db psql -U travel_log -d travel_log -v ON_ERROR_STOP=1 < backup-pg16.sql
 
-# 5. 残りを起動する(db-migrate は適用済み記録を見て何もせず終了する)
+# 5. 残りを起動する(init サービスは適用済み記録を見て何もせず終了する)
 docker compose up -d
 ```
 
@@ -52,8 +52,10 @@ docker exec -i <db> pg_dump -U travel_log --clean --if-exists travel_log > backu
 # 2. 管理画面でスタックを停止してから、旧データを退避する(消さずに残しておく)。
 #    対象は docker-compose.yml ならクローン直下の db/data、standalone なら
 #    YAML 冒頭の x-db-data-dir のパス。postgres ユーザー(uid 70)所有なので
-#    root 権限が要る。退避後に作り直す必要はない(次回起動時に db-init が作る)
+#    root 権限が要る。退避したら空のディレクトリを作り直しておく
+#    (bindマウント先を自動作成しない環境があるため)
 sudo mv <データディレクトリ> <同じパス>.pg16
+sudo mkdir <データディレクトリ>
 
 # 3. 定義とイメージを更新して、管理画面でスタックを起動する
 #    - リポジトリのクローン運用: git pull しておく

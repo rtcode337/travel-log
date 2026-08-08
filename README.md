@@ -47,7 +47,7 @@ docker compose -f docker-compose.dev.yml up --build
 ```
 
 Node や Postgres をローカルにインストールする必要はない。初回起動時、
-`db-migrate` コンテナが `01_schema.sql` を自動実行してテーブルと既定のスポット種別
+`init` コンテナが `01_schema.sql` を自動実行してテーブルと既定のスポット種別
 (`tourist`=観光地、データは空)を作成する。以降スキーマに変更が入った場合も、
 起動するたびに未適用のマイグレーションが自動で当たる。
 
@@ -136,15 +136,15 @@ docker compose pull && docker compose up -d
   docker compose pull && docker compose up -d
   ```
 - 公開されるイメージは2つ。`ghcr.io/rtcode337/travel-log`(アプリ本体)と
-  `ghcr.io/rtcode337/travel-log-db-init`(DBの準備とマイグレーション適用)
+  `ghcr.io/rtcode337/travel-log-db-init`(スキーマ・マイグレーション適用。`init`サービスが使う)
 - **PostgreSQL 16 時代の`db/data`を持つ既存環境は、更新前に1回だけデータ移行が必要**
   ([docs/postgres-18-upgrade.md](docs/postgres-18-upgrade.md))。移行せずに起動すると
   dbコンテナが起動に失敗する(データは壊れない)
-- **DBスキーマの更新は自動**。`docker compose up`すると`db-migrate`サービスが未適用の
+- **DBスキーマの更新は自動**。`docker compose up`すると`init`サービスが未適用の
   マイグレーションを順に当ててから`app`を起動する(失敗した場合は`app`も起動しないので
   古いスキーマのまま動くことはない)。適用状況は
   `docker compose exec db psql -U travel_log -d travel_log -c "select * from schema_migrations"`、
-  ログは`docker compose logs db-migrate`で確認できる
+  ログは`docker compose logs init`で確認できる
 - GitHub Actions(`GITHUB_TOKEN`)から公開したパッケージはリポジトリに自動リンクされ、
   可視性もリポジトリと同じ(=public)になるため、追加設定なしで匿名pullできる。
   リポジトリをprivateにした場合は本番ホストで`docker login ghcr.io`

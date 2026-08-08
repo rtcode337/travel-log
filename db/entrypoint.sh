@@ -1,11 +1,7 @@
 #!/bin/sh
-# DBの準備・マイグレーション適用(db/Dockerfile のENTRYPOINT)。
-#
-#   db-init prepare … db/data の作成と所有者調整。dbサービスの起動前に走る
-#   db-init migrate … スキーマ本体(/init/01_schema.sql)と /migrations の未適用SQLを
-#                     適用する。dbサービスの起動後に走る
-#
-# どちらも1回実行して終了するワンショット(compose側は restart: "no")。
+# スキーマ本体(/init/01_schema.sql)と /migrations の未適用SQLの適用
+# (db/Dockerfile のENTRYPOINT。composeの init サービス)。
+# dbサービスの起動後に1回実行して終了するワンショット(compose側は restart: "no")。
 set -eu
 
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
@@ -14,20 +10,6 @@ SCHEMA_FILE="${SCHEMA_FILE:-/init/01_schema.sql}"
 SCHEMA_VERSION=000_init_schema
 # マイグレーションの同時実行を防ぐためのadvisory lockのキー(任意の定数)
 LOCK_KEY=8241973
-
-prepare() {
-  # db/dataは.gitignore対象でgit管理下になく、cloneした直後は存在しない。dbサービスが
-  # 直接./db/dataをbindマウントすると、環境によってはホスト側にディレクトリがない状態で
-  # コンテナ起動そのものが失敗しうるため、ここで先に作ってpostgres(uid/gid 70)に
-  # 所有者を揃えておく。
-  # ここで触るのはgit管理外のdb/dataだけにすること — かつてはdb/initにもchmodを
-  # かけていたが、git管理下のファイルのパーミッションをrootで書き換えるため、
-  # db/init/01_schema.sqlに変更が入るとホスト側のgit pullが失敗するようになっていた
-  # (スキーマ本体はdbサービスにマウントせず、migrate側が流す方式に変えて解消した)
-  mkdir -p /db/data
-  chown -R 70:70 /db/data
-  echo "db-init: prepared /db/data"
-}
 
 wait_for_db() {
   # compose側でdbのhealthcheck完了を待ってから起動する想定だが、
@@ -101,11 +83,4 @@ migrate() {
   echo "db-init: migrations done (applied=$applied, skipped=$skipped)"
 }
 
-case "${1:-migrate}" in
-  prepare) prepare ;;
-  migrate) migrate ;;
-  *)
-    echo "usage: db-init [prepare|migrate]" >&2
-    exit 64
-    ;;
-esac
+migrate

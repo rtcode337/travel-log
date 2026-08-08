@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## コマンド
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:7040, next dev+ホットリロード)+Postgres。スキーマ作成・未適用マイグレーションはdb-migrateサービスが自動で行う
-docker compose pull && docker compose up -d            # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。未適用のマイグレーションはdb-migrateサービスが自動で当てる。SESSION_SECRET環境変数が必須(.env可)
+docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:7040, next dev+ホットリロード)+Postgres。スキーマ作成・未適用マイグレーションはinitサービスが自動で行う
+docker compose pull && docker compose up -d            # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。未適用のマイグレーションはinitサービスが自動で当てる。SESSION_SECRET環境変数が必須(.env可)
 npm run dev                                             # Next.js開発サーバー(ローカルPostgresを直接使う場合のみ)
 npm run build                                            # 本番ビルド(型チェック込み)
 ```
@@ -35,20 +35,21 @@ DB定義は`db/init/01_schema.sql`の1ファイルにすべてまとまってい
 
 ### DBの初期化・マイグレーションの流れ
 
-composeは`db-init` → `db` → `db-migrate` → `app`の順に起動する。`db-init`と`db-migrate`は同じイメージ(`db/Dockerfile`、`db/entrypoint.sh`のサブコマンド違い)で、どちらも1回走って終了するワンショット。
+composeは`db` → `init` → `app`の順に起動する。
 
 | サービス | 役割 | タイミング |
 |---|---|---|
-| `db-init` (`prepare`) | `db/data`の作成と所有者/パーミッション調整 | dbの起動**前** |
-| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない) | — |
-| `db-migrate` (`migrate`) | スキーマ本体(`/init/01_schema.sql`)と`/migrations`の未適用SQLを適用し`schema_migrations`に記録 | dbのhealthcheck通過**後** |
-| `app` | Next.js。`db-migrate`が正常終了するまで起動しない | 最後 |
+| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない)。`db/data`が無ければDockerが作り、所有者はpostgresのエントリポイントが自分で揃える | — |
+| `init` | スキーマ本体(`/init/01_schema.sql`)と`/migrations`の未適用SQLを適用し`schema_migrations`に記録するワンショット(`db/Dockerfile`、`db/entrypoint.sh`) | dbのhealthcheck通過**後** |
+| `app` | Next.js。`init`が正常終了するまで起動しない | 最後 |
 
-スキーマ本体もマイグレーションSQLも`db-init`イメージに焼き込まれるため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される。マイグレーションが失敗すると`db-migrate`が非ゼロ終了し、`app`も起動しないため、古いスキーマのままアプリが動くことはない。
+かつては`db/data`の作成とchownを行う`db-init`サービス(prepareサブコマンド)がdbの起動前にあったが、postgresのエントリポイントが同じことを自分でやるため廃止した。「ホスト側にディレクトリが無くても起動できる」が狙いだったものの、それが必要なstandalone環境ほどbindマウント先の自動作成に頼れず、結局あらかじめ作っておく運用になっていた。GHCRのイメージ名(`travel-log-db-init`)はこの名残で、`init`サービスが使い続けている。
+
+スキーマ本体もマイグレーションSQLも`travel-log-db-init`イメージに焼き込まれるため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される。マイグレーションが失敗すると`init`が非ゼロ終了し、`app`も起動しないため、古いスキーマのままアプリが動くことはない。
 
 `01_schema.sql`は`schema_migrations`上では`000_init_schema`という名前の「一番先頭のマイグレーション」として扱う。空のDBには実行し、既にテーブルがあるDB(旧方式でinitdbが作ったもの)には実行せず適用済みとして記録するだけにするので、既存の本番DBをそのまま引き継げる。
 
-**`db/init`をdbコンテナにマウントしないのは意図的**。かつては`docker-entrypoint-initdb.d`に`:ro`マウントし、`db-init`が`chmod -R a+rX`をかけていたが、git管理下のファイルのパーミッションをrootで書き換えるため、`01_schema.sql`を更新するとホスト側の`git pull`が失敗するようになっていた。スキーマ本体もイメージ側から流す方式にして解消した(`prepare`が触るのはgit管理外の`db/data`だけ)。
+**`db/init`をdbコンテナにマウントしないのは意図的**。かつては`docker-entrypoint-initdb.d`に`:ro`マウントし、起動前処理が`chmod -R a+rX`をかけていたが、git管理下のファイルのパーミッションをrootで書き換えるため、`01_schema.sql`を更新するとホスト側の`git pull`が失敗するようになっていた。スキーマ本体もイメージ側から流す方式にして解消した(コンテナがホスト側で触るのはgit管理外の`db/data`だけ)。
 
 開発環境では、スキーマを変えたら`db/data/`を捨てて作り直すのが手軽(移行スクリプトの検証は下記の使い捨てDBで行う)。
 

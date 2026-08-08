@@ -23,7 +23,7 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
 
-  # Dockerfileのベースイメージ(アプリ本体=node、db-init=postgres)
+  # Dockerfileのベースイメージ(アプリ本体=node、DB用イメージ=postgres)
   - package-ecosystem: "docker"
     directories:
       - "/"

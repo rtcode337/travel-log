@@ -10,11 +10,11 @@
 
 ## 適用は自動
 
-`docker compose up`すると`db-migrate`サービス(`db/Dockerfile`のイメージ、`migrate`サブコマンド)が
+`docker compose up`すると`init`サービス(`db/Dockerfile`のイメージ)が
 dbの起動を待って、スキーマ本体と未適用のスクリプトを連番順に当てる。手で流す必要はない。
 
 - 適用済みのリビジョンは`schema_migrations`テーブルに記録され、2回目以降はスキップされる
-- `app`サービスは`db-migrate`が**正常終了するまで起動しない**(古いスキーマのままアプリが
+- `app`サービスは`init`が**正常終了するまで起動しない**(古いスキーマのままアプリが
   動くのを防ぐ)。マイグレーションが失敗したらアプリも上がらないので、失敗に気づける
 - 1本のスクリプトとその適用記録は1トランザクションにまとまっている。途中で失敗すれば
   記録も残らないため、スクリプトを直して`docker compose up`し直せばよい
@@ -24,7 +24,7 @@ dbの起動を待って、スキーマ本体と未適用のスクリプトを連
 docker compose exec -T db psql -U travel_log -d travel_log -c "select version, applied_at from schema_migrations order by version"
 
 # ログを見る
-docker compose logs db-migrate
+docker compose logs init
 ```
 
 ## 書き方のルール
@@ -48,7 +48,7 @@ docker compose logs db-migrate
 # 1. 旧スキーマのダンプを復元したDBにマイグレーションを当てる
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres -c "create database t_old"
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d t_old < <旧スキーマのダンプ>.sql
-docker compose -f docker-compose.dev.yml run --rm -e PGDATABASE=t_old db-migrate
+docker compose -f docker-compose.dev.yml run --rm -e PGDATABASE=t_old init
 
 # 2. 最新スキーマで新規作成したDBを用意する
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres -c "create database t_fresh"
