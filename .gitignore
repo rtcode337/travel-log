@@ -21,6 +21,11 @@ yarn-error.log*
 .env
 .env*.local
 
+# standalone用composeの実値入りコピー(雛形は docker-compose.standalone.example.yml)。
+# この形式は SESSION_SECRET 等を直書きするので、コピーした側はコミットしない
+# (.env.example と .env の関係と同じ)
+/docker-compose.standalone.yml
+
 # Postgresの実データ(docker-compose.yml/docker-compose.dev.ymlのbindマウント先)
 # 個人情報を含むため絶対にコミットしない。ディレクトリ自体はdb-initサービス
 # (docker-compose.yml)が起動時にmkdirするので.gitkeepは不要。中身ではなく

@@ -15,9 +15,9 @@ npm run build                                            # 本番ビルド(型�
 
 どちらにも`predev`/`prebuild`で`npm run copy-maplibre-worker`(`scripts/copy-maplibre-worker.mjs`)が付いており、MapLibreのワーカースクリプトを`node_modules`から`public/maplibre-gl/`へコピーする(生成物のためgit管理外。理由は下記「MapLibreのワーカースクリプト」)。`next dev`/`next build`を直接叩くとこのコピーが走らないため、地図が真っ白になったらまず`npm run copy-maplibre-worker`を実行すること。
 
-3つのcomposeファイル(`docker-compose.yml`=本番用 / `docker-compose.dev.yml`=開発用 / `docker-compose.standalone.yml`)はどれもプロジェクト名を`travel-log`に揃えてある。同じホスト上で本番用と開発用を**同時に**は動かせない(ポート7040も`db/data`も共有しているため、名前を分けても同時起動はできない)。切り替えるときは先に`docker compose -f <今動いている方> down`すること。
+3つのcomposeファイル(`docker-compose.yml`=本番用 / `docker-compose.dev.yml`=開発用 / `docker-compose.standalone.example.yml`)はどれもプロジェクト名を`travel-log`に揃えてある。同じホスト上で本番用と開発用を**同時に**は動かせない(ポート7040も`db/data`も共有しているため、名前を分けても同時起動はできない)。切り替えるときは先に`docker compose -f <今動いている方> down`すること。
 
-`docker-compose.standalone.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。
+`docker-compose.standalone.example.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義の雛形。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。**リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
 
 このプロジェクトにテストスイート/テストコマンドは存在しない。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
 

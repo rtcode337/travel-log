@@ -101,7 +101,7 @@ PUBLIC_BASE_URL=https://travel.example.com
 ```
 
 - `.env`(Docker Compose)/ `.env.local`(Dockerを使わない場合)/
-  `docker-compose.standalone.yml`冒頭の`x-public-base-url` のいずれかに書く
+  standalone用のコピー(`docker-compose.standalone.yml`)冒頭の`x-public-base-url` のいずれかに書く
 - パス部分は使わず、スキーム・ホスト・ポートだけを見る
 - `https://`を設定するとセッションCookieに`Secure`属性が付く。同じインスタンスに
   LAN内から`http://<ホスト>:7040`で直接アクセスしてもログインできなくなる点に注意
@@ -163,10 +163,12 @@ docker compose pull && docker compose up -d
 #### リポジトリを置けない環境(NASのコンテナマネージャー等)
 
 `.env`もクローンも置けず、管理画面にYAMLを貼り付けて起動するタイプの環境向けに
-[docker-compose.standalone.yml](docker-compose.standalone.yml)を用意している。
+[docker-compose.standalone.example.yml](docker-compose.standalone.example.yml)を用意している。
 `${...}`を使わず値を直書きし、bindマウントを絶対パスで書いたもの(サービス構成・
-起動順は`docker-compose.yml`と同じ)。冒頭の「ここだけ編集」——3つの置き場
-(`db` / `db/data` / `photos`)の絶対パスと`SESSION_SECRET`——を書き換えて貼り付ければ起動する。
+起動順は`docker-compose.yml`と同じ)。`docker-compose.standalone.yml`としてコピーし
+(コピー側は`.gitignore`済み。秘密を直書きするため雛形は直接編集しない)、冒頭の
+「ここだけ編集」——3つの置き場(`db` / `db/data` / `photos`)の絶対パスと
+`SESSION_SECRET`——を書き換えて貼り付ければ起動する。
 
 `SESSION_SECRET`は空のままだとログイン時に`SESSION_SECRET is not set`で失敗するので、
 必ず32バイト程度のランダム文字列を入れること。
