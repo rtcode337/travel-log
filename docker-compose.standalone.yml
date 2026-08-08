@@ -11,7 +11,7 @@
 #   1. 「ここだけ編集」の置き場を、そのホストの絶対パスに書き換える
 #   2. SESSION_SECRET に32バイト程度のランダム文字列を設定する(必須)
 #   3. その内容を管理画面に貼り付けて起動する
-#   4. http://<ホスト>:3000/ を開く(初回アクセス時のセットアップで管理者アカウントを作る)
+#   4. http://<ホスト>:7040/ を開く(初回アクセス時のセットアップで管理者アカウントを作る)
 #
 # 更新は管理画面の「イメージを最新にして再作成」相当の操作(`docker compose pull` +
 # `up -d`)だけでよい。未適用のマイグレーションは db-migrate が自動で当てる。
@@ -48,7 +48,7 @@ x-google-client-secret: &google-client-secret ""
 # リバースプロキシ越し(HTTPS終端あり)で使う場合、プロキシが X-Forwarded-Proto /
 # X-Forwarded-Host を送らない構成だと、Googleログインのリダイレクトが http:// で
 # 組まれて認証に失敗する。そのときはここに公開URLを書いて明示する。
-# 直接 http://<ホスト>:3000 で使うなら空のままでよい。
+# 直接 http://<ホスト>:7040 で使うなら空のままでよい。
 x-public-base-url: &public-base-url ""
 
 services:
@@ -132,5 +132,5 @@ services:
         target: /app/photos
     ports:
       # host:container。LAN内からのみ見える状態にしておくこと
-      - "3000:3000"
+      - "7040:7040"
     restart: unless-stopped
