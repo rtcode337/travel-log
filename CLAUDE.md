@@ -52,7 +52,7 @@ composeは`db-init` → `db` → `db-migrate` → `app`の順に起動する。`
 
 ```bash
 docker compose -f docker-compose.dev.yml down
-rm -rf db/data/pgdata   # 既存データを捨てる(訪問記録・アカウントも消える)
+rm -rf db/data/18   # 既存データを捨てる(訪問記録・アカウントも消える)
 docker compose -f docker-compose.dev.yml up --build
 ```
 

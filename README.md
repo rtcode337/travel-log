@@ -137,6 +137,9 @@ docker compose pull && docker compose up -d
   ```
 - 公開されるイメージは2つ。`ghcr.io/rtcode337/travel-log`(アプリ本体)と
   `ghcr.io/rtcode337/travel-log-db-init`(DBの準備とマイグレーション適用)
+- **PostgreSQL 16 時代の`db/data`を持つ既存環境は、更新前に1回だけデータ移行が必要**
+  ([docs/postgres-18-upgrade.md](docs/postgres-18-upgrade.md))。移行せずに起動すると
+  dbコンテナが起動に失敗する(データは壊れない)
 - **DBスキーマの更新は自動**。`docker compose up`すると`db-migrate`サービスが未適用の
   マイグレーションを順に当ててから`app`を起動する(失敗した場合は`app`も起動しないので
   古いスキーマのまま動くことはない)。適用状況は
