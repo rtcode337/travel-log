@@ -9,7 +9,7 @@ dump → restore の移行を行う。新規に立てる環境ではこの手順
 「database files are incompatible with server」で起動に失敗する(データが壊れることはない)。
 
 手順は「`docker compose` コマンドが使えるか」で分かれる。どの YAML
-(`docker-compose.yml` / `docker-compose.standalone.yml`)で動かしているかは関係ない
+(`docker-compose.yml` / standalone用のコピー)で動かしているかは関係ない
 —— NAS のコンテナマネージャーのように管理画面でスタックを運用している環境は、
 `docker-compose.yml` を使っていても SSH からは `docker compose` を叩けないので後者の手順になる。
 
@@ -57,7 +57,8 @@ sudo mv <データディレクトリ> <同じパス>.pg16
 
 # 3. 定義とイメージを更新して、管理画面でスタックを起動する
 #    - リポジトリのクローン運用: git pull しておく
-#    - YAML 貼り付け運用: 新しい docker-compose.standalone.yml の内容に貼り替える
+#    - YAML 貼り付け運用: 新しい docker-compose.standalone.example.yml を基に
+#      自分の値を入れ直した内容に貼り替える
 #    そのうえで「イメージを最新にして再作成」相当の操作で起動する。
 #    18 の空クラスタが初期化され、スキーマも自動適用されてアプリまで起動する
 
