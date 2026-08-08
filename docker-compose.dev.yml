@@ -2,20 +2,21 @@ name: travel-log
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
-      # db/data直下(bindマウントのルート)を直接PGDATAにすると、.gitkeepのような
-      # ドットファイルの存在だけでinitdbが「マウントポイントを直接使うな」と
-      # 初期化を拒否するため、1段掘ったサブディレクトリをPGDATAにする
-      PGDATA: /var/lib/postgresql/data/pgdata
+      # postgres:18のPGDATA既定はマウント直下ではなく /var/lib/postgresql/18/docker。
+      # 16の頃に必要だったPGDATAの上書き(マウント直下だとドットファイルの存在で
+      # initdbが初期化を拒否する対策)は、既定がサブディレクトリになったので不要
     volumes:
       # db/initはマウントしない。スキーマ本体(01_schema.sql)はdb-migrateが流す
       # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
       #  スキーマを更新したときにgit pullが失敗するようになるため)
-      - ./db/data:/var/lib/postgresql/data
+      # マウント先が /var/lib/postgresql/data ではなく1段上なのは本番用と同じ理由
+      # (docker-compose.ymlのdbサービスのコメント参照)
+      - ./db/data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s
@@ -35,12 +36,12 @@ services:
       PGUSER: travel_log
       PGPASSWORD: travel_log
       PGDATABASE: travel_log
-    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql/data に何も
+    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
     # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
     # このサービスはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
     # 使い捨てのtmpfsを当てて抑止する
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql
     restart: "no"
 
   app:

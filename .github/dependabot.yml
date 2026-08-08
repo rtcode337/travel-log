@@ -42,7 +42,7 @@ updates:
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
 
-  # docker-compose直書きのイメージ(dbサービスのpostgres:16-alpine)
+  # docker-compose直書きのイメージ(dbサービスのpostgres:18-alpine)
   - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:

@@ -61,17 +61,17 @@ services:
       - type: bind
         source: *db-dir
         target: /db
-    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql/data に何も
+    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
     # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
     # db-init/db-migrateはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
     # 使い捨てのtmpfsを当てて抑止する
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql
     command: ["prepare"]
     restart: "no"
 
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     depends_on:
       db-init:
         condition: service_completed_successfully
@@ -83,9 +83,13 @@ services:
       POSTGRES_DB: travel_log
     volumes:
       # db/init はマウントしない。スキーマ本体(01_schema.sql)は db-migrate が流す
+      # postgres:18 はPGDATAが /var/lib/postgresql/18/docker で、VOLUME宣言も
+      # 1段上の /var/lib/postgresql に変わった。/var/lib/postgresql/data を
+      # マウントすると匿名ボリュームが毎回作られるため1段上をマウントする
+      # (実データはホストの <db-data-dir>/18/docker に入る)
       - type: bind
         source: *db-data-dir
-        target: /var/lib/postgresql/data
+        target: /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s
@@ -109,7 +113,7 @@ services:
       PGDATABASE: travel_log
     # 匿名ボリュームの抑止(理由は db-init 参照)
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql
     restart: "no"
 
   app:
