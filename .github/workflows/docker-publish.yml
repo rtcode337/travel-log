@@ -1,8 +1,8 @@
 # mainへのpushで本番用Dockerイメージをビルドし、GHCRへ公開する。
 # 本番環境の更新はこれらをpullするだけでよい(README「本番運用」参照)。
 #   ghcr.io/rtcode337/travel-log          … アプリ本体(Dockerfileのprodステージ、appサービス)
-#   ghcr.io/rtcode337/travel-log-db-init  … DBの準備とマイグレーション適用
-#                                           (db/Dockerfile、db-init/db-migrateサービス)
+#   ghcr.io/rtcode337/travel-log-db-init  … スキーマ・マイグレーション適用
+#                                           (db/Dockerfile、initサービス。イメージ名は旧構成の名残)
 #
 # アプリ本体は amd64/arm64 を「それぞれのアーキのネイティブランナー」で並列ビルドし、
 # ダイジェストで push したものを最後の merge ジョブでマニフェストにまとめる。

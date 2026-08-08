@@ -5,19 +5,20 @@
 #   1. `${...}` を使わず、値をYAMLに直接書く(`.env`もシェルの環境変数も無い前提のため)
 #   2. bindマウントを相対パス(./db・./photos)ではなく絶対パスで書く
 #      (管理画面から登録する環境では相対パスの基準が分かりにくいため)
-# サービス構成・起動順(db-init → db → db-migrate → app)は本番用と同じ。
+# サービス構成・起動順(db → init → app)は本番用と同じ。
 #
 # 使い方:
 #   1. このファイルをコピーして docker-compose.standalone.yml を作る(コピー側は
 #      .gitignore 済み。値を直書きする形式なので、雛形を直接編集すると
 #      SESSION_SECRET 等の秘密がコミット対象に入ってしまう)
-#   2. コピーの「ここだけ編集」の置き場を、そのホストの絶対パスに書き換える
+#   2. データの置き場のディレクトリをホストに作り、コピーの「ここだけ編集」を
+#      その絶対パスに書き換える
 #   3. SESSION_SECRET に32バイト程度のランダム文字列を設定する(必須)
 #   4. その内容を管理画面に貼り付けて起動する
 #   5. http://<ホスト>:7040/ を開く(初回アクセス時のセットアップで管理者アカウントを作る)
 #
 # 更新は管理画面の「イメージを最新にして再作成」相当の操作(`docker compose pull` +
-# `up -d`)だけでよい。未適用のマイグレーションは db-migrate が自動で当てる。
+# `up -d`)だけでよい。未適用のマイグレーションは init サービスが自動で当てる。
 # 特定時点に戻したいときは、下の2つの image のタグを `latest` から
 # `sha-xxxxxxx`(Actionsが付けるコミットSHAタグ)に変える —— ただしマイグレーションは
 # 前進のみで巻き戻せないため、スキーマ変更を伴うリリースを戻すにはDBのリストアが要る。
@@ -28,12 +29,9 @@
 name: travel-log
 
 # ---- ここだけ編集: データの置き場(すべてホストの絶対パス) ----
-# db     … db-init が中に data/ を作る親ディレクトリ
-# db-data… Postgresの実データ。**必ず db の直下の data にすること**
-#          (db-init が /db/data を作って postgres(uid/gid 70)に chown するため)
+# db-data… Postgresの実データ(所有者はpostgresのエントリポイントが自分で揃える)
 # photos … 訪問記録の写真。DBには相対パスだけが入るので、DBと一緒にバックアップする
-# いずれも無ければDockerが自動作成するが、先に作っておくのが確実。
-x-db-dir: &db-dir "/path/to/travel-log/db"
+# どちらも**あらかじめ作っておくこと**(bindマウント先を自動作成しない環境がある)。
 x-db-data-dir: &db-data-dir "/path/to/travel-log/db/data"
 x-photos-dir: &photos-dir "/path/to/travel-log/photos"
 
@@ -55,37 +53,16 @@ x-google-client-secret: &google-client-secret ""
 x-public-base-url: &public-base-url ""
 
 services:
-  # dbの起動前に、bindマウント先(db/data)の作成と所有者調整を行うワンショット
-  # (詳細は db/entrypoint.sh の prepare 関数のコメント参照)。
-  db-init:
-    image: ghcr.io/rtcode337/travel-log-db-init:latest
-    user: root
-    volumes:
-      - type: bind
-        source: *db-dir
-        target: /db
-    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
-    # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
-    # db-init/db-migrateはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
-    # 使い捨てのtmpfsを当てて抑止する
-    tmpfs:
-      - /var/lib/postgresql
-    command: ["prepare"]
-    restart: "no"
-
   db:
     image: postgres:18-alpine
-    depends_on:
-      db-init:
-        condition: service_completed_successfully
     environment:
-      # ホストにポート公開しないコンテナ間だけの接続。変えるなら db-migrate の
+      # ホストにポート公開しないコンテナ間だけの接続。変えるなら init の
       # PG* と app の DATABASE_URL も同じ値に揃えること
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
     volumes:
-      # db/init はマウントしない。スキーマ本体(01_schema.sql)は db-migrate が流す
+      # db/init はマウントしない。スキーマ本体(01_schema.sql)は init サービスが流す
       # postgres:18 はPGDATAが /var/lib/postgresql/18/docker で、VOLUME宣言も
       # 1段上の /var/lib/postgresql に変わった。/var/lib/postgresql/data を
       # マウントすると匿名ボリュームが毎回作られるため1段上をマウントする
@@ -104,7 +81,7 @@ services:
   # 順に適用するワンショット。適用済みリビジョンは schema_migrations テーブルに記録され、
   # 2回目以降は何もせず終了する。app はこれが正常終了するまで起動しない
   # (古いスキーマのままアプリが動くのを防ぐ)。
-  db-migrate:
+  init:
     image: ghcr.io/rtcode337/travel-log-db-init:latest
     depends_on:
       db:
@@ -114,7 +91,10 @@ services:
       PGUSER: travel_log
       PGPASSWORD: travel_log
       PGDATABASE: travel_log
-    # 匿名ボリュームの抑止(理由は db-init 参照)
+    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
+    # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
+    # このサービスはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
+    # 使い捨てのtmpfsを当てて抑止する
     tmpfs:
       - /var/lib/postgresql
     restart: "no"
@@ -122,7 +102,7 @@ services:
   app:
     image: ghcr.io/rtcode337/travel-log:latest
     depends_on:
-      db-migrate:
+      init:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log

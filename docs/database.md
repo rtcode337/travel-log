@@ -259,5 +259,5 @@ erDiagram
    `schema_migrations` への insert は書かない —— `db/entrypoint.sh` が受け持つ。
    詳細は [`db/migrations/README.md`](../db/migrations/README.md))
 3. **この文書も同じコミットで更新する**(テーブル・列・索引・制約・関係の変更)
-4. 適用は `docker compose up` で自動(`db-migrate` サービス)。現物を確かめるなら
+4. 適用は `docker compose up` で自動(`init` サービス)。現物を確かめるなら
    `docker compose exec db psql -U travel_log -d travel_log -c '\d+ spots'`

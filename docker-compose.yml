@@ -1,40 +1,23 @@
 name: travel-log
 
 services:
-  # dbの起動前に、bindマウント先(./db/data)の作成と所有者調整を行う
-  # ワンショット(詳細はdb/entrypoint.shのprepare関数のコメント参照)。
-  # イメージはappと同じくGitHub Actionsがビルド・公開したものをpullして使う
-  db-init:
-    image: ghcr.io/rtcode337/travel-log-db-init:latest
-    user: root
-    volumes:
-      - ./db:/db
-    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
-    # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
-    # db-init/db-migrateはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
-    # 使い捨てのtmpfsを当てて抑止する
-    tmpfs:
-      - /var/lib/postgresql
-    command: ["prepare"]
-    restart: "no"
-
   db:
     image: postgres:18-alpine
-    depends_on:
-      db-init:
-        condition: service_completed_successfully
     environment:
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
     volumes:
-      # db/initはマウントしない。スキーマ本体(01_schema.sql)はdb-migrateが流す
+      # db/initはマウントしない。スキーマ本体(01_schema.sql)はinitサービスが流す
       # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
       #  スキーマを更新したときにgit pullが失敗するようになるため)
       # postgres:18のイメージはPGDATAが /var/lib/postgresql/18/docker で、
       # VOLUME宣言も1段上の /var/lib/postgresql に変わった。マウント先を
       # /var/lib/postgresql/data のままにすると匿名ボリュームが毎回作られるため
-      # 1段上をマウントする(実データはホストの db/data/18/docker に入る)
+      # 1段上をマウントする(実データはホストの db/data/18/docker に入る)。
+      # db/dataが無ければDockerが作り、所有者はpostgresのエントリポイント
+      # (rootで起動して自分で揃える)が調整する。bindマウント先を自動作成しない
+      # 環境(一部のNAS等)では、先にディレクトリを作っておくこと
       - ./db/data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
@@ -44,10 +27,11 @@ services:
     restart: unless-stopped
 
   # スキーマ本体(/init/01_schema.sql)と未適用のマイグレーション(/migrations/*.sql)を
-  # 順に自動適用するワンショット。db-initと同じイメージのmigrateサブコマンド。
+  # 順に自動適用するワンショット。イメージはappと同じくGitHub Actionsが
+  # ビルド・公開したものをpullして使う(名前が-db-initなのはdb/Dockerfile参照)。
   # 適用済みリビジョンはschema_migrationsテーブルに記録され、2回目以降は何もせず終了する。
   # appはこれが正常終了するまで起動しない(古いスキーマのままアプリが動くのを防ぐ)
-  db-migrate:
+  init:
     image: ghcr.io/rtcode337/travel-log-db-init:latest
     depends_on:
       db:
@@ -57,7 +41,10 @@ services:
       PGUSER: travel_log
       PGPASSWORD: travel_log
       PGDATABASE: travel_log
-    # 匿名ボリュームの抑止(理由はdb-init参照)
+    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
+    # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
+    # このサービスはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
+    # 使い捨てのtmpfsを当てて抑止する
     tmpfs:
       - /var/lib/postgresql
     restart: "no"
@@ -68,7 +55,7 @@ services:
     # だけでよい(README「本番運用」参照)
     image: ghcr.io/rtcode337/travel-log:latest
     depends_on:
-      db-migrate:
+      init:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
