@@ -589,9 +589,27 @@ function routeOwnPoints(route: SpotRoute, spotById: Map<string, Spot>): Spot[] {
 }
 
 /**
+ * 選んだ日(`filters.visitedDate`。null=未選択)に訪問したスポットのID。
+ * 経路(buildVisitPath)と違い**スポットの解決が要らない**ので、まだ読み込んで
+ * いないスポットや別のスポット種別のスポットも含めて「その日に訪問したか」だけを
+ * 判定できる。ピンを絞り込みから免除するかの判定はこちらを使う
+ * (重ね表示側はスポットの実体を自前で持っているため、IDが分かれば足りる)。
+ */
+function visitedSpotIdsOn(visits: Visit[], filters: SpotFilters): Set<string> {
+  const date = filters.visitedDate;
+  if (!date) return new Set();
+  return new Set(
+    visits
+      .filter((visit) => toVisitDateKey(visit.visited_on) === date)
+      .map((visit) => visit.spot_id)
+  );
+}
+
+/**
  * 訪問順の経路の対象日(`filters.visitedDate`。null=表示しない)が選ばれているとき、
  * その日の訪問を訪問時刻の昇順に並べた経路を返す。
- * この種別に無いスポット(他の種別の訪問記録)は除く。
+ * 別のスポット種別のスポットも、座標を補完できていれば経路に含める(訪問予定リストと
+ * 同じ扱い。補完は pathExtraSpots)。解決できないスポットだけを除く。
  * 同じスポットへの再訪はそのまま複数回現れる(行って戻る線になる)が、
  * 連続する同じスポットへの訪問(同じ場所で複数回記録した場合)はまとめる
  * (長さ0の線分になり、矢印の向きが定まらないため)。
@@ -1207,12 +1225,13 @@ export default function MapView({
   const [currentLocation, setCurrentLocation] = useState<
     [number, number] | null
   >(null);
-  // 経路表示するリストに、本体種別に無い(別スポット種別を重ねて追加した)スポットが
-  // あるとき、その座標を api.spots.get で補完して経路に含める。resolvedRefで再取得を防ぐ
-  const [planListExtraSpots, setPlanListExtraSpots] = useState<Map<string, Spot>>(
+  // 経路表示の対象(訪問予定リスト・選んだ日の訪問)に、本体種別に無いスポット
+  // (別スポット種別のもの)があるとき、その座標を api.spots.get で補完して経路に
+  // 含める。resolvedRefで再取得を防ぐ
+  const [pathExtraSpots, setPathExtraSpots] = useState<Map<string, Spot>>(
     new Map()
   );
-  const planListResolvedRef = useRef<Set<string>>(new Set());
+  const pathResolvedRef = useRef<Set<string>>(new Set());
   // 訪問済み(ピンの緑色・訪問状況の絞り込み)には未訪問記録(unvisited)を数えない。
   // 訪問順の経路(buildVisitPath)・訪問日の選択肢は日時ありの未訪問記録も含むため、
   // そちらはvisitsをそのまま使う
@@ -1225,25 +1244,26 @@ export default function MapView({
     for (const s of spots) m.set(s.id, s);
     return m;
   }, [spots]);
-  // 訪問予定リストの経路を組むときのスポット解決用。本体スポットに、別種別スポットの
-  // 補完(planListExtraSpots)を足す。補完が無いときは spotById をそのまま使う(参照維持)
-  const planPathSpotById = useMemo(() => {
-    if (planListExtraSpots.size === 0) return spotById;
-    return new Map([...spotById, ...planListExtraSpots]);
-  }, [spotById, planListExtraSpots]);
+  // 経路(訪問順・訪問予定リスト)を組むときのスポット解決用。本体スポットに、
+  // 別種別スポットの補完(pathExtraSpots)を足す。
+  // 補完が無いときは spotById をそのまま使う(参照維持)
+  const pathSpotById = useMemo(() => {
+    if (pathExtraSpots.size === 0) return spotById;
+    return new Map([...spotById, ...pathExtraSpots]);
+  }, [spotById, pathExtraSpots]);
   /**
-   * 訪問順の経路の対象日を選ぶドロップダウン用に、この種別のスポットへ訪問した
-   * 日の一覧(新しい順)。他の種別の訪問しかない日は経路が0件になるため除く。
+   * 訪問順の経路の対象日を選ぶドロップダウン用に、訪問した日の一覧(新しい順)。
+   * **他の種別のスポットへの訪問しかない日も含める** —— 経路は別種別のスポットも
+   * 補完して繋ぐようになったので、その日を選べないと辿れないため。
    */
   const visitDates = useMemo(() => {
     const set = new Set<string>();
     for (const v of visits) {
-      if (!spotById.has(v.spot_id)) continue;
       const date = toVisitDateKey(v.visited_on);
       if (date) set.add(date);
     }
     return Array.from(set).sort((a, b) => b.localeCompare(a));
-  }, [visits, spotById]);
+  }, [visits]);
   // SSR・hydration時は常に既定(サーバーはlocalStorageを読めないため、初期値で
   // 読むとhydration不一致になる)。保存済み条件の復元はマウント後のuseEffectで行う
   const [filters, setFiltersState] = useState<SpotFilters>(DEFAULT_FILTERS);
@@ -1306,9 +1326,15 @@ export default function MapView({
         !visitedDate && filters.isolate === "visit" ? null : filters.isolate;
       setFilters({ ...filters, visitedDate, isolate });
       if (!visitedDate) return;
-      fitMapToSpots(buildVisitPath(visits, { ...filters, visitedDate }, spotById));
+      // 別種別のスポットは、この時点ではまだ補完(pathExtraSpots)が済んで
+      // いないことがある。その場合は解決できた分だけで移動し、補完が届いたあとの
+      // 経路の描き直しに合わせて地図を動かし直すことはしない
+      // (ユーザーの操作なしに地図が動くのを避けるため)
+      fitMapToSpots(
+        buildVisitPath(visits, { ...filters, visitedDate }, pathSpotById)
+      );
     },
-    [filters, setFilters, visits, spotById, fitMapToSpots]
+    [filters, setFilters, visits, pathSpotById, fitMapToSpots]
   );
   // 訪問予定リストを選んだとき。そのリストのスポットをリスト順に経路表示し、
   // 経路全体が画面に収まるよう地図を移動する(「表示しない」時は移動しない)
@@ -1321,10 +1347,10 @@ export default function MapView({
       setFilters({ ...filters, planListId, isolate });
       if (!planListId) return;
       fitMapToSpots(
-        buildPlanListPath(planLists, { ...filters, planListId }, planPathSpotById)
+        buildPlanListPath(planLists, { ...filters, planListId }, pathSpotById)
       );
     },
-    [filters, setFilters, planLists, planPathSpotById, fitMapToSpots]
+    [filters, setFilters, planLists, pathSpotById, fitMapToSpots]
   );
 
   // 地図で訪問予定リストを経路表示中に、そのリスト内のスポットへ新しく訪問記録したら、
@@ -1422,9 +1448,9 @@ export default function MapView({
     }
   }, [buildListParam, spotTypeKey]);
 
-  // 経路表示中のリスト・作成モード中の下書きに、本体種別で解決できないスポット
-  // (別種別を重ねて追加したもの)があれば、api.spots.get で座標を補完する
-  // (経路線から抜けないように)
+  // 経路表示中のリスト・作成モード中の下書き・選んだ日の訪問に、本体種別で解決
+  // できないスポット(別のスポット種別のもの)があれば、api.spots.get で座標を
+  // 補完する(経路線から抜けないように)
   useEffect(() => {
     const list = filters.planListId
       ? planLists.find((l) => l.id === filters.planListId)
@@ -1432,15 +1458,18 @@ export default function MapView({
     const targetIds = new Set([
       ...(list?.spot_ids ?? []),
       ...(buildDraft?.spotIds ?? []),
+      // 選んだ日に訪問したスポット。別種別のものも訪問順の経路に含めるため、
+      // 訪問予定リストと同じく補完の対象にする
+      ...visitedSpotIdsOn(visits, filters),
     ]);
     const missing = [...targetIds].filter(
-      (id) => !spotById.has(id) && !planListResolvedRef.current.has(id)
+      (id) => !spotById.has(id) && !pathResolvedRef.current.has(id)
     );
     if (missing.length === 0) return;
     // 二重取得を防ぐため先に予約する。取得結果は id をキーにした追記のみの解決
     // キャッシュに足すだけなので、この effect が(リスト変更などで)途中で作り直されても
     // 破棄しない。破棄すると予約だけ残って経路からスポットが抜けたままになる
-    missing.forEach((id) => planListResolvedRef.current.add(id));
+    missing.forEach((id) => pathResolvedRef.current.add(id));
     Promise.all(missing.map((id) => api.spots.get(id))).then((results) => {
       const fetched = results
         .map((r) => r.data)
@@ -1448,16 +1477,18 @@ export default function MapView({
       // 取得できなかった id は予約を外し、次に条件が変わったとき再取得できるようにする
       const fetchedIds = new Set(fetched.map((s) => s.id));
       for (const id of missing) {
-        if (!fetchedIds.has(id)) planListResolvedRef.current.delete(id);
+        if (!fetchedIds.has(id)) pathResolvedRef.current.delete(id);
       }
       if (fetched.length === 0) return;
-      setPlanListExtraSpots((prev) => {
+      setPathExtraSpots((prev) => {
         const next = new Map(prev);
         for (const s of fetched) next.set(s.id, s);
         return next;
       });
     });
-  }, [filters.planListId, planLists, spotById, buildDraft]);
+    // filters は visitedDate / planListId しか見ないが、両方を含む filters を
+    // そのまま渡している(visitedSpotIdsOn が filters を受け取るため)
+  }, [filters, planLists, spotById, buildDraft, visits]);
 
   // ピンのタップ: 作成モード中は追加確認へ、それ以外は従来どおり詳細表示へ
   const handleSpotSelect = useCallback((id: string) => {
@@ -1631,16 +1662,16 @@ export default function MapView({
 
   // 作成モード中の下書きの経路(選択済みスポットを選んだ順に繋いだもの)。地図に
   // 訪問予定リストと同じ紫の矢印で描き、追加・削除・並び替えに即追従する。
-  // スポットは本体+重ね表示+別種別の補完(planListExtraSpots)で解決する
+  // スポットは本体+重ね表示+別種別の補完(pathExtraSpots)で解決する
   const buildDraftPath = useMemo(() => {
     if (!buildDraft) return [];
     return buildDraft.spotIds
       .map(
         (id) =>
-          spotById.get(id) ?? overlaySpotById.get(id) ?? planListExtraSpots.get(id)
+          spotById.get(id) ?? overlaySpotById.get(id) ?? pathExtraSpots.get(id)
       )
       .filter((s): s is Spot => s !== undefined);
-  }, [buildDraft, spotById, overlaySpotById, planListExtraSpots]);
+  }, [buildDraft, spotById, overlaySpotById, pathExtraSpots]);
 
   // 作成モードに入った時点でスポットのある下書き(既存リストの編集など)は、
   // 経路が解決でき次第、全体が見えるよう一度だけ地図を移動する
@@ -2350,13 +2381,13 @@ export default function MapView({
       )
     );
     // 選んだ日に訪問したスポット(訪問順の経路)・選んだ訪問予定リストのスポットは、
-    // 絞り込みで外れていても必ず表示する(経路を辿るための表示のため全条件を免除)
-    const visitPathIds = new Set(
-      buildVisitPath(visits, filters, spotById).map((s) => s.id)
-    );
+    // 絞り込みで外れていても必ず表示する(経路を辿るための表示のため全条件を免除)。
+    // 訪問側は経路(並び順つき)ではなく訪問記録のIDから作る —— 座標の補完を待たずに
+    // 判定でき、本体種別のスポットだけを絞る用途では並び順が要らないため
+    const visitPathIds = visitedSpotIdsOn(visits, filters);
     // 作成モード中は、下書きの経由スポットも経路と同様に絞り込みから免除する
     const planPathIds = new Set([
-      ...buildPlanListPath(planLists, filters, planPathSpotById).map((s) => s.id),
+      ...buildPlanListPath(planLists, filters, pathSpotById).map((s) => s.id),
       ...(buildDraft?.spotIds ?? []),
     ]);
     // 「これだけを表示」中は、その経路のスポットだけに絞る(他のスポット・ルート・
@@ -2425,7 +2456,7 @@ export default function MapView({
   }, [
     spots,
     spotById,
-    planPathSpotById,
+    pathSpotById,
     visits,
     planLists,
     buildDraft,
@@ -2452,14 +2483,14 @@ export default function MapView({
         ? filterVisibleRoutes(routes, filters, seriesStyles, spotById)
         : [];
     const visitPath =
-      isolate === "plan" ? [] : buildVisitPath(visits, filters, spotById);
+      isolate === "plan" ? [] : buildVisitPath(visits, filters, pathSpotById);
     // 作成モード中に編集対象のリスト自身を経路表示していた場合は、更新前の経路が
     // 下書きの経路と古い形のまま二重に残らないよう、保存済み側は描かない
     const planListPath =
       isolate === "visit" ||
       (buildDraft !== null && filters.planListId === buildDraft.editingId)
         ? []
-        : buildPlanListPath(planLists, filters, planPathSpotById);
+        : buildPlanListPath(planLists, filters, pathSpotById);
 
     runWhenMapReady(() => {
       ensureRouteLayers(map, overlayKeysRef, openRouteDetail, openPathDetail);
@@ -2499,7 +2530,7 @@ export default function MapView({
     visits,
     planLists,
     spotById,
-    planPathSpotById,
+    pathSpotById,
     currentLocation,
     buildDraft,
     buildDraftPath,
@@ -2508,25 +2539,33 @@ export default function MapView({
   ]);
 
   // 別種別の重ね表示の描画。絞り込み・経由地ピンの免除は本体と同じロジックを、
-  // その種別の保存済み設定・シリーズ設定で適用する(訪問順の経路(緑)は
-  // 表示中の種別の訪問だけが対象のため、重ね表示側では描かない)
+  // その種別の保存済み設定・シリーズ設定で適用する(経路の線そのもの(緑・青)は
+  // 本体のルートレイヤーが種別をまたいで1本に描くので、重ね表示側では描かない)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     let cancelled = false;
 
     runWhenMapReady(() => {
-      // 「これだけを表示」中の扱い。visit(訪問順の経路)は本体種別だけが対象のため
-      // 重ね表示は全部消す。plan(訪問予定リスト)はリストに別種別のスポットを混ぜられる
-      // ため、そのリストのメンバーだけ残す(絞り込み・ルートは無視して membership で判定)
+      // 経路(訪問順・訪問予定リスト)のメンバーは、重ね表示側でも本体と同じく
+      // 絞り込み・非表示を免除する —— どちらの経路も別のスポット種別のスポットを
+      // 含みうるので、免除が本体種別だけだと「線は通っているのにピンが無い」
+      // (非表示にした別種別のスポットがまさにそれ)が起きる。
+      // 判定は membership(ID の集合)だけで、絞り込み・ルートは見ない
       const isolate = effectiveIsolate(filters);
-      const isolateListIds =
-        isolate === "plan"
-          ? new Set(
-              planLists.find((l) => l.id === filters.planListId)?.spot_ids ?? []
-            )
-          : null;
-      const active = isolate === "visit" ? [] : overlayTypeKeys;
+      const visitPathIds = visitedSpotIdsOn(visits, filters);
+      const planListIds = new Set(
+        planLists.find((l) => l.id === filters.planListId)?.spot_ids ?? []
+      );
+      // 「これだけを表示」中は、その経路のメンバーだけを残す
+      const isolateIds =
+        isolate === "visit"
+          ? visitPathIds
+          : isolate === "plan"
+            ? planListIds
+            : null;
+      const pathIds = new Set([...visitPathIds, ...planListIds]);
+      const active = overlayTypeKeys;
       // 選択が外れた(・注視で消した)種別は、作成済みレイヤーのデータを空にする
       // (レイヤー自体は残しても害がない。ensureOverlayLayers参照)
       for (const key of createdOverlayKeysRef.current) {
@@ -2557,34 +2596,35 @@ export default function MapView({
           const catStyles = overlayCategoryStylesOf(typeKey);
           const typeFilters = overlayFilters.get(typeKey) ?? DEFAULT_FILTERS;
           const spotById = new Map(data.spots.map((s) => [s.id, s]));
-          // plan の「これだけを表示」中は重ね表示のルートも隠す
-          // (注視中のリストだけの地図にする)
-          const visibleRoutes = isolateListIds
+          // 「これだけを表示」中は重ね表示のルートも隠す
+          // (注視中の経路だけの地図にする)
+          const visibleRoutes = isolateIds
             ? []
             : filterVisibleRoutes(data.routes, typeFilters, styles, spotById);
           const routeMemberIds = new Set(
             visibleRoutes.flatMap((route) => route.points.map((p) => p.spot_id))
           );
           // 非表示スポットは重ね表示側でも除外する(スポットIDによるユーザーごとの
-          // 設定のため種別をまたいで共通に効く)。リストの注視(membership)は本体と
-          // 同じく免除する
+          // 設定のため種別をまたいで共通に効く)。ただし経路のメンバーは本体と
+          // 同じく免除する(pathIds を hiddenIds より先に見る)
           const filtered = data.spots.filter((spot) =>
-            isolateListIds
-              ? isolateListIds.has(spot.id)
-              : !hiddenIds.has(spot.id) &&
-                (passesFilters(
-                  typeFilters,
-                  spot.series,
-                  spot.categories,
-                  visitedIds.has(spot.id)
-                ) ||
-                  (routeMemberIds.has(spot.id) &&
-                    passesFilters(
-                      { ...typeFilters, series: [], categories: [] },
-                      spot.series,
-                      spot.categories,
-                      visitedIds.has(spot.id)
-                    )))
+            isolateIds
+              ? isolateIds.has(spot.id)
+              : pathIds.has(spot.id) ||
+                (!hiddenIds.has(spot.id) &&
+                  (passesFilters(
+                    typeFilters,
+                    spot.series,
+                    spot.categories,
+                    visitedIds.has(spot.id)
+                  ) ||
+                    (routeMemberIds.has(spot.id) &&
+                      passesFilters(
+                        { ...typeFilters, series: [], categories: [] },
+                        spot.series,
+                        spot.categories,
+                        visitedIds.has(spot.id)
+                      ))))
           );
 
           // クラスタは重ね先の種別の先頭シリーズの色で塗り、本体の青いクラスタや
@@ -2637,9 +2677,10 @@ export default function MapView({
     runWhenMapReady,
     handleOverlaySpotSelect,
     // 「これだけを表示」の切り替えで重ね表示の出し分けが変わるため filters も見る。
-    // plan の注視ではリストのメンバー解決に planLists も要る
+    // 経路のメンバー解決に、plan は planLists、visit(選んだ日の訪問)は visits が要る
     filters,
     planLists,
+    visits,
   ]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示
@@ -2705,7 +2746,7 @@ export default function MapView({
       }
     : detailPathKind === "visit"
       ? (() => {
-          const path = buildVisitPath(visits, filters, spotById);
+          const path = buildVisitPath(visits, filters, pathSpotById);
           if (path.length === 0) return null;
           return {
             title: "訪問順の経路",
@@ -2724,7 +2765,7 @@ export default function MapView({
       : detailPathKind === "plan"
         ? (() => {
             const list = planLists.find((l) => l.id === filters.planListId);
-            const path = buildPlanListPath(planLists, filters, planPathSpotById);
+            const path = buildPlanListPath(planLists, filters, pathSpotById);
             if (!list || path.length === 0) return null;
             return {
               title: list.title,
