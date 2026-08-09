@@ -1002,6 +1002,7 @@ export default function SpotsView({
               setShowListForm(false);
               setEditingList(null);
             }}
+            onSaved={loadPlanLists}
           />
         )}
 
