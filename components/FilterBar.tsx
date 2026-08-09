@@ -29,8 +29,16 @@ export interface SpotFilters {
    * 訪問順の経路を描く対象日(`YYYY-MM-DD`のローカル日付)。絞り込みではなく、
    * 地図でその日に訪問したスポットを訪問順に矢印で結ぶための対象日。
    * null = 経路を表示しない。既定はその日(今日)。地図専用(一覧では使わない)。
+   * **期間で指定するときは開始日**(終了日は`visitedDateTo`)。
    */
   visitedDate: string | null;
+  /**
+   * 訪問順の経路の対象期間の終了日(`YYYY-MM-DD`)。null = 単日(`visitedDate`のみ)。
+   * **開始日と別の列にしてあるので、単日はこれまでどおり`visitedDate`だけで表せる**
+   * —— 保存済みの条件(この項目が無い)もそのまま単日として読める。
+   * 旅行のように複数日にまたがる訪問を1本の経路として辿るための指定。
+   */
+  visitedDateTo: string | null;
   /**
    * 訪問予定リスト(旅程)の経路を描く対象リストのID。絞り込みではなく、
    * 訪問日と同様に、そのリストのスポットをリスト順に矢印で結ぶための対象。
@@ -58,6 +66,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   categories: [],
   visited: ["unvisited"],
   visitedDate: null,
+  visitedDateTo: null,
   planListId: null,
   showRoutes: true,
   isolate: null,

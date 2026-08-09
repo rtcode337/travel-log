@@ -24,7 +24,11 @@ import {
   CURRENT_LOCATION_ZOOM,
 } from "@/lib/mapStyle";
 import { useRegionScope } from "@/lib/useRegionScope";
-import { DEFAULT_REGION_SCOPE } from "@/lib/region";
+import {
+  DEFAULT_REGION_SCOPE,
+  resolveWikipediaLang,
+  resolveWikipediaTitleSource,
+} from "@/lib/region";
 import { countedVisits, getSpotTypeSetting } from "@/lib/types";
 import type {
   Role,
@@ -68,7 +72,9 @@ import FilterBar, {
   type VisitedValue,
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
-import SpotDetailModal from "@/components/SpotDetailModal";
+import SpotDetailModal, { WikipediaIcon } from "@/components/SpotDetailModal";
+import SpotInfoModal from "@/components/SpotInfoModal";
+import VisitDateCalendar from "@/components/VisitDateCalendar";
 import SpotDownloadDialogs, {
   DownloadProgressDialog,
 } from "@/components/SpotDownloadDialogs";
@@ -589,25 +595,37 @@ function routeOwnPoints(route: SpotRoute, spotById: Map<string, Spot>): Spot[] {
 }
 
 /**
- * 選んだ日(`filters.visitedDate`。null=未選択)に訪問したスポットのID。
+ * 訪問順の経路の対象期間(`filters.visitedDate`〜`visitedDateTo`)に入る訪問か。
+ * 終了日が無ければ開始日だけの単日。日付キーは`YYYY-MM-DD`なので文字列比較でよい。
+ */
+function isInVisitedRange(visitedOn: string | null, filters: SpotFilters): boolean {
+  const from = filters.visitedDate;
+  if (!from) return false;
+  const key = toVisitDateKey(visitedOn);
+  if (!key) return false;
+  return key >= from && key <= (filters.visitedDateTo ?? from);
+}
+
+/**
+ * 選んだ日(期間)に訪問したスポットのID。
  * 経路(buildVisitPath)と違い**スポットの解決が要らない**ので、まだ読み込んで
- * いないスポットや別のスポット種別のスポットも含めて「その日に訪問したか」だけを
+ * いないスポットや別のスポット種別のスポットも含めて「その期間に訪問したか」だけを
  * 判定できる。ピンを絞り込みから免除するかの判定はこちらを使う
  * (重ね表示側はスポットの実体を自前で持っているため、IDが分かれば足りる)。
  */
 function visitedSpotIdsOn(visits: Visit[], filters: SpotFilters): Set<string> {
-  const date = filters.visitedDate;
-  if (!date) return new Set();
+  if (!filters.visitedDate) return new Set();
   return new Set(
     visits
-      .filter((visit) => toVisitDateKey(visit.visited_on) === date)
+      .filter((visit) => isInVisitedRange(visit.visited_on, filters))
       .map((visit) => visit.spot_id)
   );
 }
 
 /**
- * 訪問順の経路の対象日(`filters.visitedDate`。null=表示しない)が選ばれているとき、
- * その日の訪問を訪問時刻の昇順に並べた経路を返す。
+ * 訪問順の経路の対象期間(`filters.visitedDate`〜`visitedDateTo`。開始日がnullなら
+ * 表示しない)が選ばれているとき、その期間の訪問を訪問時刻の昇順に並べた経路を返す。
+ * **期間をまたいでも1本の経路にする**(旅行の何日ぶんかをそのまま辿れるように)。
  * 別のスポット種別のスポットも、座標を補完できていれば経路に含める(訪問予定リストと
  * 同じ扱い。補完は pathExtraSpots)。解決できないスポットだけを除く。
  * 同じスポットへの再訪はそのまま複数回現れる(行って戻る線になる)が、
@@ -619,11 +637,10 @@ function buildVisitPath(
   filters: SpotFilters,
   spotById: Map<string, Spot>
 ): Spot[] {
-  const date = filters.visitedDate;
-  if (!date) return [];
+  if (!filters.visitedDate) return [];
   return visits
     .flatMap((visit) => {
-      if (toVisitDateKey(visit.visited_on) !== date) return [];
+      if (!isInVisitedRange(visit.visited_on, filters)) return [];
       const spot = spotById.get(visit.spot_id);
       return spot ? [{ time: Date.parse(visit.visited_on!), spot }] : [];
     })
@@ -1027,6 +1044,10 @@ function loadSavedFilters(typeKey: string): SpotFilters {
           : obj.visitedDate === "today"
             ? todayKey()
             : date(obj.visitedDate) ?? todayKey(),
+      // 期間の終了日。キー欠落(この項目より前の保存データ)・不正値は単日扱い。
+      // 「今日」のような相対表現は持たない —— 終了日だけ動くと期間の長さが
+      // 日をまたぐたびに変わってしまうため、具体的な日付でだけ保存する
+      visitedDateTo: date(obj.visitedDateTo),
       // 訪問予定リストの経路対象(そのリストが今も存在するかは描画側で解決する)
       planListId: typeof obj.planListId === "string" ? obj.planListId : null,
       // キー自体が無い保存データ(この設定の追加前に保存されたもの)は既定のオン扱い
@@ -1105,6 +1126,15 @@ function saveOverlayTypeKeys(typeKey: string, overlays: string[]) {
   } catch {
     // 保存できなくてもこのセッションの重ね表示自体は動かす
   }
+}
+
+/** カレンダーのアイコン(Google Material Symbols「calendar_month」、Apache License 2.0) */
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M5 22q-.825 0-1.412-.587Q3 20.825 3 20V6q0-.825.588-1.412Q4.175 4 5 4h1V2h2v2h8V2h2v2h1q.825 0 1.413.588Q21 5.175 21 6v14q0 .825-.587 1.413Q19.825 22 19 22Zm0-2h14V10H5v10ZM5 8h14V6H5Zm0 0V6v2Zm7 6q-.425 0-.712-.288Q11 13.425 11 13t.288-.713Q11.575 12 12 12t.713.287Q13 12.575 13 13t-.287.712Q12.425 14 12 14Zm-4 0q-.425 0-.713-.288Q7 13.425 7 13t.287-.713Q7.575 12 8 12t.713.287Q9 12.575 9 13t-.287.712Q8.425 14 8 14Zm8 0q-.425 0-.712-.288Q15 13.425 15 13t.288-.713Q15.575 12 16 12t.712.287Q17 12.575 17 13t-.288.712Q16.425 14 16 14Zm-4 4q-.425 0-.712-.288Q11 17.425 11 17t.288-.712Q11.575 16 12 16t.713.288Q13 16.575 13 17t-.287.712Q12.425 18 12 18Zm-4 0q-.425 0-.713-.288Q7 17.425 7 17t.287-.712Q7.575 16 8 16t.713.288Q9 16.575 9 17t-.287.712Q8.425 18 8 18Zm8 0q-.425 0-.712-.288Q15 17.425 15 17t.288-.712Q15.575 16 16 16t.712.288Q17 16.575 17 17t-.288.712Q16.425 18 16 18Z" />
+    </svg>
+  );
 }
 
 /**
@@ -1252,36 +1282,26 @@ export default function MapView({
     return new Map([...spotById, ...pathExtraSpots]);
   }, [spotById, pathExtraSpots]);
   /**
-   * 訪問順の経路の対象日を選ぶドロップダウン用に、訪問した日の一覧(新しい順)。
-   * **他の種別のスポットへの訪問しかない日も含める** —— 経路は別種別のスポットも
-   * 補完して繋ぐようになったので、その日を選べないと辿れないため。
+   * 訪問記録のある日。カレンダーで「その日に記録があるか」の印(点)を打つのに使う。
+   * **他の種別のスポットへの訪問も含める** —— 経路は別種別のスポットも
+   * 補完して繋ぐようになったので、その日を落とすと辿れないため。
    */
-  const visitDates = useMemo(() => {
+  const visitDateSet = useMemo(() => {
     const set = new Set<string>();
     for (const v of visits) {
       const date = toVisitDateKey(v.visited_on);
       if (date) set.add(date);
     }
-    return Array.from(set).sort((a, b) => b.localeCompare(a));
+    return set;
   }, [visits]);
   // SSR・hydration時は常に既定(サーバーはlocalStorageを読めないため、初期値で
   // 読むとhydration不一致になる)。保存済み条件の復元はマウント後のuseEffectで行う
   const [filters, setFiltersState] = useState<SpotFilters>(DEFAULT_FILTERS);
   /**
-   * 訪問順の経路の対象日セレクトの選択肢。先頭は常に「今日」、その次に「表示しない」、
-   * 続けて訪問のある他の日(新しい順)。選択中の日が一覧に無い場合(その日の訪問を
-   * 消した後など)も、選択を保てるよう残す。
+   * カレンダーとリセットが基準にする「今日」。マウント後に一度だけ決める
+   * (レンダーのたびに`todayKey()`を呼ぶと日をまたいだ瞬間に値が変わりうるため)。
    */
-  const visitDateOptions = useMemo(() => {
-    const today = todayKey();
-    const others = visitDates.filter((d) => d !== today);
-    const selected = filters.visitedDate;
-    if (selected && selected !== today && !others.includes(selected)) {
-      others.push(selected);
-      others.sort((a, b) => b.localeCompare(a));
-    }
-    return { today, others };
-  }, [visitDates, filters.visitedDate]);
+  const visitDateOptions = useMemo(() => ({ today: todayKey() }), []);
   // 変更のたびにlocalStorageへも書き込む(次に地図を開いたときの復元用)
   const setFilters = useCallback(
     (next: SpotFilters) => {
@@ -1318,21 +1338,29 @@ export default function MapView({
       { padding: 60, maxZoom: 15, animate: true }
     );
   }, []);
+  /**
+   * 訪問順の経路の対象日(期間)を選んだとき。対象をセットしたうえで、その経路
+   * 全体が画面に収まるよう地図を移動する。`from`がnullなら「表示しない」。
+   */
   const handleSelectVisitDate = useCallback(
-    (value: string) => {
-      const visitedDate = value || null;
+    (from: string | null, to: string | null) => {
       // 「表示しない」にしたら、その経路の「これだけを表示」も解除する
-      const isolate =
-        !visitedDate && filters.isolate === "visit" ? null : filters.isolate;
-      setFilters({ ...filters, visitedDate, isolate });
-      if (!visitedDate) return;
+      const isolate = !from && filters.isolate === "visit" ? null : filters.isolate;
+      const next = {
+        ...filters,
+        visitedDate: from,
+        // 開始日が無いときに終了日だけ残ると、次に日を選んだとき意図しない期間に
+        // なるため一緒に落とす
+        visitedDateTo: from ? to : null,
+        isolate,
+      };
+      setFilters(next);
+      if (!from) return;
       // 別種別のスポットは、この時点ではまだ補完(pathExtraSpots)が済んで
       // いないことがある。その場合は解決できた分だけで移動し、補完が届いたあとの
       // 経路の描き直しに合わせて地図を動かし直すことはしない
       // (ユーザーの操作なしに地図が動くのを避けるため)
-      fitMapToSpots(
-        buildVisitPath(visits, { ...filters, visitedDate }, pathSpotById)
-      );
+      fitMapToSpots(buildVisitPath(visits, next, pathSpotById));
     },
     [filters, setFilters, visits, pathSpotById, fitMapToSpots]
   );
@@ -1416,6 +1444,9 @@ export default function MapView({
   // ピンをタップして「リストに追加しますか?」を確認中のスポットID
   const [buildDraft, setBuildDraft] = useState<PlanListDraft | null>(null);
   const [addCandidate, setAddCandidate] = useState<string | null>(null);
+  // 追加の確認中に開くWikipediaの概要(SpotInfoModal)。確認ダイアログを閉じるときに
+  // 一緒に閉じるため、対象は addCandidate 側に持たせず真偽値だけを持つ
+  const [addCandidateInfo, setAddCandidateInfo] = useState(false);
   const [savingList, setSavingList] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
   // ピンのクリックハンドラ(レイヤー作成時に一度だけ束縛される)から現在の作成モードを
@@ -1652,6 +1683,54 @@ export default function MapView({
     [overlayData]
   );
 
+  // 「リストに追加しますか?」で見せるスポット。まず手元(本体・重ね表示・補完)から
+  // 引いて名前をすぐ出す。解決は下書きの経路と同じ3か所から行う
+  const addCandidateCached = useMemo(
+    () =>
+      addCandidate
+        ? spotById.get(addCandidate) ??
+          overlaySpotById.get(addCandidate) ??
+          pathExtraSpots.get(addCandidate) ??
+          null
+        : null,
+    [addCandidate, spotById, overlaySpotById, pathExtraSpots]
+  );
+  /**
+   * 確認ダイアログで説明とWikipediaの入口を出すために取り直した全項目。
+   * **公開スポットは手元の値では足りない** —— IndexedDBキャッシュは容量のため
+   * `description`も`spot_type_id`も保存しておらず、`expandSpot`が
+   * null・空文字のプレースホルダーを入れて返すため(`lib/spotCacheDb.ts`)。
+   * 空の`spot_type_id`のまま種別を引くと必ず見つからず、Wikipediaの可否が
+   * 種別の設定ではなく既定値(true)で決まってしまう。
+   */
+  const [addCandidateDetail, setAddCandidateDetail] = useState<Spot | null>(
+    null
+  );
+  useEffect(() => {
+    if (!addCandidate) {
+      setAddCandidateDetail(null);
+      return;
+    }
+    let cancelled = false;
+    api.spots.get(addCandidate).then(({ data }) => {
+      if (!cancelled && data) setAddCandidateDetail(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [addCandidate]);
+  const addCandidateSpot = addCandidateDetail ?? addCandidateCached;
+  const addCandidateSpotType = useMemo(
+    () =>
+      spotTypes.find((t) => t.id === addCandidateDetail?.spot_type_id) ?? null,
+    [spotTypes, addCandidateDetail]
+  );
+  // 確認ダイアログを閉じるときは、その上に開いているWikipediaの概要も一緒に閉じる
+  const closeAddCandidate = useCallback(() => {
+    setAddCandidate(null);
+    setAddCandidateInfo(false);
+  }, []);
+
   // 作成中パネルに渡す解決用マップ。本体スポットに重ね表示スポットを足したもの
   // (IDが被ったら本体を優先)。これで別種別スポットも名前つきで一覧表示できる
   const buildPanelSpotById = useMemo(() => {
@@ -1856,6 +1935,8 @@ export default function MapView({
   const pendingMarkersRef = useRef<maplibregl.Marker[]>([]);
 
   const [showFilterModal, setShowFilterModal] = useState(false);
+  // 訪問日を選ぶカレンダー(絞り込みモーダルの上に重ねる別モーダル)
+  const [showVisitCalendar, setShowVisitCalendar] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
     { name: string; lat: number; lng: number }[]
@@ -2751,7 +2832,11 @@ export default function MapView({
           return {
             title: "訪問順の経路",
             description: filters.visitedDate
-              ? `${formatVisitDate(filters.visitedDate)}に訪問したスポットを、訪問した順に並べています。`
+              ? filters.visitedDateTo
+                ? `${formatVisitDate(filters.visitedDate)}〜${formatVisitDate(
+                    filters.visitedDateTo
+                  )}に訪問したスポットを、訪問した順に並べています。`
+                : `${formatVisitDate(filters.visitedDate)}に訪問したスポットを、訪問した順に並べています。`
               : null,
             pointNoun: "地点",
             points: path.map((s, i) => ({
@@ -2923,6 +3008,74 @@ export default function MapView({
         </div>
       </div>
 
+      {/* 訪問日を選ぶカレンダー。絞り込みモーダル(z-50)の上に重ねる。
+          期間の選択は2回のタップで決まるので、**選んでも閉じない**
+          (1回目のタップで閉じると期間を選べない)。選択はその場で反映されるため、
+          閉じる操作は「閉じる」だけでよい */}
+      {showVisitCalendar && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setShowVisitCalendar(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[85dvh] w-full max-w-xs space-y-2 overflow-y-auto rounded-2xl bg-white p-4"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-bold">訪問日</h2>
+              <button
+                type="button"
+                onClick={() => setShowVisitCalendar(false)}
+                aria-label="閉じる"
+                className="rounded-full px-2 text-xl leading-none text-gray-400"
+              >
+                ×
+              </button>
+            </div>
+            <p className="text-sm">
+              {filters.visitedDate ? (
+                <>
+                  {formatVisitDate(filters.visitedDate)}
+                  {filters.visitedDateTo && (
+                    <> 〜 {formatVisitDate(filters.visitedDateTo)}</>
+                  )}
+                </>
+              ) : (
+                <span className="text-gray-400">表示しない</span>
+              )}
+            </p>
+            <VisitDateCalendar
+              from={filters.visitedDate}
+              to={filters.visitedDateTo}
+              markedDates={visitDateSet}
+              today={visitDateOptions.today}
+              onSelect={handleSelectVisitDate}
+            />
+            <p className="text-xs text-gray-400">
+              日付をタップで1日、続けてもう1日タップで期間。
+              <span className="mx-1 inline-block size-1 rounded-full bg-green-600 align-middle" />
+              の日に訪問記録があります。
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => handleSelectVisitDate(visitDateOptions.today, null)}
+                className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+              >
+                今日
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectVisitDate(null, null)}
+                className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+              >
+                表示しない
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 絞り込みモーダル */}
       {showFilterModal && (
         <div
@@ -2967,7 +3120,7 @@ export default function MapView({
                 <p className="flex items-center gap-1.5 text-sm font-medium">
                   訪問日
                   <HelpTip>
-                    選んだ日に訪問したスポットを、訪問した順に矢印(緑)で結んで地図に表示します。その日に訪問したスポットは、絞り込みで外れていても表示されます。
+                    選んだ日(期間)に訪問したスポットを、訪問した順に矢印(緑)で結んで地図に表示します。期間を選ぶと日をまたいで1本の経路になります。対象のスポットは、絞り込みで外れていても・別のスポット種別でも表示されます。
                   </HelpTip>
                 </p>
                 <div className="flex shrink-0 items-center gap-1.5">
@@ -2995,12 +3148,14 @@ export default function MapView({
                   <SectionResetButton
                     disabled={
                       filters.visitedDate === visitDateOptions.today &&
+                      filters.visitedDateTo === null &&
                       filters.isolate !== "visit"
                     }
                     onClick={() =>
                       setFilters({
                         ...filters,
                         visitedDate: todayKey(),
+                        visitedDateTo: null,
                         isolate:
                           filters.isolate === "visit" ? null : filters.isolate,
                       })
@@ -3008,20 +3163,49 @@ export default function MapView({
                   />
                 </div>
               </div>
-              <select
-                aria-label="訪問順の経路の対象日"
-                value={filters.visitedDate ?? ""}
-                onChange={(e) => handleSelectVisitDate(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
-              >
-                <option value={visitDateOptions.today}>今日</option>
-                <option value="">表示しない</option>
-                {visitDateOptions.others.map((date) => (
-                  <option key={date} value={date}>
-                    {formatVisitDate(date)}
-                  </option>
-                ))}
-              </select>
+              {/* 選択中の対象日(期間)。タップでカレンダーを別モーダルで開く
+                  (絞り込みモーダルにカレンダーを直に置くと、他の条件を見るのに
+                  毎回その分スクロールすることになるため)。「今日」「表示しない」は
+                  よく使うのでここに残す */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowVisitCalendar(true)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-left text-sm"
+                >
+                  <CalendarIcon className="size-4 shrink-0 text-gray-400" />
+                  <span className="min-w-0 truncate">
+                    {filters.visitedDate ? (
+                      <>
+                        {formatVisitDate(filters.visitedDate)}
+                        {filters.visitedDateTo && (
+                          <> 〜 {formatVisitDate(filters.visitedDateTo)}</>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-gray-400">表示しない</span>
+                    )}
+                  </span>
+                </button>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSelectVisitDate(visitDateOptions.today, null)
+                    }
+                    className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
+                  >
+                    今日
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectVisitDate(null, null)}
+                    className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
+                  >
+                    表示しない
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* 訪問予定リスト(旅程)の経路。訪問日と同様、リストのスポットを
@@ -3287,19 +3471,20 @@ export default function MapView({
         </div>
       )}
 
-      {/* 作成モード中にピンをタップしたとき: リストへ追加するか確認するダイアログ */}
+      {/* 作成モード中にピンをタップしたとき: リストへ追加するか確認するダイアログ。
+          名前だけでは入れるか決められないため、スポットの説明とWikipediaの概要への
+          入口も出す(Wikipediaはスポット詳細と同じくその種別で有効なときだけ) */}
       {addCandidate && buildDraft && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setAddCandidate(null)}
+          onClick={closeAddCandidate}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xs space-y-3 rounded-2xl bg-white p-4"
+            className="max-h-[85dvh] w-full max-w-sm space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
           >
             {(() => {
-              const spot =
-                spotById.get(addCandidate) ?? overlaySpotById.get(addCandidate);
+              const spot = addCandidateSpot;
               const already = buildDraft.spotIds.includes(addCandidate);
               return (
                 <>
@@ -3309,10 +3494,31 @@ export default function MapView({
                       ? " はすでにリストに入っています。"
                       : " を訪問予定リストに追加しますか?"}
                   </p>
+                  {spot?.description && (
+                    <p className="whitespace-pre-wrap text-sm text-gray-600">
+                      {spot.description}
+                    </p>
+                  )}
+                  {/* 取り直しが済むまでは出さない(種別が分かるまで可否を
+                      決められず、既定値で出すと後から消えてちらつくため) */}
+                  {addCandidateDetail &&
+                    getSpotTypeSetting(
+                      addCandidateSpotType,
+                      "wikipedia_enabled"
+                    ) && (
+                    <button
+                      type="button"
+                      onClick={() => setAddCandidateInfo(true)}
+                      className="inline-flex items-center gap-1 rounded p-1 text-sm text-blue-600 hover:bg-blue-50"
+                    >
+                      <WikipediaIcon className="size-5" />
+                      Wikipediaで見る
+                    </button>
+                  )}
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => setAddCandidate(null)}
+                      onClick={closeAddCandidate}
                       className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
                     >
                       {already ? "閉じる" : "キャンセル"}
@@ -3325,7 +3531,7 @@ export default function MapView({
                             ...buildDraft,
                             spotIds: [...buildDraft.spotIds, addCandidate],
                           });
-                          setAddCandidate(null);
+                          closeAddCandidate();
                         }}
                         className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
                       >
@@ -3338,6 +3544,22 @@ export default function MapView({
             })()}
           </div>
         </div>
+      )}
+
+      {/* 追加の確認から開くWikipediaの概要。確認ダイアログより後ろに置くことで
+          同じ z-[60] でも上に重なる(閉じると確認ダイアログに戻る) */}
+      {addCandidateInfo && addCandidateSpot && (
+        <SpotInfoModal
+          spotName={addCandidateSpot.name}
+          region={addCandidateSpot.region}
+          lang={resolveWikipediaLang(addCandidateSpotType)}
+          primaryTitle={
+            resolveWikipediaTitleSource(addCandidateSpotType) === "series"
+              ? addCandidateSpot.series
+              : null
+          }
+          onClose={() => setAddCandidateInfo(false)}
+        />
       )}
 
       {/* 右クリック/長押しメニュー */}
@@ -3549,6 +3771,13 @@ export default function MapView({
             // 地図起点フラグも下ろす
             setEditingPlanList(null);
             buildFromMapRef.current = false;
+          }}
+          // 地図へ行かず「保存」で基本情報だけ直した場合。経路表示中のリストの
+          // 題名・期間が変わるので読み直す(経由スポットは変わっていない)
+          onSaved={() => {
+            api.visitPlanLists
+              .list(spotTypeKey)
+              .then(({ data }) => setPlanLists(data ?? []));
           }}
         />
       )}

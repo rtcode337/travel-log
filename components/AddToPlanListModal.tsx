@@ -66,6 +66,12 @@ export default function AddToPlanListModal({
         typeKey={typeKey}
         initialSpotIds={[spotId]}
         onClose={() => setShowNewForm(false)}
+        // 地図へ行かず「保存」で作った場合も、このスポットは種として入っている。
+        // 追加の目的は果たせているので、呼び出し元に知らせて全体を閉じる
+        onSaved={() => {
+          onAdded?.();
+          onClose();
+        }}
       />
     );
   }
