@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import HelpTip from "@/components/HelpTip";
+import ExportJobsPanel from "@/components/ExportJobsPanel";
 import { api } from "@/lib/api-client";
 import { buildCsv, parseCsv } from "@/lib/csv";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
@@ -1633,8 +1634,9 @@ export default function AdminView({
 
       {/* スポット種別(ログイン後の既定・種別マスタ) */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
-        {/* 左カラム: ユーザー管理(admin専用) */}
+        {/* 左カラム: ユーザー管理と訪問記録のエクスポート(どちらもadmin専用) */}
         {isAdmin && (
+          <div className="flex flex-col gap-6">
           <section>
             <h2 className="mb-2 text-base font-bold">ユーザー管理</h2>
             {userMessage && (
@@ -1798,6 +1800,8 @@ export default function AdminView({
               </p>
             </form>
           </section>
+          <ExportJobsPanel />
+          </div>
         )}
 
         {/* 右カラム(またはadminでない場合は唯一のカラム): スポットの管理 */}

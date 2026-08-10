@@ -31,9 +31,11 @@ name: travel-log
 # ---- ここだけ編集: データの置き場(すべてホストの絶対パス) ----
 # db-data… Postgresの実データ(所有者はpostgresのエントリポイントが自分で揃える)
 # photos … 訪問記録の写真。DBには相対パスだけが入るので、DBと一緒にバックアップする
+# exports … 訪問記録エクスポートのZIP。作り直せるのでバックアップは要らない
 # どちらも**あらかじめ作っておくこと**(bindマウント先を自動作成しない環境がある)。
 x-db-data-dir: &db-data-dir "/path/to/travel-log/data"
 x-photos-dir: &photos-dir "/path/to/travel-log/photos"
+x-exports-dir: &exports-dir "/path/to/travel-log/exports"
 
 # ---- ここだけ編集: アプリの設定(.env の代わり) ----
 # セッションCookieの署名鍵(必須)。32バイト程度のランダム文字列を入れる
@@ -117,6 +119,10 @@ services:
       - type: bind
         source: *photos-dir
         target: /app/photos
+      # 訪問記録エクスポートのZIP置き場(lib/exportStorage.ts)。作り直せる使い捨て
+      - type: bind
+        source: *exports-dir
+        target: /app/exports
     ports:
       # host:container。LAN内からのみ見える状態にしておくこと
       - "7040:7040"

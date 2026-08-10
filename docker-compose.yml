@@ -70,6 +70,9 @@ services:
     volumes:
       # 訪問記録の写真ファイル置き場(lib/photos.ts)。DBには相対パスのみ保存される
       - ./photos:/app/photos
+      # 訪問記録エクスポートのZIP置き場(lib/exportStorage.ts)。写真と分けてあるのは
+      # 寿命が違うため —— こちらは作り直せる使い捨てで、同じユーザーの最新1件だけ残る
+      - ./exports:/app/exports
     ports:
       - "7040:7040"
     restart: unless-stopped

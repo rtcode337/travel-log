@@ -1,5 +1,6 @@
 import type {
   AppUser,
+  ExportJob,
   MyReview,
   PublicReview,
   Review,
@@ -45,11 +46,23 @@ async function fetchAndParse<T>(
   return { data: data as T, error: null };
 }
 
+/**
+ * `fresh: true` を渡したGETはタブ内キャッシュを使わず、毎回サーバーへ取りに行く
+ * (キャッシュにも残さない)。**サーバー側で状態が進むもの**——エクスポートの
+ * 生成状況のように、こちらが何も書き込まなくても running → done へ変わるもの——を
+ * 見に行くために要る。普通のGETは今までどおりキャッシュに載せる
+ * (画面を行き来するたびに同じ一覧を取り直さないため)。
+ */
 async function request<T>(
   path: string,
-  init?: RequestInit
+  init?: RequestInit & { fresh?: boolean }
 ): Promise<Result<T>> {
   const method = (init?.method ?? "GET").toUpperCase();
+
+  if (method === "GET" && init?.fresh) {
+    // ブラウザのHTTPキャッシュにも当てさせない(同じURLのGETが繰り返される)
+    return fetchAndParse<T>(path, { ...init, cache: "no-store" });
+  }
 
   if (method === "GET") {
     const cached = getCache.get(path);
@@ -304,6 +317,25 @@ export const api = {
       request<{ ok: boolean }>(`/api/visit-plans/${spotId}`, {
         method: "DELETE",
       }),
+  },
+  /** 訪問記録エクスポート(管理者が実行し、対象ユーザーもダウンロードできる) */
+  exports: {
+    /**
+     * 管理者は全件、それ以外は自分が対象のものだけ。
+     * 生成状況はサーバー側で進むため、**タブ内キャッシュを使わず毎回取り直す**
+     * (キャッシュに載せると、作成中のまま画面が固まって見える)
+     */
+    list: () => request<ExportJob[]>("/api/exports", { fresh: true }),
+    /** 対象ユーザーのメールアドレスを指定して生成を始める(管理者のみ) */
+    create: (email: string) =>
+      request<ExportJob>("/api/exports", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/api/exports/${id}`, { method: "DELETE" }),
+    /** ZIPのダウンロードURL(ブラウザに直接開かせる) */
+    downloadUrl: (id: string) => `/api/exports/${id}/download`,
   },
   visitPlanLists: {
     list: (typeKey: string) =>

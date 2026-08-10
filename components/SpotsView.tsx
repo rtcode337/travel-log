@@ -221,8 +221,6 @@ export default function SpotsView({
   const [detailListId, setDetailListId] = useState<string | null>(null);
 
   const [browseMode, setBrowseMode] = useState<BrowseMode>("series");
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [managementItems, setManagementItems] = useState<Spot[]>([]);
   const [managementTotal, setManagementTotal] = useState(0);
   const [managementAvailableSeries, setManagementAvailableSeries] = useState<Series[]>([]);
@@ -495,37 +493,6 @@ export default function SpotsView({
     setFilteredPage(1);
   }, [selectedRegion, filters, sortKey, setFilteredPage]);
 
-  // この種別の自分の訪問記録(メモ+スポット情報のCSVと添付写真)のZIPエクスポート。
-  // ZIPバイナリのためapi-client(JSON前提)を使わず直接fetchし、
-  // blob化してからaタグのdownloadで保存させる
-  const handleExportVisits = async () => {
-    setExporting(true);
-    setExportError(null);
-    try {
-      const res = await fetch(
-        `/api/visits/export?type=${encodeURIComponent(spotTypeKey)}`
-      );
-      if (!res.ok) throw new Error();
-      const blob = await res.blob();
-      const filename =
-        res.headers
-          .get("Content-Disposition")
-          ?.match(/filename="([^"]+)"/)?.[1] ?? "travel-log-visits.zip";
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      setExportError("エクスポートに失敗しました。");
-    } finally {
-      setExporting(false);
-    }
-  };
-
   if (loading) {
     return (
       <main className="p-4">
@@ -633,21 +600,7 @@ export default function SpotsView({
             <div className="mb-6">
               <div className="mb-4 flex items-center justify-between gap-2">
                 <h1 className="text-lg font-bold">最近の訪問場所</h1>
-                {recentVisits.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleExportVisits}
-                    disabled={exporting}
-                    title="この種別の自分の訪問記録(メモ・写真)をZIPでダウンロード"
-                    className="shrink-0 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    {exporting ? "エクスポート中…" : "📦 エクスポート"}
-                  </button>
-                )}
               </div>
-              {exportError && (
-                <p className="mb-2 text-xs text-red-600">{exportError}</p>
-              )}
               {recentVisits.length === 0 ? (
                 <p className="text-sm text-gray-500">
                   まだ訪問記録がありません。

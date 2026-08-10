@@ -319,6 +319,31 @@ create index visit_plan_list_items_list_id_idx on visit_plan_list_items (list_id
 create index visit_plan_list_items_spot_id_idx on visit_plan_list_items (spot_id);
 
 -- =============================================================
+-- export_jobs: 訪問記録+写真のZIPエクスポート。管理者が対象ユーザーを指定して
+-- 実行し、生成はバックグラウンドで進む(running → done / failed)。
+-- ZIP本体は /app/exports(ホストの ./exports をbindマウント)に置き、ここには
+-- そこからの相対パスだけを持つ(写真と同じ持ち方)。
+-- 同じユーザーのZIPは最新1件だけ残す(新しいものが done になった時点で前を削除)
+-- =============================================================
+create table export_jobs (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references users (id) on delete cascade,
+  requested_by uuid references users (id) on delete set null,
+  status       text not null default 'running'
+                 check (status in ('running', 'done', 'failed')),
+  file_path    text,
+  file_size    bigint,
+  visit_count  int,
+  photo_count  int,
+  error        text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  finished_at  timestamptz
+);
+
+create index export_jobs_user_id_idx on export_jobs (user_id);
+
+-- =============================================================
 -- reviews: 口コミ。投稿するたびに増える掲示板方式(1ユーザーが同じスポットに何件でも書ける)。
 -- スポット種別ごとにspot_type_settingsの'reviews_enabled'で機能そのもののON/OFFを切り替えられる。
 -- シリーズ表示ロジックには reviews を一切参照させないこと
@@ -392,6 +417,10 @@ create trigger visit_plan_list_items_set_updated_at
 
 create trigger reviews_set_updated_at
   before update on reviews
+  for each row execute function set_updated_at();
+
+create trigger export_jobs_set_updated_at
+  before update on export_jobs
   for each row execute function set_updated_at();
 
 -- =============================================================

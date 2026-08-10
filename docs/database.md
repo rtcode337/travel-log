@@ -32,6 +32,7 @@ erDiagram
     users ||--o{ spot_hides : ""
     users ||--o{ visit_plans : ""
     users ||--o{ visit_plan_lists : ""
+    users ||--o{ export_jobs : "対象 / 実行者"
     users ||--o{ reviews : ""
 
     spots ||--o{ spot_route_points : ""
@@ -201,6 +202,14 @@ erDiagram
         uuid user_id FK
         uuid spot_id FK "ユーザー×スポットでユニーク(トグル)"
     }
+    export_jobs {
+        uuid id PK
+        uuid user_id FK "エクスポート対象"
+        uuid requested_by FK "実行した管理者"
+        text status "running / done / failed"
+        text file_path "exports/ からの相対パス"
+        bigint file_size
+    }
     visit_plan_lists {
         uuid id PK
         uuid user_id FK
@@ -234,6 +243,11 @@ erDiagram
   「その旅行で何を回ったか」の記録でもあるため、行が消えると後から辿れない。
   印の付いた経由スポットは経路(地図の矢印・Google マップの経路検索)から外れる。
   画面から手で付け外しもできる(`PATCH /api/visit-plan-lists/[id]/items/[spotId]`)
+- **`export_jobs` は訪問記録エクスポートのジョブ**。管理者が対象ユーザーを指定して
+  実行し、生成はバックグラウンドで進む(`running` → `done` / `failed`)。ZIP本体は
+  `/app/exports`(ホストの `./exports` をバインド)に置き、ここには相対パスだけを持つ
+  (写真と同じ持ち方)。**同じユーザーのZIPは最新1件だけ残す** —— 新しいものが `done`
+  になった時点で古い行とファイルを消す(写真の二重保持でディスクが膨らまないように)
 - **`reviews` は掲示板方式**(1ユーザーが同じスポットに何件でも書ける)。機能自体の
   ON/OFF は種別ごとに `spot_type_settings` の `reviews_enabled` で切り替える。
   シリーズ表示ロジックには `reviews` を一切参照させない
@@ -253,6 +267,7 @@ erDiagram
 | visits / spot_hides / visit_plans | `user_id` / `spot_id` | ユーザーの記録の取得と逆引き |
 | visit_plan_lists | `user_id` / `spot_type_id` | 旅程の一覧 |
 | visit_plan_list_items | `list_id` / `spot_id` | 旅程の中身と逆引き |
+| export_jobs | `user_id` | 対象ユーザーの結果の取得 |
 | reviews | `spot_id` | スポット詳細の口コミ一覧 |
 
 ## 変更手順
