@@ -7,6 +7,7 @@ import {
   MY_SPOT_SERIES,
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
+import HelpTip from "@/components/HelpTip";
 
 /** 配列の要素を from→to へ移動した新しい配列を返す */
 function move<T>(arr: T[], from: number, to: number): T[] {
@@ -173,8 +174,17 @@ export default function PlanBuildPanel({
                   </span>
                 </>
               ) : (
-                <span className="min-w-0 flex-1 break-words text-sm text-gray-400">
+                <span className="flex min-w-0 flex-1 items-center gap-1 break-words text-sm text-gray-400">
                   (読み込み中のスポット)
+                  <HelpTip sheet>
+                    そのスポットの情報が手元に無いときの表示です。IDから
+                    取り直している最中なら、終わりしだい名前に変わります。
+                    いつまでも変わらないときは、
+                    <b>スポットが削除された</b>・
+                    <b>他の人の非公開スポットで見られない</b>・
+                    <b>通信に失敗した</b>のいずれかです。
+                    名前が出ていなくても並び替え・削除はでき、そのまま保存してもリストからは外れません。
+                  </HelpTip>
                 </span>
               )}
               <button
