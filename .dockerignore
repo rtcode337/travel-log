@@ -4,5 +4,5 @@ node_modules
 .github
 .env
 .env.local
-db/data
+data
 photos

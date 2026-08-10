@@ -11,11 +11,11 @@ npm run dev                                             # Next.js開発サーバ
 npm run build                                            # 本番ビルド(型チェック込み)
 ```
 
-`npm run dev`/`npm run build`はどちらも`--webpack`を明示している(Next.js 16の既定バンドラーのTurbopackには、bindマウントされた`db/data`・`photos`をファイル監視から外す`watchOptions.ignored`相当の設定が無いため。`next.config.ts`のコメント参照)。
+`npm run dev`/`npm run build`はどちらも`--webpack`を明示している(Next.js 16の既定バンドラーのTurbopackには、bindマウントされた`data`・`photos`をファイル監視から外す`watchOptions.ignored`相当の設定が無いため。`next.config.ts`のコメント参照)。
 
 どちらにも`predev`/`prebuild`で`npm run copy-maplibre-worker`(`scripts/copy-maplibre-worker.mjs`)が付いており、MapLibreのワーカースクリプトを`node_modules`から`public/maplibre-gl/`へコピーする(生成物のためgit管理外。理由は下記「MapLibreのワーカースクリプト」)。`next dev`/`next build`を直接叩くとこのコピーが走らないため、地図が真っ白になったらまず`npm run copy-maplibre-worker`を実行すること。
 
-3つのcomposeファイル(`docker-compose.yml`=本番用 / `docker-compose.dev.yml`=開発用 / `docker-compose.standalone.example.yml`)はどれもプロジェクト名を`travel-log`に揃えてある。同じホスト上で本番用と開発用を**同時に**は動かせない(ポート7040も`db/data`も共有しているため、名前を分けても同時起動はできない)。切り替えるときは先に`docker compose -f <今動いている方> down`すること。
+3つのcomposeファイル(`docker-compose.yml`=本番用 / `docker-compose.dev.yml`=開発用 / `docker-compose.standalone.example.yml`)はどれもプロジェクト名を`travel-log`に揃えてある。同じホスト上で本番用と開発用を**同時に**は動かせない(ポート7040も`data`も共有しているため、名前を分けても同時起動はできない)。切り替えるときは先に`docker compose -f <今動いている方> down`すること。
 
 `docker-compose.standalone.example.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義の雛形。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。**リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
 
@@ -27,7 +27,7 @@ DB定義は`db/init/01_schema.sql`の1ファイルにすべてまとまってい
 
 テーブル定義の読める形の一覧とER図は[docs/database.md](docs/database.md)にまとめてある。**DBに変更を入れたら、同じコミットでこの文書も更新すること**(README等と同じく実装に追従させる対象)。
 
-あわせて、**テーブルに変更を加えた場合は同じコミットで`db/migrations/`に移行スクリプトを追加し、本番DBを既存データを保持したまま移行可能にすること**(本番には利用者の訪問記録・写真が入るため、`db/data/`を捨てる運用はできない)。ファイル名は`<連番>_<内容>.sql`で、ファイル名がそのまま`schema_migrations.version`になる。**`begin`/`commit`と`schema_migrations`へのinsertはスクリプトに書かない**(どちらも`db/entrypoint.sh`が受け持つ)。全文idempotentにすること — 新規DBに対しても一度は実行される。詳細は`db/migrations/README.md`。
+あわせて、**テーブルに変更を加えた場合は同じコミットで`db/migrations/`に移行スクリプトを追加し、本番DBを既存データを保持したまま移行可能にすること**(本番には利用者の訪問記録・写真が入るため、`data/`を捨てる運用はできない)。ファイル名は`<連番>_<内容>.sql`で、ファイル名がそのまま`schema_migrations.version`になる。**`begin`/`commit`と`schema_migrations`へのinsertはスクリプトに書かない**(どちらも`db/entrypoint.sh`が受け持つ)。全文idempotentにすること — 新規DBに対しても一度は実行される。詳細は`db/migrations/README.md`。
 
 適用は`docker compose up`で自動的に行われる(手で流す必要はない。下記「DBの初期化・マイグレーションの流れ」参照)。
 
@@ -39,27 +39,27 @@ composeは`db` → `init` → `app`の順に起動する。
 
 | サービス | 役割 | タイミング |
 |---|---|---|
-| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない)。`db/data`が無ければDockerが作り、所有者はpostgresのエントリポイントが自分で揃える | — |
+| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない)。`data`が無ければDockerが作り、所有者はpostgresのエントリポイントが自分で揃える | — |
 | `init` | スキーマ本体(`/init/01_schema.sql`)と`/migrations`の未適用SQLを適用し`schema_migrations`に記録するワンショット(`db/Dockerfile`、`db/entrypoint.sh`) | dbのhealthcheck通過**後** |
 | `app` | Next.js。`init`が正常終了するまで起動しない | 最後 |
 
-かつては`db/data`の作成とchownを行う`db-init`サービス(prepareサブコマンド)がdbの起動前にあったが、postgresのエントリポイントが同じことを自分でやるため廃止した。「ホスト側にディレクトリが無くても起動できる」が狙いだったものの、それが必要なstandalone環境ほどbindマウント先の自動作成に頼れず、結局あらかじめ作っておく運用になっていた。GHCRのイメージ名(`travel-log-db-init`)はこの名残で、`init`サービスが使い続けている。
+かつてはデータディレクトリの作成とchownを行う`db-init`サービス(prepareサブコマンド)がdbの起動前にあったが、postgresのエントリポイントが同じことを自分でやるため廃止した。「ホスト側にディレクトリが無くても起動できる」が狙いだったものの、それが必要なstandalone環境ほどbindマウント先の自動作成に頼れず、結局あらかじめ作っておく運用になっていた。GHCRのイメージ名(`travel-log-db-init`)はこの名残で、`init`サービスが使い続けている。
 
 スキーマ本体もマイグレーションSQLも`travel-log-db-init`イメージに焼き込まれるため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される。マイグレーションが失敗すると`init`が非ゼロ終了し、`app`も起動しないため、古いスキーマのままアプリが動くことはない。
 
 `01_schema.sql`は`schema_migrations`上では`000_init_schema`という名前の「一番先頭のマイグレーション」として扱う。空のDBには実行し、既にテーブルがあるDB(旧方式でinitdbが作ったもの)には実行せず適用済みとして記録するだけにするので、既存の本番DBをそのまま引き継げる。
 
-**`db/init`をdbコンテナにマウントしないのは意図的**。かつては`docker-entrypoint-initdb.d`に`:ro`マウントし、起動前処理が`chmod -R a+rX`をかけていたが、git管理下のファイルのパーミッションをrootで書き換えるため、`01_schema.sql`を更新するとホスト側の`git pull`が失敗するようになっていた。スキーマ本体もイメージ側から流す方式にして解消した(コンテナがホスト側で触るのはgit管理外の`db/data`だけ)。
+**`db/init`をdbコンテナにマウントしないのは意図的**。かつては`docker-entrypoint-initdb.d`に`:ro`マウントし、起動前処理が`chmod -R a+rX`をかけていたが、git管理下のファイルのパーミッションをrootで書き換えるため、`01_schema.sql`を更新するとホスト側の`git pull`が失敗するようになっていた。スキーマ本体もイメージ側から流す方式にして解消した(コンテナがホスト側で触るのはgit管理外の`data`だけ)。
 
-開発環境では、スキーマを変えたら`db/data/`を捨てて作り直すのが手軽(移行スクリプトの検証は下記の使い捨てDBで行う)。
+開発環境では、スキーマを変えたら`data/`を捨てて作り直すのが手軽(移行スクリプトの検証は下記の使い捨てDBで行う)。
 
 ```bash
 docker compose -f docker-compose.dev.yml down
-rm -rf db/data/18   # 既存データを捨てる(訪問記録・アカウントも消える)
+rm -rf data/18     # 既存データを捨てる(訪問記録・アカウントも消える)
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-既存データ(`db/data/`。Postgresの実データで、リポジトリ直下にbindマウントされるが`.gitignore`対象)を消さずにスキーマ・移行スクリプトを試したい場合は、同じPostgresコンテナ内に使い捨てDBを作って流すとよい。
+既存データ(`data/`。Postgresの実データで、リポジトリ直下にbindマウントされるが`.gitignore`対象)を消さずにスキーマ・移行スクリプトを試したい場合は、同じPostgresコンテナ内に使い捨てDBを作って流すとよい。
 
 ```bash
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres -c "create database schema_check"
@@ -215,13 +215,13 @@ PATCH `/api/spot-types/[id]`は`series_styles`・`categories`と同じく、保�
 
 **訪問記録のある日には日付の下に緑の点**を打つ(`visitDateSet`。どの日に記録があるか分からないまま総当たりで選ぶことになるのを避けるため。**他のスポット種別への訪問も数える** — 経路が種別をまたぐようになったので、その日を落とすと辿れない)。1回目のタップで開始日、2回目で終了日。既に期間が決まっている状態でのタップは新しい開始日として選び直し(範囲を狭めるのにリセットを挟まずに済む)、開始日より前をタップしたときはその日を開始日にして元の開始日を終了日にする(前方向にも伸ばせる)。同じ日を2回タップしても単日のまま。「今日」「表示しない」はよく使うので、カレンダーの中と絞り込みモーダルの両方に置く。既定値は今日。かつてはセレクト(今日 / 表示しない / 訪問のある日の一覧)だったが、期間指定とデータのある日の可視化のためカレンダーに変えた。「表示しない」(`null`)は`saveFilters`が文字列`"none"`で保存し、`loadSavedFilters`は`"none"`のときだけ`null`=表示しないにする。**「今日」(値が`todayKey()`と一致)は具体的な日付ではなく文字列`"today"`で保存し、読み込み時にその日の今日へ解決する**(日付のまま保存すると翌日に開いたとき前日が選ばれた状態で復元されてしまうため)。日付はその日、それ以外(旧仕様の絞り込みだった頃の`null`・キー欠落・不正値)は今日に倒すため、**既存ユーザーも初回から今日の経路が出る**(`todayKey`/`defaultMapFilters`)。終了日(`visitedDateTo`)は**「今日」のような相対表現を持たず具体的な日付でだけ保存する**(終了日だけ動くと期間の長さが日をまたぐたびに変わってしまうため)。カレンダーで日を選んだとき(`handleSelectVisitDate`)は、対象日(期間)をセットしたうえで**その経路全体が画面に収まるよう`fitBounds`する**(1地点だけならmaxZoomまで寄る。経路が0件・「表示しない」のときは地図を動かさない)。開始日を`null`にするときは終了日も一緒に落とす(残っていると次に日を選んだとき意図しない期間になる)。ユーザーが明示的に選んだときだけ移動し、マウント時の既定(今日)の復元では移動しない。日付キーへの変換は`toVisitDateKey`(`visits.visited_on`はtimestamptzでUTC文字列のため、**必ずローカル時刻で日を切る** — UTCのまま切ると日本時間の朝9時前の訪問が前日になる)。
 
-訪問日が選ばれているとき、`MapView`は**その日の訪問記録を訪問時刻の昇順に矢印で結んだ「訪問順の経路」**を描く(`buildVisitPath`)。ルートCSVのルートと同じ`spot-routes`ソース・同じ線/矢印レイヤーに載せるだけなので描画コードは共用で、色だけ`VISIT_PATH_COLOR`(緑`#16a34a`=訪問済みピンの塗りと同じ)にしてルートと区別する。同じスポットへの再訪はそのまま複数回経由地として現れる(行って戻る線になる)が、連続する同じスポットへの訪問は長さ0の線分になり矢印の向きが定まらないためまとめる。日時不明の訪問は除外する。**別のスポット種別のスポットも経路に含める**(訪問予定リストと同じ扱い) — 本体種別で解決できないスポットは`api.spots.get`で座標だけ補完する(`pathExtraSpots`/`pathSpotById`。訪問予定リストと共用の仕組み)。かつては表示中の種別の訪問だけを繋いでいたが、同じ日に別の種別のスポットも回っていると経路がそこで途切れていた。**この経路上のスポット(`pathIds`)は、シリーズ・カテゴリ・訪問状況の絞り込みで外れていても必ずピンを表示する**(絞り込みではなくその日の訪問を辿るための表示のため全条件を免除。ルートCSVの経由地はシリーズ・カテゴリのみ免除で訪問状況は適用する点と対照的)。**この免除は重ね表示側にも同じく効く**(別種別のスポットが経路に入るようになったため。詳しくは「別スポット種別の重ね表示」)。免除の判定には経路(並び順つき)ではなく訪問記録から作ったIDの集合(`visitedSpotIdsOn`)を使う —— 座標の補完を待たずに判定でき、ピンを出すかどうかに並び順は要らないため。
+訪問日が選ばれているとき、`MapView`は**その日の訪問記録を訪問時刻の昇順に矢印で結んだ「訪問順の経路」**を描く(`buildVisitPathsByDay`)。**期間を指定したときは日ごとに別の線にし、日をまたいでスポットを結ばない** —— 宿へ帰って翌朝また出る間の移動は実際には辿っていないので、繋ぐと1日の道のりが読めなくなるため。**線・詳細・Google マップの経路検索のいずれも日ごとに別のルートとして扱う**(フィーチャに`pathDate`を持たせ、タップした線の日ぶんだけを詳細に出す)。かつては期間をまたいで1本に繋いでいた。ルートCSVのルートと同じ`spot-routes`ソース・同じ線/矢印レイヤーに載せるだけなので描画コードは共用で、色だけ`VISIT_PATH_COLOR`(緑`#16a34a`=訪問済みピンの塗りと同じ)にしてルートと区別する。同じスポットへの再訪はそのまま複数回経由地として現れる(行って戻る線になる)が、連続する同じスポットへの訪問は長さ0の線分になり矢印の向きが定まらないためまとめる。日時不明の訪問は除外する。**別のスポット種別のスポットも経路に含める**(訪問予定リストと同じ扱い) — 本体種別で解決できないスポットは`api.spots.get`で座標だけ補完する(`pathExtraSpots`/`pathSpotById`。訪問予定リストと共用の仕組み)。かつては表示中の種別の訪問だけを繋いでいたが、同じ日に別の種別のスポットも回っていると経路がそこで途切れていた。**この経路上のスポット(`pathIds`)は、シリーズ・カテゴリ・訪問状況の絞り込みで外れていても必ずピンを表示する**(絞り込みではなくその日の訪問を辿るための表示のため全条件を免除。ルートCSVの経由地はシリーズ・カテゴリのみ免除で訪問状況は適用する点と対照的)。**この免除は重ね表示側にも同じく効く**(別種別のスポットが経路に入るようになったため。詳しくは「別スポット種別の重ね表示」)。免除の判定には経路(並び順つき)ではなく訪問記録から作ったIDの集合(`visitedSpotIdsOn`)を使う —— 座標の補完を待たずに判定でき、ピンを出すかどうかに並び順は要らないため。
 
 同じ仕組みで、絞り込みモーダルの訪問日の下に**「訪問予定リスト」セレクト**があり、選んだリスト(旅程)のスポットを**リスト順に矢印(紫`PLAN_LIST_PATH_COLOR`=`#9333ea`)で結んだ経路**を描く(`filters.planListId`・`buildPlanListPath`。**訪問済みの経由スポットは経路に載せない** —— 済んだ場所を通り続ける線が残ると次にどこへ行くかが読めないため。リスト自体からは消えない)。訪問日の経路と同じ`spot-routes`ソース/レイヤーに色違いで重ねるだけで(`buildRouteGeoJSON`は色付き経路の配列`extraPaths`を受け取る)、選んだときに`handleSelectPlanList`が経路全体へ`fitBounds`し、経路上のスポットは`pathIds`で絞り込みから免除する点も訪問日と同じ。**現在地(GeolocateControlの青丸)を表示中は、現在地からリスト先頭のスポットまでも線・矢印で結ぶ。この区間だけは青丸と同じ青(`CURRENT_LOCATION_PATH_COLOR`=maplibre-gl既定の`#1da1f2`)で描き、現在地から出ている線だと分かるようにする**(`buildRouteGeoJSON`の`start`に`currentLocation` stateを、`startColor`にこの青を渡すと、この区間が独立したLineStringとして経路の先頭に繋がる。現在地は`geolocate`イベントで更新し(約1m未満の移動は再レンダー抑制のため無視)、青丸ごと消えるOFFへの遷移で忘れる — `trackuserlocationend`はBACKGROUND=青丸が残る遷移でも発火するため、青丸のDOM要素の有無でOFFを見分ける)。リストは`MapView`が`api.visitPlanLists.list`で読み(1件以上あるときだけセレクトを出す)、選択は`loadSavedFilters`/`saveFilters`で保存する(削除済み等で見つからないIDは描画側で無視)。訪問予定リストのセクションのリセットボタンが`planListId`を`null`に戻す(見出し行のリセットは絞り込みのみで触らない)。
 
 ### ルート・経路をGoogle マップで開く
 
-ルート・訪問順の経路・訪問予定リストのような「巡る順に並んだスポット列」は、Google マップの経路検索(Maps URLs の`dir`)にそのまま渡して開ける(`lib/googleMaps.ts`の`buildGoogleMapsRouteUrl`+`components/GoogleMapsRouteLink.tsx`)。**出発地(origin)は現在地**で、スポットは**最後の1件が目的地(destination)、それ以外が経由地(waypoints)**になる。置き場所は地図のルート・経路の詳細モーダル(`MapView`の`routeDetailView`。ルートCSVのルート/訪問順の経路/訪問予定リストの経路すべて)と、訪問予定リストの詳細(`VisitPlanListDetailModal`。`/[type]/spots`とスポット詳細の「訪問予定」から開くもの)。**訪問予定リストは訪問済みの経由スポットを外して渡す**(地図の経路と同じ扱い)。かつては先頭のスポットを出発地にしていたが、今いる場所からそこまでの経路が出ず使い物にならないため現在地に変えた。
+ルート・訪問順の経路・訪問予定リストのような「巡る順に並んだスポット列」は、Google マップの経路検索(Maps URLs の`dir`)にそのまま渡して開ける(`lib/googleMaps.ts`の`buildGoogleMapsRouteUrl`+`components/GoogleMapsRouteLink.tsx`)。**出発地(origin)は現在地**で、スポットは**最後の1件が目的地(destination)、それ以外が経由地(waypoints)**になる。置き場所は地図のルート・経路の詳細モーダル(`MapView`の`routeDetailView`。ルートCSVのルート/訪問順の経路(その日ぶん)/訪問予定リストの経路すべて)と、訪問予定リストの詳細(`VisitPlanListDetailModal`。`/[type]/spots`とスポット詳細の「訪問予定」から開くもの)。**訪問予定リストは訪問済みの経由スポットを外して渡す**(地図の経路と同じ扱い)。**詳細のスポット名をタップすると、その位置へ`flyTo`したうえでそのスポットの詳細モーダルを開く** —— 一覧から辿ったときに「そこが何なのか」を見に行くまでを1タップで済ませるため。詳細の出し分けはピンのタップと同じで、本体種別のスポット(`spotById`にある)なら通常のモーダル、別種別なら読み取り専用の方を開く。かつては先頭のスポットを出発地にしていたが、今いる場所からそこまでの経路が出ず使い物にならないため現在地に変えた。
 
 現在地は`lib/useRouteOrigin.ts`の`useRouteOrigin`(スポット詳細の単一スポットへの経路リンクと共通)で取る。**位置情報の権限が既に許可されているときだけ**`getCurrentPosition`する — モーダルを開いただけで権限ダイアログを出さないため。取れなければ`origin`を付けずに開き、Google マップ側の判断(多くの場合は現在地)に委ねる。
 

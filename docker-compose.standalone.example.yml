@@ -32,7 +32,7 @@ name: travel-log
 # db-data… Postgresの実データ(所有者はpostgresのエントリポイントが自分で揃える)
 # photos … 訪問記録の写真。DBには相対パスだけが入るので、DBと一緒にバックアップする
 # どちらも**あらかじめ作っておくこと**(bindマウント先を自動作成しない環境がある)。
-x-db-data-dir: &db-data-dir "/path/to/travel-log/db/data"
+x-db-data-dir: &db-data-dir "/path/to/travel-log/data"
 x-photos-dir: &photos-dir "/path/to/travel-log/photos"
 
 # ---- ここだけ編集: アプリの設定(.env の代わり) ----

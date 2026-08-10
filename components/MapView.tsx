@@ -226,7 +226,7 @@ function ensureRouteLayers(
   map: maplibregl.Map,
   overlayKeysRef: OverlayKeysRef,
   onSelectRoute: (routeId: string) => void,
-  onSelectPath: (kind: "visit" | "plan") => void
+  onSelectPath: (kind: "visit" | "plan", date: string | null) => void
 ) {
   if (map.getSource(ROUTES_SOURCE_ID)) return;
 
@@ -299,11 +299,16 @@ function ensureRouteLayers(
       onSelectRoute(routeId);
       return;
     }
-    const pathKind = e.features?.find(
+    const pathFeature = e.features?.find(
       (f) =>
         f.properties?.pathKind === "visit" || f.properties?.pathKind === "plan"
-    )?.properties?.pathKind;
-    if (pathKind === "visit" || pathKind === "plan") onSelectPath(pathKind);
+    );
+    const pathKind = pathFeature?.properties?.pathKind;
+    if (pathKind === "visit" || pathKind === "plan") {
+      // 訪問順の経路は日ごとに線が分かれているので、タップした線の日を渡す
+      const pathDate = pathFeature?.properties?.pathDate;
+      onSelectPath(pathKind, typeof pathDate === "string" ? pathDate : null);
+    }
   });
   map.on("mouseenter", ROUTE_HIT_LAYER_ID, () => {
     map.getCanvas().style.cursor = "pointer";
@@ -624,40 +629,57 @@ function visitedSpotIdsOn(visits: Visit[], filters: SpotFilters): Set<string> {
 
 /**
  * 訪問順の経路の対象期間(`filters.visitedDate`〜`visitedDateTo`。開始日がnullなら
- * 表示しない)が選ばれているとき、その期間の訪問を訪問時刻の昇順に並べた経路を返す。
- * **期間をまたいでも1本の経路にする**(旅行の何日ぶんかをそのまま辿れるように)。
+ * 表示しない)が選ばれているとき、その期間の訪問を**日ごとに分けて**、それぞれ
+ * 訪問時刻の昇順に並べた経路を返す(日付の昇順)。
+ * **日をまたいでスポットを線で結ばない** —— 宿へ帰って翌朝また出る間の移動は
+ * 実際には辿っていないので、繋ぐと1日の道のりが読めなくなるため。
+ * 線・詳細・Google マップの経路検索のいずれも日ごとに別のものとして扱う。
  * 別のスポット種別のスポットも、座標を補完できていれば経路に含める(訪問予定リストと
  * 同じ扱い。補完は pathExtraSpots)。解決できないスポットだけを除く。
  * 同じスポットへの再訪はそのまま複数回現れる(行って戻る線になる)が、
  * 連続する同じスポットへの訪問(同じ場所で複数回記録した場合)はまとめる
  * (長さ0の線分になり、矢印の向きが定まらないため)。
  */
-function buildVisitPath(
+function buildVisitPathsByDay(
   visits: Visit[],
   filters: SpotFilters,
   spotById: Map<string, Spot>
-): Spot[] {
+): { date: string; path: Spot[] }[] {
   if (!filters.visitedDate) return [];
-  return visits
-    .flatMap((visit) => {
-      if (!isInVisitedRange(visit.visited_on, filters)) return [];
-      const spot = spotById.get(visit.spot_id);
-      return spot ? [{ time: Date.parse(visit.visited_on!), spot }] : [];
-    })
-    .sort((a, b) => a.time - b.time)
-    .map((v) => v.spot)
-    .filter((spot, i, list) => i === 0 || spot.id !== list[i - 1].id);
+  const byDay = new Map<string, { time: number; spot: Spot }[]>();
+  for (const visit of visits) {
+    if (!isInVisitedRange(visit.visited_on, filters)) continue;
+    const spot = spotById.get(visit.spot_id);
+    const date = toVisitDateKey(visit.visited_on);
+    if (!spot || !date) continue;
+    const day = byDay.get(date) ?? [];
+    day.push({ time: Date.parse(visit.visited_on!), spot });
+    byDay.set(date, day);
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([date, entries]) => ({
+      date,
+      path: entries
+        .sort((a, b) => a.time - b.time)
+        .map((v) => v.spot)
+        .filter((spot, i, list) => i === 0 || spot.id !== list[i - 1].id),
+    }))
+    .filter((day) => day.path.length > 0);
 }
 
 /**
  * routeId はタップでルート詳細を開くのに使う。訪問順の経路・訪問予定リストの経路には
  * routeId の代わりに pathKind を付け、タップで対応する経路の詳細を開く。
+ * 訪問順の経路は日ごとに別の線なので、どの日の線かを pathDate(`YYYY-MM-DD`)で持ち、
+ * タップしたときにその日ぶんの詳細を出せるようにする。
  */
 type RouteFeatureProps = {
   color: string;
   icon: string;
   routeId?: string;
   pathKind?: "visit" | "plan";
+  pathDate?: string;
 };
 
 /**
@@ -699,6 +721,8 @@ function buildRouteGeoJSON(
     path: Spot[];
     color: string;
     kind?: "visit" | "plan";
+    /** 訪問順の経路で、その線がどの日のものか(`YYYY-MM-DD`) */
+    date?: string;
     start?: [number, number] | null;
     startColor?: string;
   }[]
@@ -732,6 +756,7 @@ function buildRouteGeoJSON(
           color: p.color,
           icon: ensureRouteArrowImage(map, p.color),
           ...(p.kind ? { pathKind: p.kind } : {}),
+          ...(p.date ? { pathDate: p.date } : {}),
         },
       }));
 
@@ -1365,7 +1390,9 @@ export default function MapView({
       // いないことがある。その場合は解決できた分だけで移動し、補完が届いたあとの
       // 経路の描き直しに合わせて地図を動かし直すことはしない
       // (ユーザーの操作なしに地図が動くのを避けるため)
-      fitMapToSpots(buildVisitPath(visits, next, pathSpotById));
+      fitMapToSpots(
+        buildVisitPathsByDay(visits, next, pathSpotById).flatMap((d) => d.path)
+      );
     },
     [filters, setFilters, visits, pathSpotById, fitMapToSpots]
   );
@@ -1401,6 +1428,8 @@ export default function MapView({
   const [detailPathKind, setDetailPathKind] = useState<"visit" | "plan" | null>(
     null
   );
+  // 訪問順の経路は日ごとに線が分かれるため、詳細を開いた線がどの日かを覚える
+  const [detailPathDate, setDetailPathDate] = useState<string | null>(null);
   // 経路詳細の「編集」で開く訪問予定リストの基本情報編集モーダルの対象
   const [editingPlanList, setEditingPlanList] = useState<VisitPlanList | null>(
     null
@@ -1414,7 +1443,8 @@ export default function MapView({
     setOverlayDetailRouteId(null);
     setDetailRouteId(routeId);
   }, []);
-  const openPathDetail = useCallback((kind: "visit" | "plan") => {
+  const openPathDetail = useCallback((kind: "visit" | "plan", date: string | null) => {
+    setDetailPathDate(date);
     setDetailRouteId(null);
     setOverlayDetailRouteId(null);
     setDetailPathKind(kind);
@@ -2543,8 +2573,11 @@ export default function MapView({
       isolate === null
         ? filterVisibleRoutes(routes, filters, seriesStyles, spotById)
         : [];
-    const visitPath =
-      isolate === "plan" ? [] : buildVisitPath(visits, filters, pathSpotById);
+    // 訪問順の経路は日ごとに別の線にする(日をまたいで結ばない)
+    const visitPathsByDay =
+      isolate === "plan"
+        ? []
+        : buildVisitPathsByDay(visits, filters, pathSpotById);
     // 作成モード中に編集対象のリスト自身を経路表示していた場合は、更新前の経路が
     // 下書きの経路と古い形のまま二重に残らないよう、保存済み側は描かない
     const planListPath =
@@ -2560,7 +2593,12 @@ export default function MapView({
         | undefined;
       source?.setData(
         buildRouteGeoJSON(map, visibleRoutes, seriesStyles, [
-          { path: visitPath, color: VISIT_PATH_COLOR, kind: "visit" },
+          ...visitPathsByDay.map((day) => ({
+            path: day.path,
+            color: VISIT_PATH_COLOR,
+            kind: "visit" as const,
+            date: day.date,
+          })),
           {
             path: planListPath,
             color: PLAN_LIST_PATH_COLOR,
@@ -2787,6 +2825,8 @@ export default function MapView({
     editList?: VisitPlanList;
     points: {
       key: string;
+      /** タップでその位置へ移動したあと、このスポットの詳細を開く */
+      spotId: string;
       name: string;
       lng: number;
       lat: number;
@@ -2799,6 +2839,7 @@ export default function MapView({
         pointNoun: "経由地",
         points: detailRoute.points.map((p) => ({
           key: `${p.spot_id}-${p.seq}`,
+          spotId: p.spot_id,
           name: p.spot_name,
           lng: p.lng,
           lat: p.lat,
@@ -2807,20 +2848,20 @@ export default function MapView({
       }
     : detailPathKind === "visit"
       ? (() => {
-          const path = buildVisitPath(visits, filters, pathSpotById);
-          if (path.length === 0) return null;
+          // 線は日ごとに分かれているので、詳細もタップした日の1日ぶんだけを出す
+          // (期間指定でも「その日に辿った道のり」が読めるように)。日が分からない
+          // 古い状態のときは先頭の日にフォールバックする
+          const days = buildVisitPathsByDay(visits, filters, pathSpotById);
+          const day =
+            days.find((d) => d.date === detailPathDate) ?? days[0] ?? null;
+          if (!day) return null;
           return {
-            title: "訪問順の経路",
-            description: filters.visitedDate
-              ? filters.visitedDateTo
-                ? `${formatVisitDate(filters.visitedDate)}〜${formatVisitDate(
-                    filters.visitedDateTo
-                  )}に訪問したスポットを、訪問した順に並べています。`
-                : `${formatVisitDate(filters.visitedDate)}に訪問したスポットを、訪問した順に並べています。`
-              : null,
+            title: `訪問順の経路(${formatVisitDate(day.date)})`,
+            description: `${formatVisitDate(day.date)}に訪問したスポットを、訪問した順に並べています。`,
             pointNoun: "地点",
-            points: path.map((s, i) => ({
+            points: day.path.map((s, i) => ({
               key: `${s.id}-${i}`,
+              spotId: s.id,
               name: s.name,
               lng: s.lng,
               lat: s.lat,
@@ -2839,6 +2880,7 @@ export default function MapView({
               editList: list,
               points: path.map((s, i) => ({
                 key: `${s.id}-${i}`,
+                spotId: s.id,
                 name: s.name,
                 lng: s.lng,
                 lat: s.lat,
@@ -2850,6 +2892,7 @@ export default function MapView({
     setDetailRouteId(null);
     setOverlayDetailRouteId(null);
     setDetailPathKind(null);
+    setDetailPathDate(null);
   };
 
   // 今表示中のスポット種別の表示名(左下のチップに出す)。spotTypesは重ね表示
@@ -3696,7 +3739,11 @@ export default function MapView({
                         <span className="w-6 shrink-0 text-right text-xs font-medium tabular-nums text-gray-500">
                           {i + 1}
                         </span>
-                        {/* スポット名のタップでその位置へ飛ぶ(モーダルは閉じる) */}
+                        {/* スポット名のタップでその位置へ飛び、続けてそのスポットの
+                            詳細を開く(一覧から辿ったときに、そこが何なのかを
+                            見に行くまでが1タップで済むように)。詳細は本体種別の
+                            スポットなら通常のモーダル、別種別なら読み取り専用
+                            (ピンをタップしたときと同じ出し分け) */}
                         <button
                           type="button"
                           onClick={() => {
@@ -3705,6 +3752,11 @@ export default function MapView({
                               center: [point.lng, point.lat],
                               zoom: 16,
                             });
+                            if (spotById.has(point.spotId)) {
+                              setDetailSpotId(point.spotId);
+                            } else {
+                              setOverlayDetailSpotId(point.spotId);
+                            }
                           }}
                           className="min-w-0 truncate text-left font-medium text-blue-600 underline"
                         >
@@ -3727,7 +3779,7 @@ export default function MapView({
                 </ol>
                 <p className="pt-2 text-xs text-gray-500">
                   {routeDetailView.pointNoun}
-                  {routeDetailView.points.length}件。スポット名をタップすると、その位置に地図を移動します。
+                  {routeDetailView.points.length}件。スポット名をタップすると、その位置へ移動して詳細を開きます。
                 </p>
                 {/* 経路全体をGoogle マップの経路検索で開く(先頭が出発地、
                     途中が経由地、最後が目的地) */}

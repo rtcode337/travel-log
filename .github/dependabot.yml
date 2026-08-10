@@ -33,7 +33,7 @@ updates:
       day: "monday"
       timezone: "Asia/Tokyo"
     ignore:
-      # Postgresのメジャーアップデートはdb/dataの移行作業(pg_upgradeまたは
+      # Postgresのメジャーアップデートはdata/の移行作業(pg_upgradeまたは
       # dump/restore)が必要なため、自動PRにはしない(意図的に手動で上げる)
       - dependency-name: "postgres"
         update-types: ["version-update:semver-major"]

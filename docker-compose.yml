@@ -14,11 +14,11 @@ services:
       # postgres:18のイメージはPGDATAが /var/lib/postgresql/18/docker で、
       # VOLUME宣言も1段上の /var/lib/postgresql に変わった。マウント先を
       # /var/lib/postgresql/data のままにすると匿名ボリュームが毎回作られるため
-      # 1段上をマウントする(実データはホストの db/data/18/docker に入る)。
-      # db/dataが無ければDockerが作り、所有者はpostgresのエントリポイント
+      # 1段上をマウントする(実データはホストの data/18/docker に入る)。
+      # dataが無ければDockerが作り、所有者はpostgresのエントリポイント
       # (rootで起動して自分で揃える)が調整する。bindマウント先を自動作成しない
       # 環境(一部のNAS等)では、先にディレクトリを作っておくこと
-      - ./db/data:/var/lib/postgresql
+      - ./data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s
