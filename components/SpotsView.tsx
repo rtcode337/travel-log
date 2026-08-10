@@ -619,6 +619,8 @@ export default function SpotsView({
                             {formatPlanDateRange(list.start_date, list.end_date)}
                             {" ・ "}
                             {list.spot_ids.length}スポット
+                            {list.visited_spot_ids.length > 0 &&
+                              `(訪問済み ${list.visited_spot_ids.length})`}
                           </p>
                         </div>
                         <span className="shrink-0 text-gray-400">›</span>
@@ -1020,6 +1022,7 @@ export default function SpotsView({
               setDetailListId(null);
               loadPlanLists();
             }}
+            onChanged={loadPlanLists}
             onOpenSpot={(id) => {
               setDetailListId(null);
               setDetailSpotId(id);

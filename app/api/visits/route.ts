@@ -80,15 +80,30 @@ export async function POST(request: Request) {
     throw e;
   }
 
-  // 訪問を記録したら、その場所は訪問予定リストから自動的に外す。ただし
-  // 日時なしの未訪問記録(=まだ行っていない下調べのメモ)は行きたい場所の
-  // ままなので外さない(日時ありの未訪問記録は「訪れたが改めて来たい」
-  // 記録のため、通常の訪問と同じく外す)
+  // 訪問を記録したら、その場所は訪問予定(行きたい場所のブックマーク)から
+  // 自動的に外す。ただし日時なしの未訪問記録(=まだ行っていない下調べのメモ)は
+  // 行きたい場所のままなので外さない(日時ありの未訪問記録は「訪れたが改めて
+  // 来たい」記録のため、通常の訪問と同じく外す)
   if (!(unvisited && !body.visited_on)) {
     await query("delete from visit_plans where user_id = $1 and spot_id = $2", [
       userId,
       body.spot_id,
     ]);
+    // 訪問予定リスト(旅程)側は行を消さず、訪問済みの印を付けるだけにする。
+    // 消してしまうと「その旅程で何を回ったか」が後から辿れなくなるため。
+    // 経路(地図の紫の矢印・Google マップの経路検索)からはこの印で外れる。
+    // 本人の全リストが対象で、既に印が付いている行は日時を上書きしない
+    // (最初にそこへ行った時刻を残す)
+    await query(
+      `update visit_plan_list_items it
+          set visited_at = now()
+         from visit_plan_lists l
+        where it.list_id = l.id
+          and l.user_id = $1
+          and it.spot_id = $2
+          and it.visited_at is null`,
+      [userId, body.spot_id]
+    );
   }
 
   return NextResponse.json({ data: rows[0] });

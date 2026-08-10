@@ -215,6 +215,7 @@ erDiagram
         uuid list_id FK
         uuid spot_id FK "リスト×スポットでユニーク"
         integer seq "リスト内の並び順"
+        timestamptz visited_at "訪問済みになった日時(null=未訪問)"
     }
     reviews {
         uuid id PK
@@ -228,7 +229,11 @@ erDiagram
 
 - **`visits` は同一スポットへの複数回訪問を許容する**(トグルではない)
 - **`visit_plans`(1スポットの予定)と `visit_plan_lists`(順序付きの旅程)は独立**。
-  訪問を記録すると `visit_plans` からは自動で消える
+  訪問を記録すると `visit_plans` からは自動で消えるが、**旅程の側は消さず
+  `visit_plan_list_items.visited_at` に日時を入れる**(訪問済みの印)。旅程は
+  「その旅行で何を回ったか」の記録でもあるため、行が消えると後から辿れない。
+  印の付いた経由スポットは経路(地図の矢印・Google マップの経路検索)から外れる。
+  画面から手で付け外しもできる(`PATCH /api/visit-plan-lists/[id]/items/[spotId]`)
 - **`reviews` は掲示板方式**(1ユーザーが同じスポットに何件でも書ける)。機能自体の
   ON/OFF は種別ごとに `spot_type_settings` の `reviews_enabled` で切り替える。
   シリーズ表示ロジックには `reviews` を一切参照させない

@@ -338,6 +338,12 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(input),
       }),
+    /** 経由スポット1件の「訪問済み」を付け外しする(更新後のリストが返る) */
+    setItemVisited: (id: string, spotId: string, visited: boolean) =>
+      request<VisitPlanList>(
+        `/api/visit-plan-lists/${id}/items/${spotId}`,
+        { method: "PATCH", body: JSON.stringify({ visited }) }
+      ),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/visit-plan-lists/${id}`, {
         method: "DELETE",
