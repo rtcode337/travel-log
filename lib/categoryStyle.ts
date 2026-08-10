@@ -20,16 +20,51 @@ import type { Category, SpotType } from "./types";
  */
 
 /** ピンの頭の形。増やすときはlib/pinIcon.tsの描画にも分岐を足すこと */
-export const PIN_SHAPES = ["circle", "rounded-square"] as const;
+export const PIN_SHAPES = [
+  "circle",
+  "rounded-square",
+  "diamond",
+  "pentagon",
+  "hexagon",
+  "castle",
+] as const;
 export type PinShape = (typeof PIN_SHAPES)[number];
 
 /** 設定が無いカテゴリ・設定そのものが無い種別で使う形 */
 export const DEFAULT_PIN_SHAPE: PinShape = "circle";
 
+/**
+ * 自前の形を書くときの座標系。**幅100・高さ145の箱**に、SVGのパス(`d`)で描く。
+ * 145 は「頭100 + とんがり45」の比で、組み込みの形と同じ縦横比になる。
+ *
+ * **箱の下端中央(50,145)がスポットの位置**(symbolレイヤーは`icon-anchor: bottom`)。
+ * とんがりを付けたければそこまで伸ばし、付けないなら図形の下端がその位置に接する。
+ * ラベル(シリーズの文字)は**頭の中心(50,50)**に描くので、そこは塗りを空けておく。
+ */
+export const PIN_PATH_VIEW_WIDTH = 100;
+export const PIN_PATH_VIEW_HEIGHT = 145;
+
+/**
+ * パス(`d`)として妥当な文字だけでできているか。**canvasはパスを描くだけで
+ * スクリプトを実行しないので危険は無い**が、打ち間違いを黙って空のピンにしない
+ * ための最低限の検査(Path2Dは不正な断片を例外にせず無視する)。
+ */
+const PATH_D_RE = /^[Mm][\s0-9.,+\-eE]*[MmLlHhVvCcSsQqTtAaZz][A-Za-z0-9.,+\-eE\s]*$/;
+
+export function isValidPinPath(v: unknown): v is string {
+  return typeof v === "string" && v.length > 0 && v.length <= 4000 && PATH_D_RE.test(v);
+}
+
 export interface CategoryStyleDefinition {
   category: string;
-  shape: PinShape;
+  /** 組み込みの形。`path`を書いたときは省略できる */
+  shape?: PinShape;
+  /** 自前の形(SVGのパス。100×145の箱に描く)。`shape`より優先する */
+  path?: string;
 }
+
+/** 解決済みの形。文字列なら組み込み、オブジェクトなら自前のパス */
+export type PinShapeSpec = PinShape | { path: string };
 
 /** spot_type_settingsにおける、カテゴリの見た目設定を保存するキー(値はJSON文字列) */
 export const CATEGORY_STYLES_SETTING_KEY = "category_styles";
@@ -48,6 +83,8 @@ export function isValidCategoryStyle(v: unknown): v is CategoryStyleDefinition {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.category !== "string" || !o.category) return false;
+  // pathがあればそちらを使う(shapeは省略可)。両方無い・両方不正なら無効
+  if (o.path !== undefined) return isValidPinPath(o.path);
   return isPinShape(o.shape);
 }
 
@@ -81,10 +118,12 @@ export function resolveCategoryStyles(
 export function findPinShape(
   categories: Category[] | null | undefined,
   styles: CategoryStyleDefinition[]
-): PinShape {
+): PinShapeSpec {
   if (!categories || categories.length === 0 || styles.length === 0) {
     return DEFAULT_PIN_SHAPE;
   }
   const found = styles.find((s) => categories.includes(s.category));
-  return found ? found.shape : DEFAULT_PIN_SHAPE;
+  if (!found) return DEFAULT_PIN_SHAPE;
+  if (found.path) return { path: found.path };
+  return found.shape ?? DEFAULT_PIN_SHAPE;
 }
