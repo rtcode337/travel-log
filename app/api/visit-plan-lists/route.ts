@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import type { VisitPlanList } from "@/lib/types";
+import { PLAN_LIST_COLUMNS } from "@/lib/visitPlanListSql";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * 現在のユーザーの、指定スポット種別の訪問予定リスト一覧。各リストの経由スポットは
  * seq順の spot_ids(UUID配列)として返す(スポットの詳細は呼び出し側が保持済みの
- * 一覧から解決する)。
+ * 一覧から解決する)。訪問済みの経由スポットは spot_ids に残したまま
+ * visited_spot_ids にも入る。
  */
 export async function GET(request: Request) {
   const userId = await getCurrentUserId();
@@ -22,15 +24,7 @@ export async function GET(request: Request) {
   }
 
   const { rows } = await query<VisitPlanList>(
-    `select l.id, l.spot_type_id, l.title, l.description,
-            to_char(l.start_date, 'YYYY-MM-DD') as start_date,
-            to_char(l.end_date, 'YYYY-MM-DD') as end_date,
-            l.created_at, l.updated_at,
-            coalesce(
-              array_agg(i.spot_id order by i.seq)
-                filter (where i.spot_id is not null),
-              '{}'
-            ) as spot_ids
+    `select ${PLAN_LIST_COLUMNS}
        from visit_plan_lists l
        left join visit_plan_list_items i on i.list_id = l.id
       where l.user_id = $1
@@ -119,15 +113,7 @@ export async function POST(request: Request) {
   }
 
   const created = await query<VisitPlanList>(
-    `select l.id, l.spot_type_id, l.title, l.description,
-            to_char(l.start_date, 'YYYY-MM-DD') as start_date,
-            to_char(l.end_date, 'YYYY-MM-DD') as end_date,
-            l.created_at, l.updated_at,
-            coalesce(
-              array_agg(i.spot_id order by i.seq)
-                filter (where i.spot_id is not null),
-              '{}'
-            ) as spot_ids
+    `select ${PLAN_LIST_COLUMNS}
        from visit_plan_lists l
        left join visit_plan_list_items i on i.list_id = l.id
       where l.id = $1

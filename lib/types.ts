@@ -380,7 +380,10 @@ export interface VisitPlanList {
   /** 訪問予定期間(`YYYY-MM-DD`)。終了日未入力時は開始日と同じ(=単日) */
   start_date: string;
   end_date: string;
+  /** 経由スポット(seq順)。訪問済みのものも消さずにここへ残る */
   spot_ids: string[];
+  /** `spot_ids` のうち訪問済みのもの。経路(地図の矢印・Google マップ)から外す判定に使う */
+  visited_spot_ids: string[];
   created_at: string;
   updated_at: string;
 }

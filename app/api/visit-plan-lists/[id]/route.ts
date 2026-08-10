@@ -2,20 +2,13 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import type { VisitPlanList } from "@/lib/types";
+import { PLAN_LIST_COLUMNS } from "@/lib/visitPlanListSql";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** 指定リスト(本人)のspot_ids付き1件を返すSELECT(GET/PATCHの返却で共用) */
 const LIST_SELECT = `
-  select l.id, l.spot_type_id, l.title, l.description,
-         to_char(l.start_date, 'YYYY-MM-DD') as start_date,
-         to_char(l.end_date, 'YYYY-MM-DD') as end_date,
-         l.created_at, l.updated_at,
-         coalesce(
-           array_agg(i.spot_id order by i.seq)
-             filter (where i.spot_id is not null),
-           '{}'
-         ) as spot_ids
+  select ${PLAN_LIST_COLUMNS}
     from visit_plan_lists l
     left join visit_plan_list_items i on i.list_id = l.id
    where l.id = $1 and l.user_id = $2
@@ -98,7 +91,13 @@ export async function PATCH(
   );
 
   // 経由スポットは丸ごと置き換える(重複除去+存在するスポットに限定)。
-  // 地図で別スポット種別を重ねて追加できるため種別は問わない(itemsテーブルも種別非依存)
+  // 地図で別スポット種別を重ねて追加できるため種別は問わない(itemsテーブルも種別非依存)。
+  // 置き換えで行が作り直されるため、訪問済み(visited_at)は先に控えて後で戻す
+  // —— 戻さないと、リストの並び替えやタイトルの編集をしただけで訪問済みが消える
+  const before = await query<{ spot_id: string; visited_at: string | null }>(
+    "select spot_id, visited_at from visit_plan_list_items where list_id = $1",
+    [id]
+  );
   await query("delete from visit_plan_list_items where list_id = $1", [id]);
   const ordered = spotIds.filter((s, i) => spotIds.indexOf(s) === i);
   if (ordered.length > 0) {
@@ -110,6 +109,16 @@ export async function PATCH(
        on conflict (list_id, spot_id) do nothing`,
       [id, ordered]
     );
+    const visited = before.rows.filter((r) => r.visited_at !== null);
+    if (visited.length > 0) {
+      await query(
+        `update visit_plan_list_items it
+            set visited_at = v.visited_at
+           from unnest($2::uuid[], $3::timestamptz[]) as v(spot_id, visited_at)
+          where it.list_id = $1 and it.spot_id = v.spot_id`,
+        [id, visited.map((r) => r.spot_id), visited.map((r) => r.visited_at)]
+      );
+    }
   }
 
   const { rows } = await query<VisitPlanList>(LIST_SELECT, [id, userId]);

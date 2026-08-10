@@ -663,6 +663,9 @@ type RouteFeatureProps = {
 /**
  * 選んだ訪問予定リスト(旅程)の経路。そのリストのスポットをリスト順に並べる
  * (見えないスポット=未ダウンロード等は除いて残りを繋ぐ)。
+ * **訪問済みの経由スポットは経路に載せない** —— 済んだ場所を通り続ける線が
+ * 残ると「次にどこへ行くか」が読めなくなるため。リスト自体からは消えないので、
+ * 訪問予定リストの詳細では訪問済みとして並んだままになる。
  */
 function buildPlanListPath(
   planLists: VisitPlanList[],
@@ -672,7 +675,9 @@ function buildPlanListPath(
   if (!filters.planListId) return [];
   const list = planLists.find((l) => l.id === filters.planListId);
   if (!list) return [];
+  const visited = new Set(list.visited_spot_ids);
   return list.spot_ids
+    .filter((id) => !visited.has(id))
     .map((id) => spotById.get(id))
     .filter((s): s is Spot => s !== undefined);
 }
@@ -1381,31 +1386,6 @@ export default function MapView({
     [filters, setFilters, planLists, pathSpotById, fitMapToSpots]
   );
 
-  // 地図で訪問予定リストを経路表示中に、そのリスト内のスポットへ新しく訪問記録したら、
-  // 自動でそのスポットをリストから外す(訪問済みが経路に残り続けないように)。
-  // 表示中のリスト(filters.planListId)にそのスポットが含まれるときだけ動く
-  const handleVisitRecorded = useCallback(
-    async (spotId: string) => {
-      const listId = filters.planListId;
-      if (!listId) return;
-      const list = planLists.find((l) => l.id === listId);
-      if (!list || !list.spot_ids.includes(spotId)) return;
-      const nextSpotIds = list.spot_ids.filter((id) => id !== spotId);
-      const { data } = await api.visitPlanLists.update(listId, {
-        title: list.title,
-        description: list.description,
-        start_date: list.start_date,
-        end_date: list.end_date,
-        spot_ids: nextSpotIds,
-      });
-      setPlanLists((prev) =>
-        prev.map((l) =>
-          l.id === listId ? (data ?? { ...l, spot_ids: nextSpotIds }) : l
-        )
-      );
-    },
-    [filters.planListId, planLists]
-  );
   // マウント時と、マウント中に種別が切り替わった場合に、その種別の保存済み条件を読む
   useEffect(() => {
     setFiltersState(loadSavedFilters(spotTypeKey));
@@ -3793,7 +3773,6 @@ export default function MapView({
           allowPlanList
           onClose={() => setOverlayDetailSpotId(null)}
           onVisitChange={loadVisits}
-          onVisitRecorded={handleVisitRecorded}
           // 重ね表示スポットを現在の種別のリストへ追加したら、経路表示中のリストの
           // 線にも反映されるようリスト一覧を取り直す
           onPlanListChange={loadPlanLists}
@@ -3868,7 +3847,6 @@ export default function MapView({
           spots={spots}
           onClose={() => setDetailSpotId(null)}
           onVisitChange={loadVisits}
-          onVisitRecorded={handleVisitRecorded}
           // 既存の訪問予定リストへの追加をリスト一覧へ反映する(経路表示中の
           // リストに追加した場合、地図の紫の経路も引き直される)
           onPlanListChange={loadPlanLists}

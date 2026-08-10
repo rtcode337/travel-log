@@ -300,11 +300,16 @@ create table visit_plan_lists (
 create index visit_plan_lists_user_id_idx on visit_plan_lists (user_id);
 create index visit_plan_lists_spot_type_id_idx on visit_plan_lists (spot_type_id);
 
+-- visited_at: 訪問済みになった日時(nullなら未訪問)。訪問記録を付けると自動で入り、
+-- 画面から手で付け外しもできる。訪問済みの経由スポットは経路(地図の紫の矢印・
+-- Google マップの経路検索)から外れるが、行はリストに残す
+-- ——「その旅程で何を回ったか」を後から辿れるようにするため
 create table visit_plan_list_items (
   id          uuid primary key default gen_random_uuid(),
   list_id     uuid not null references visit_plan_lists (id) on delete cascade,
   spot_id     uuid not null references spots (id) on delete cascade,
   seq         int not null,
+  visited_at  timestamptz,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   unique (list_id, spot_id)

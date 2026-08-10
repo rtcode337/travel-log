@@ -89,7 +89,6 @@ export default function SpotDetailModal({
   allowPlanList = false,
   onClose,
   onVisitChange,
-  onVisitRecorded,
   onSpotChange,
   onSpotDeleted,
   onVisitPlanChange,
@@ -126,7 +125,6 @@ export default function SpotDetailModal({
   /** 新しい訪問記録が追加されたときだけ、そのスポットIDとともに呼ばれる
    * (地図で経路表示中の訪問予定リストから、訪問済みスポットを自動で外すのに使う。
    *  訪問記録の編集・削除では呼ばれない) */
-  onVisitRecorded?: (spotId: string) => void;
   /** スポット自体の編集・承認/却下で内容が変わったときに、変更後の内容とともに呼ばれる
    * (呼び出し元の一覧の再取得・公開スポットキャッシュの更新用) */
   onSpotChange?: (spot: Spot) => void;
@@ -858,11 +856,14 @@ export default function SpotDetailModal({
             // 訪問記録時、サーバー側で訪問予定からも自動的に外れる
             onVisitPlanChange?.();
             onReviewChange?.();
-            // 地図で経路表示中の訪問予定リストから、訪問済みスポットを自動で外す。
-            // 日時なしの未訪問記録(下調べ)はサーバー側でも訪問予定が残る
-            // (まだ行っていない)ため、リストからも外さない
+            // 訪問記録を付けると、サーバー側でその場所を含む訪問予定リストの
+            // 経由スポットに訪問済みの印が付き、地図の経路から外れる。印の付いた
+            // 状態を出すためにリストを取り直す(自分の「訪問予定」欄と、リストを
+            // 持っている呼び出し元の両方)。日時なしの未訪問記録(下調べ)は
+            // サーバー側でも印が付かない(まだ行っていない)ため取り直さない
             if (saved && !(saved.unvisited && !saved.visited_on)) {
-              onVisitRecorded?.(spot.id);
+              loadPlanLists();
+              onPlanListChange?.();
             }
           }}
         />
@@ -986,6 +987,12 @@ export default function SpotDetailModal({
             // 表示中のスポット自身なら閉じるだけでよい。別のスポットは呼び出し元に
             // 表示対象の差し替えを頼む(onOpenSpot未指定の呼び出し元では何もしない)
             if (id !== spotId) onOpenSpot?.(id);
+          }}
+          // 訪問済みの付け外しは経路(地図の紫の矢印)の見え方を変えるため、
+          // リストを持っている呼び出し元にも取り直させる
+          onChanged={() => {
+            loadPlanLists();
+            onPlanListChange?.();
           }}
         />
       )}
