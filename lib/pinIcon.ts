@@ -1,7 +1,12 @@
 import type * as maplibregl from "maplibre-gl";
 import type { Series } from "./types";
 import { autoTextColor, findSeriesStyle, isImageLabel, type SeriesStyleDefinition } from "./seriesStyle";
-import { DEFAULT_PIN_SHAPE, type PinShape } from "./categoryStyle";
+import {
+  DEFAULT_PIN_SHAPE,
+  PIN_PATH_VIEW_HEIGHT,
+  PIN_PATH_VIEW_WIDTH,
+  type PinShapeSpec,
+} from "./categoryStyle";
 
 /**
  * 地図ピン(下がとんがった吹き出し型)の画像をcanvasで生成し、
@@ -34,10 +39,8 @@ function pinTailHeight(size: number): number {
  * シリーズ名だけをIDにすると暫定の見た目で登録した画像がそのまま使われ続けてしまう
  * (ensurePinImageはmap.hasImage()で早期returnする)。
  */
-function styleSignature(style: SeriesStyleDefinition): string {
-  const label = isImageLabel(style.label) ? `img:${style.label.image}` : `txt:${style.label}`;
-  const raw = `${style.color}|${style.borderColor}|${style.size}|${style.textColor ?? ""}|${label}`;
-  // FNV-1a(ラベルが画像(base64)のこともあるため、IDに全文を入れず固定長にする)
+/** FNV-1a。長い値(画像のbase64・自前のパス)をIDに入れず固定長にするために使う */
+function fnv1a(raw: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < raw.length; i += 1) {
     h ^= raw.charCodeAt(i);
@@ -46,17 +49,27 @@ function styleSignature(style: SeriesStyleDefinition): string {
   return (h >>> 0).toString(36);
 }
 
+function styleSignature(style: SeriesStyleDefinition): string {
+  const label = isImageLabel(style.label) ? `img:${style.label.image}` : `txt:${style.label}`;
+  return fnv1a(
+    `${style.color}|${style.borderColor}|${style.size}|${style.textColor ?? ""}|${label}`
+  );
+}
+
 export function pinIconId(
   series: Series | null,
   visited: boolean,
   isPrivate: boolean,
   seriesStyles: SeriesStyleDefinition[],
   /** 頭の形(カテゴリ由来)。**IDに混ぜないと、形を変えても既存の画像が使われ続ける** */
-  shape: PinShape = DEFAULT_PIN_SHAPE
+  shape: PinShapeSpec = DEFAULT_PIN_SHAPE
 ): string {
   const sig = styleSignature(findSeriesStyle(series, seriesStyles));
   const base = `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}`;
-  return `${base}-${sig}-${shape}-${series ?? "__null__"}`;
+  // 自前のパスはそのまま混ぜるとIDが長くなるうえ、MapLibreの画像IDに使えない
+  // 文字が入りうるのでハッシュにする
+  const shapeKey = typeof shape === "string" ? shape : `p${fnv1a(shape.path)}`;
+  return `${base}-${sig}-${shapeKey}-${series ?? "__null__"}`;
 }
 
 /** data URL画像をHTMLImageElementとして読み込む(base64は同期的に近いが、確実性のためdecode()を待つ) */
@@ -76,7 +89,7 @@ export async function ensurePinImage(
   isPrivate: boolean,
   seriesStyles: SeriesStyleDefinition[],
   /** 頭の形(カテゴリ由来。lib/categoryStyle.ts の findPinShape で解決したもの) */
-  shape: PinShape = DEFAULT_PIN_SHAPE
+  shape: PinShapeSpec = DEFAULT_PIN_SHAPE
 ): Promise<string> {
   const id = pinIconId(series, visited, isPrivate, seriesStyles, shape);
   if (map.hasImage(id)) return id;
@@ -104,9 +117,23 @@ export async function ensurePinImage(
   const cy = PIN_ICON_PAD + r; // 頭(円)の中心
   const tipY = h - PIN_ICON_PAD; // とんがりの先端(画像下端中央)
 
-  // 頭ととんがりを1つのパスとして描く(塗りと縁取りを一度に済ませるため)
-  ctx.beginPath();
-  if (shape === "rounded-square") {
+  // 頭ととんがりを1つのパスとして描く(塗りと縁取りを一度に済ませるため)。
+  // 自前のパス(設定ファイル由来)も同じ1本として扱えるようPath2Dに組む
+  const path = new Path2D();
+  if (typeof shape !== "string") {
+    // 100×145の箱に描かれたパスを、このピンの寸法へ拡大縮小して取り込む。
+    // 箱の下端中央がスポットの位置(icon-anchor: bottom)に来る
+    const sx = size / PIN_PATH_VIEW_WIDTH;
+    const sy = (size + tail) / PIN_PATH_VIEW_HEIGHT;
+    path.addPath(new Path2D(shape.path), {
+      a: sx,
+      b: 0,
+      c: 0,
+      d: sy,
+      e: PIN_ICON_PAD,
+      f: PIN_ICON_PAD,
+    });
+  } else if (shape === "rounded-square") {
     // 角丸四角。円と同じ幅に収め、下辺の左右から先端へ引く。
     // 下辺は角丸の分だけ内側から始まるので、とんがりの付け根も同じ位置に合わせる
     const k = r * 0.42; // 角丸の半径
@@ -114,35 +141,74 @@ export async function ensurePinImage(
     const right = cx + r;
     const top = cy - r;
     const bottom = cy + r;
-    ctx.moveTo(left + k, top);
-    ctx.lineTo(right - k, top);
-    ctx.quadraticCurveTo(right, top, right, top + k);
-    ctx.lineTo(right, bottom - k);
-    ctx.quadraticCurveTo(right, bottom, right - k, bottom);
-    ctx.lineTo(cx, tipY); // 右下の角からとんがりの先端へ
-    ctx.lineTo(left + k, bottom);
-    ctx.quadraticCurveTo(left, bottom, left, bottom - k);
-    ctx.lineTo(left, top + k);
-    ctx.quadraticCurveTo(left, top, left + k, top);
+    path.moveTo(left + k, top);
+    path.lineTo(right - k, top);
+    path.quadraticCurveTo(right, top, right, top + k);
+    path.lineTo(right, bottom - k);
+    path.quadraticCurveTo(right, bottom, right - k, bottom);
+    path.lineTo(cx, tipY); // 右下の角からとんがりの先端へ
+    path.lineTo(left + k, bottom);
+    path.quadraticCurveTo(left, bottom, left, bottom - k);
+    path.lineTo(left, top + k);
+    path.quadraticCurveTo(left, top, left + k, top);
+  } else if (shape === "castle") {
+    // 上辺を凸凹(狭間)にした四角。城郭の胸壁の記号。多角形より輪郭の特徴が
+    // 分かりやすく、小さいピンでも「他と違う」ことは読み取れる
+    const left = cx - r;
+    const right = cx + r;
+    const top = cy - r;
+    const bottom = cy + r;
+    const step = (2 * r) / 5; // 凸凹の1区画。凸3・凹2で上辺を作る
+    const notch = r * 0.35; // 凹みの深さ
+    path.moveTo(left, bottom);
+    path.lineTo(left, top);
+    for (let i = 0; i < 5; i++) {
+      const y = i % 2 === 0 ? top : top + notch;
+      path.lineTo(left + i * step, y);
+      path.lineTo(left + (i + 1) * step, y);
+    }
+    path.lineTo(right, bottom);
+    path.lineTo(cx, tipY); // 右下の角から先端へ
+  } else if (shape !== "circle") {
+    // 多角形。**真下に頂点が来る向きは使わない** —— とんがりと重なって
+    // 長さ0の線分になり、輪郭が潰れるため。下側の2頂点から先端へ引く
+    const deg = (d: number): [number, number] => {
+      const rad = (d * Math.PI) / 180;
+      return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+    };
+    // 頂点を時計回りに並べ、下側の2頂点の間に先端を挟む。
+    // bottomRightはその「右下の頂点」の添字(ここを過ぎたら先端へ引く)
+    const [angles, bottomRight] =
+      shape === "diamond"
+        ? [[-90, 0, 180], 1] // ひし形は左右の頂点が下側の2点を兼ねる
+        : shape === "pentagon"
+          ? [[-90, -18, 54, 126, 198], 2]
+          : [[-60, 0, 60, 120, 180, 240], 2]; // 六角形は上辺を平らにする
+    (angles as number[]).forEach((d, i) => {
+      const [x, y] = deg(d);
+      if (i === 0) path.moveTo(x, y);
+      else path.lineTo(x, y);
+      if (i === bottomRight) path.lineTo(cx, tipY); // 右下の頂点から先端へ
+    });
   } else {
     // 円の下側±45°の2点からとんがりの先端へ直線を引いた吹き出し型
-    ctx.arc(cx, cy, r, (3 * Math.PI) / 4, Math.PI / 4);
-    ctx.lineTo(cx, tipY);
+    path.arc(cx, cy, r, (3 * Math.PI) / 4, Math.PI / 4);
+    path.lineTo(cx, tipY);
   }
-  ctx.closePath();
+  path.closePath();
   // shadow系プロパティはscale()の影響を受けないため実ピクセルで指定する
   ctx.shadowColor = "rgba(0,0,0,0.35)";
   ctx.shadowBlur = 2 * PIXEL_RATIO;
   ctx.shadowOffsetY = 1 * PIXEL_RATIO;
   ctx.fillStyle = fill;
-  ctx.fill();
+  ctx.fill(path);
   ctx.shadowColor = "transparent";
 
   // 縁取りは常に描く。非公開だけ破線にする(それ以外はシリーズの見た目のまま)
   ctx.setLineDash(isPrivate ? [3, 2.5] : []);
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = borderColor;
-  ctx.stroke();
+  ctx.stroke(path);
   ctx.setLineDash([]);
 
   if (!visited && isImageLabel(label)) {

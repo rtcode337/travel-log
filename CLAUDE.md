@@ -145,15 +145,30 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 **カテゴリに握らせる見た目は「形」だけ**にしてある(`lib/categoryStyle.ts`)。色・大きさ・
 ラベルはシリーズが、塗りの上書き(緑+✓)は訪問済みが、破線の縁取りは非公開スポットが
 すでに使っており、そこへカテゴリを重ねるとどちらが効いているのか読めない見た目になるため。
-形はそれらと直交していて、最小のピン(size 12)でも見分けられる。用途は「その場所が
-どういう種類か」ではなく、**シリーズとは別の軸をひと目で見せたいとき**(観光地の
-`じっくり` = 立ち寄るのに手間がかかる、など)。
+形はそれらと直交している。用途は「その場所がどういう種類か」(観光地の神社仏閣・城・
+商業施設・美術館博物館)と、**シリーズとは別の軸**(同じく`じっくり` = 立ち寄るのに
+手間がかかる)の両方。**ただし1スポットに出せる形は1つ**なので、両方を同時には示せない。
 
 `spot_type_settings`の`category_styles`キー(`CATEGORY_STYLES_SETTING_KEY`)に
-JSON文字列(`CategoryStyleDefinition[]` = `{ category, shape }`の配列)を保存する。
-`shape`は`PIN_SHAPES`(`circle` / `rounded-square`)のいずれか。**シリーズと違い既定は
-空配列**(=すべて既定の丸)で、使いたい種別だけが設定するもの。取得は
-`useCategoryStyles(typeKey)`フック(`useSeriesStyles`のカテゴリ版)。
+JSON文字列(`CategoryStyleDefinition[]` = `{ category, shape? , path? }`の配列)を
+保存する。`shape`は`PIN_SHAPES`(`circle` / `rounded-square` / `diamond` / `pentagon` /
+`hexagon` / `castle`)のいずれか。**シリーズと違い既定は空配列**(=すべて既定の丸)で、
+使いたい種別だけが設定するもの。取得は`useCategoryStyles(typeKey)`フック
+(`useSeriesStyles`のカテゴリ版)。
+
+**組み込みの形で足りないときは`path`にSVGのパス(`d`)を書ける**(`shape`より優先。
+アプリを直さずに設定側で形を増やせるようにするため)。**幅100・高さ145の箱**に描き、
+**箱の下端中央がスポットの位置**(`icon-anchor: bottom`)。**下がとんがっている必要は
+無い**。ラベル(シリーズの文字)は頭の中心(50,50)に描かれるのでそこは塗らない。
+描画は`Path2D`に組み、自前パスは`addPath`に変換行列を渡して取り込む
+(`lib/pinIcon.ts`)。**画像ID(`pinIconId`)にはパスのハッシュを混ぜる** ——
+混ぜないとパスを書き換えても既存の画像が使われ続ける。
+**パスはcanvasで図形を描くだけでスクリプトは走らない**ので設定から受け取ってよいが、
+打ち間違いを黙って空のピンにしないよう字面を検査する(`isValidPinPath`。
+travel-log-dataの`validate_data.py`にも同じ検査がある)。
+**組み込みの形を足すときは`PIN_SHAPES`・`lib/pinIcon.ts`の描画・
+travel-log-dataの`SHAPES`の3か所**をそろえること。多角形は**真下に頂点が来る向きに
+しない**(ピンのとんがりと重なって輪郭が潰れる)。
 
 **1スポットは複数カテゴリを持てるので、設定の配列順で最初に一致したものを採用する**
 (`findPinShape`)。シリーズの配列順が並び順を決めているのと同じ考え方。
