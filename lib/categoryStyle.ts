@@ -62,7 +62,20 @@ export interface CategoryStyleDefinition {
   shape?: PinShape;
   /** 自前の形(SVGのパス。100×145の箱に描く)。`shape`より優先する */
   path?: string;
+  /**
+   * ピンの**中に描くアイコン**(SVGのパス。24×24の箱に描く)。
+   * これがあるカテゴリのスポットは、**シリーズの文字(A〜E)の代わりに**
+   * このアイコンが出る —— シリーズは色で分かるので、中身は「何の場所か」に
+   * 使うほうが地図が読める、という考え方。
+   * 塗りはラベルと同じ文字色(ピンの色に対して読める色)なので、
+   * 穴や隙間があってもピンの色が透けて見えるだけで問題ない。
+   * 訪問済み(緑+✓)のときは出さない —— 訪問済みかどうかを優先する。
+   */
+  icon?: string;
 }
+
+/** ピンの中に描くアイコンの座標系(24×24。Simple Iconsなどと同じ感覚で描ける) */
+export const PIN_ICON_VIEW_SIZE = 24;
 
 /** 解決済みの形。文字列なら組み込み、オブジェクトなら自前のパス */
 export type PinShapeSpec = PinShape | { path: string };
@@ -85,7 +98,10 @@ export function isValidCategoryStyle(v: unknown): v is CategoryStyleDefinition {
   const o = v as Record<string, unknown>;
   if (typeof o.category !== "string" || !o.category) return false;
   // pathがあればそちらを使う(shapeは省略可)。両方無い・両方不正なら無効
+  if (o.icon !== undefined && !isValidPinPath(o.icon)) return false;
   if (o.path !== undefined) return isValidPinPath(o.path);
+  // 形の指定が無くアイコンだけ、というのも有効(丸いピンに絵だけ入る)
+  if (o.shape === undefined && o.icon !== undefined) return true;
   return isPinShape(o.shape);
 }
 
@@ -127,4 +143,19 @@ export function findPinShape(
   if (!found) return DEFAULT_PIN_SHAPE;
   if (found.path) return { path: found.path };
   return found.shape ?? DEFAULT_PIN_SHAPE;
+}
+
+/**
+ * スポットのカテゴリ群から、ピンの中に描くアイコンを決める(無ければnull)。
+ * 形と同じく設定の配列順で最初に一致したものを採用する。
+ */
+export function findPinIcon(
+  categories: Category[] | null | undefined,
+  styles: CategoryStyleDefinition[]
+): string | null {
+  if (!categories || categories.length === 0 || styles.length === 0) return null;
+  const found = styles.find(
+    (s) => s.icon !== undefined && categories.includes(s.category)
+  );
+  return found?.icon ?? null;
 }

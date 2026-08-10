@@ -3,6 +3,7 @@ import type { Series } from "./types";
 import { autoTextColor, findSeriesStyle, isImageLabel, type SeriesStyleDefinition } from "./seriesStyle";
 import {
   DEFAULT_PIN_SHAPE,
+  PIN_ICON_VIEW_SIZE,
   PIN_PATH_VIEW_HEIGHT,
   PIN_PATH_VIEW_WIDTH,
   type PinShapeSpec,
@@ -62,14 +63,17 @@ export function pinIconId(
   isPrivate: boolean,
   seriesStyles: SeriesStyleDefinition[],
   /** 頭の形(カテゴリ由来)。**IDに混ぜないと、形を変えても既存の画像が使われ続ける** */
-  shape: PinShapeSpec = DEFAULT_PIN_SHAPE
+  shape: PinShapeSpec = DEFAULT_PIN_SHAPE,
+  /** 中に描くカテゴリのアイコン(カテゴリ由来)。これもIDに混ぜる */
+  icon: string | null = null
 ): string {
   const sig = styleSignature(findSeriesStyle(series, seriesStyles));
   const base = `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}`;
   // 自前のパスはそのまま混ぜるとIDが長くなるうえ、MapLibreの画像IDに使えない
   // 文字が入りうるのでハッシュにする
   const shapeKey = typeof shape === "string" ? shape : `p${fnv1a(shape.path)}`;
-  return `${base}-${sig}-${shapeKey}-${series ?? "__null__"}`;
+  const iconKey = icon ? `-i${fnv1a(icon)}` : "";
+  return `${base}-${sig}-${shapeKey}${iconKey}-${series ?? "__null__"}`;
 }
 
 /** data URL画像をHTMLImageElementとして読み込む(base64は同期的に近いが、確実性のためdecode()を待つ) */
@@ -89,9 +93,11 @@ export async function ensurePinImage(
   isPrivate: boolean,
   seriesStyles: SeriesStyleDefinition[],
   /** 頭の形(カテゴリ由来。lib/categoryStyle.ts の findPinShape で解決したもの) */
-  shape: PinShapeSpec = DEFAULT_PIN_SHAPE
+  shape: PinShapeSpec = DEFAULT_PIN_SHAPE,
+  /** 中に描くカテゴリのアイコン(24×24のSVGパス)。あるときはシリーズの文字の代わりに出す */
+  icon: string | null = null
 ): Promise<string> {
-  const id = pinIconId(series, visited, isPrivate, seriesStyles, shape);
+  const id = pinIconId(series, visited, isPrivate, seriesStyles, shape, icon);
   if (map.hasImage(id)) return id;
 
   const style = findSeriesStyle(series, seriesStyles);
@@ -211,7 +217,24 @@ export async function ensurePinImage(
   ctx.stroke(path);
   ctx.setLineDash([]);
 
-  if (!visited && isImageLabel(label)) {
+  if (!visited && icon) {
+    // カテゴリのアイコン。**シリーズの文字の代わり**に中央へ描く
+    // (シリーズは色で分かるので、中身は「何の場所か」に使う)。
+    // 塗りは文字色と同じ = ピンの色に対して読める色
+    const iconSize = size * 0.62;
+    const scale = iconSize / PIN_ICON_VIEW_SIZE;
+    const placed = new Path2D();
+    placed.addPath(new Path2D(icon), {
+      a: scale,
+      b: 0,
+      c: 0,
+      d: scale,
+      e: cx - iconSize / 2,
+      f: cy - iconSize / 2,
+    });
+    ctx.fillStyle = textColor;
+    ctx.fill(placed);
+  } else if (!visited && isImageLabel(label)) {
     try {
       const img = await loadImage(label.image);
       const imgSize = size * 0.7;

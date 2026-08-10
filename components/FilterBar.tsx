@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { distinctValues, type Category, type Series, type Spot } from "@/lib/types";
 import {
   getSeriesOrder,
-  MY_SPOT_SERIES,
+  UNSET_SERIES,
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
 import { getCategoryOrder } from "@/lib/category";
@@ -110,8 +110,8 @@ export function passesFilters(
   isVisited: boolean
 ): boolean {
   if (filters.series.length > 0) {
-    // シリーズ未設定(null/空)は「マイスポット」として突き合わせる
-    const effective = series && series.length > 0 ? series : MY_SPOT_SERIES;
+    // シリーズ未設定(null/空)は「未設定」として突き合わせる
+    const effective = series && series.length > 0 ? series : UNSET_SERIES;
     if (!filters.series.includes(effective)) return false;
   }
   // スポットは複数のカテゴリを持てるため、選択中のいずれかを持っていれば通す(OR条件)
@@ -252,11 +252,11 @@ export default function FilterBar({
     const known = distinctValues(spots.map((s) => s.series)).sort(
       (a, b) => getSeriesOrder(a, seriesStyles) - getSeriesOrder(b, seriesStyles)
     );
-    // シリーズ未設定(=マイスポット)のスポットが1件でもあれば選択肢に加える
-    // (自分が追加した非公開のマイスポットもシリーズ絞り込みで選べるようにする)
-    const hasMySpot = spots.some((s) => !s.series);
-    const base = hasMySpot ? [...known, MY_SPOT_SERIES] : known;
-    // 選択中だが実データに無いシリーズ(唯一のマイスポットを削除した後など)も、
+    // シリーズ未設定のスポットが1件でもあれば選択肢に加える
+    // (自分が追加した非公開スポットもシリーズ絞り込みで選べるようにする)
+    const hasUnset = spots.some((s) => !s.series);
+    const base = hasUnset ? [...known, UNSET_SERIES] : known;
+    // 選択中だが実データに無いシリーズ(最後の1件を削除した後など)も、
     // 「すべて」に戻せるよう選択肢として残す(でないとチップごと消えて外せなくなる)
     const orphaned = filters.series.filter((s) => !base.includes(s));
     return [...base, ...orphaned];

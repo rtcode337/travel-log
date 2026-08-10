@@ -17,7 +17,7 @@ import { DEFAULT_REGION_SCOPE, regionFieldLabel } from "@/lib/region";
 import { useRegionScope } from "@/lib/useRegionScope";
 import { useCategories } from "@/lib/useCategories";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
-import { MY_SPOT_SERIES } from "@/lib/seriesStyle";
+import { UNSET_SERIES } from "@/lib/seriesStyle";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitFields from "@/components/VisitFields";
@@ -91,7 +91,7 @@ export default function AddSpotModal({
   const [processingPhotos, setProcessingPhotos] = useState(false);
 
   // 実際に適用されるstatus(編集は既存のまま、新規は選択中のstatus)。
-  // 非公開スポット以外はシリーズ必須(非公開・シリーズ未設定はマイスポット扱い)
+  // 非公開スポット以外はシリーズ必須(非公開はシリーズ未設定のままにできる)
   const effectiveStatus: SpotStatus = isEdit ? spot!.status : status;
   const seriesRequired = effectiveStatus !== "private";
 
@@ -160,7 +160,7 @@ export default function AddSpotModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // 非公開スポット以外はシリーズ必須(非公開でシリーズ未設定はマイスポット扱い)
+    // 非公開スポット以外はシリーズ必須(非公開はシリーズ未設定のままにできる)
     if (seriesRequired && !series.trim()) {
       setError("公開・承認待ちのスポットはシリーズを選択してください。");
       return;
@@ -388,9 +388,9 @@ export default function AddSpotModal({
             onChange={(e) => setSeries(e.target.value as Series)}
             className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
           >
-            {/* 非公開はシリーズ未設定=マイスポット扱い可。公開・承認待ちは必須 */}
+            {/* 非公開はシリーズ未設定のままにできる。公開・承認待ちは必須 */}
             <option value="">
-              {seriesRequired ? "選択してください" : `未設定(${MY_SPOT_SERIES})`}
+              {seriesRequired ? "選択してください" : UNSET_SERIES}
             </option>
             {seriesOptions.map((s) => (
               <option key={s} value={s}>
@@ -400,7 +400,7 @@ export default function AddSpotModal({
           </select>
           {!seriesRequired && (
             <p className="mt-1 text-xs text-gray-500">
-              非公開スポットでシリーズを選ばない場合は「{MY_SPOT_SERIES}」(赤ピンに白丸)として表示されます。
+              非公開スポットではシリーズを選ばなくてもかまいません(白いピンに青丸で表示されます)。
             </p>
           )}
         </div>
