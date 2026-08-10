@@ -39,7 +39,8 @@ export const DEFAULT_PIN_SHAPE: PinShape = "circle";
  *
  * **箱の下端中央(50,145)がスポットの位置**(symbolレイヤーは`icon-anchor: bottom`)。
  * とんがりを付けたければそこまで伸ばし、付けないなら図形の下端がその位置に接する。
- * ラベル(シリーズの文字)は**頭の中心(50,50)**に描くので、そこは塗りを空けておく。
+ * ラベル(シリーズの文字)は**頭の中心(50,50)**に描くので、そこは塗りで覆うこと
+ * (文字色は塗りに対して読める色が選ばれるため、空けると地図に直接文字が乗る)。
  */
 export const PIN_PATH_VIEW_WIDTH = 100;
 export const PIN_PATH_VIEW_HEIGHT = 145;
