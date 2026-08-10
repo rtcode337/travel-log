@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import type { Spot } from "@/lib/types";
 import {
   findSeriesStyle,
-  MY_SPOT_SERIES,
+  UNSET_SERIES,
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
 import HelpTip from "@/components/HelpTip";
@@ -126,12 +126,12 @@ export default function PlanBuildPanel({
         )}
         {spotIds.map((spotId, i) => {
           const spot = spotsById.get(spotId);
-          // シリーズ未設定(null/空)は「マイスポット」の見た目・名前で示す
+          // シリーズ未設定(null/空)は「未設定」の見た目・名前で示す
           const style = spot ? findSeriesStyle(spot.series, seriesStyles) : null;
           const seriesName =
             spot && spot.series && spot.series.length > 0
               ? spot.series
-              : MY_SPOT_SERIES;
+              : UNSET_SERIES;
           return (
             <li
               key={spotId}

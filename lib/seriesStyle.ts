@@ -66,24 +66,28 @@ const UNKNOWN_SERIES_STYLE: SeriesStyleDefinition = {
 };
 
 /**
- * 「マイスポット」= 非公開スポットでシリーズ未入力のスポットに与える仮想シリーズ。
- * 非公開スポット以外はシリーズ必須にしたため、シリーズ未設定(null/空)のスポットは
- * すべてこの扱いにする。見た目は「赤ピンの中に白丸」で、大きさはAランクと同じ
- * (size 26)。DBには保存せず、描画時にのみ適用する
- * (地名検索の赤マーカーと色が被るが、意図した見た目)。
+ * シリーズ未設定(null/空)のスポットに与える仮想シリーズ。非公開スポット以外は
+ * シリーズ必須なので、実際に付くのは主に自分の非公開スポット。
+ * 見た目は**白いピンに青い丸**。DBには保存せず、描画時にのみ適用する。
+ *
+ * かつては「マイスポット」という名前で赤ピン+白丸にしていたが、
+ * **未設定はあくまで未設定**であって別の分類ではないので、名前を「未設定」に戻し、
+ * 見た目も**シリーズの文字を持たないこと自体が分かる**白+丸にした
+ * (赤は地名検索のマーカーとも色が被っていた)。丸をラベル画像で置くのは、
+ * 文字のラベル(A〜E)と同じ枠に収まり、バッジ表示にもそのまま使えるため。
  */
-export const MY_SPOT_SERIES = "マイスポット";
+export const UNSET_SERIES = "未設定";
 
-/** 白丸のラベル画像(赤ピンの中に置く) */
-const MY_SPOT_DOT_IMAGE =
-  "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Ccircle%20cx='12'%20cy='12'%20r='8'%20fill='%23ffffff'/%3E%3C/svg%3E";
+/** 青丸のラベル画像(白ピンの中に置く) */
+const UNSET_DOT_IMAGE =
+  "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Ccircle%20cx='12'%20cy='12'%20r='8'%20fill='%232563eb'/%3E%3C/svg%3E";
 
-const MY_SPOT_STYLE: SeriesStyleDefinition = {
-  series: MY_SPOT_SERIES,
-  color: "#dc2626",
-  borderColor: "#991b1b",
+const UNSET_SERIES_STYLE: SeriesStyleDefinition = {
+  series: UNSET_SERIES,
+  color: "#ffffff",
+  borderColor: "#9ca3af",
   size: 26,
-  label: { image: MY_SPOT_DOT_IMAGE },
+  label: { image: UNSET_DOT_IMAGE },
 };
 
 /** #rrggbb形式の色の明度から、読みやすい文字色(白 or 濃灰)を選ぶ */
@@ -143,16 +147,16 @@ export function resolveSeriesStyles(
 }
 
 /**
- * series文字列に対応するスタイルを探す。シリーズ未設定(null/空文字)・「マイスポット」は
- * マイスポットの見た目(白ピン+青丸)にする。種別の一覧に無い非空のシリーズは
+ * series文字列に対応するスタイルを探す。シリーズ未設定(null/空文字)は
+ * 白ピン+青丸。種別の一覧に無い非空のシリーズは
  * UNKNOWN_SERIES_STYLE(labelはseriesそのもの)。
  */
 export function findSeriesStyle(
   series: Series | null,
   styles: SeriesStyleDefinition[]
 ): SeriesStyleDefinition {
-  if (series === null || series === "" || series === MY_SPOT_SERIES) {
-    return MY_SPOT_STYLE;
+  if (series === null || series === "" || series === UNSET_SERIES) {
+    return UNSET_SERIES_STYLE;
   }
   return styles.find((s) => s.series === series) ?? { ...UNKNOWN_SERIES_STYLE, series, label: series };
 }

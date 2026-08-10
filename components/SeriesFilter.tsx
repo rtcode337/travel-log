@@ -58,14 +58,17 @@ export default function SeriesFilter({
   }
 
   return (
-    <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white text-sm">
+    <div className="flex divide-x divide-gray-300 overflow-hidden rounded-l-lg border border-gray-300 bg-white text-sm">
       <button
         type="button"
         onClick={() => onChange([])}
-        className={`flex-1 px-2 py-1.5 font-medium ${
+        // 角丸は左端だけ(枠も rounded-l-lg)。**右端は直角**にする ——
+        // 枠が角丸だと overflow-hidden が最後のチップの角を丸く切ってしまい、
+        // そこだけ形が違って見えるため
+        className={`flex-1 rounded-l-lg px-2 py-1.5 font-medium ${
           selected.length === 0
             ? "bg-blue-600 text-white"
-            : "text-gray-500 hover:bg-gray-50"
+            : "bg-gray-100 text-gray-500 hover:bg-gray-200"
         }`}
       >
         すべて
@@ -79,16 +82,23 @@ export default function SeriesFilter({
             type="button"
             title={r}
             onClick={() => onChange(toggleSelection(selected, r))}
+            // 選択中はそのシリーズの色で塗る。**未選択側を灰色にしてある**のは、
+            // 白いシリーズ(シリーズ未設定)だと塗っても地の白と同じで、
+            // 選んだかどうかが分からなくなるため。あわせて選択中は下辺に
+            // 縁取り色の帯を敷き、白でも選択が分かるようにする
+            // (**四辺を囲むリングにはしない** —— 1つ1つが独立した四角の箱に
+            //  見えて、ひと続きの切り替えとして読めなくなる)
             style={
               active
                 ? {
                     backgroundColor: style.color,
                     color: style.textColor ?? autoTextColor(style.color),
+                    boxShadow: `inset 0 -3px 0 ${style.borderColor}`,
                   }
                 : undefined
             }
             className={`flex-1 px-2 py-1.5 font-medium ${
-              active ? "" : "text-gray-500 hover:bg-gray-50"
+              active ? "" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
             }`}
           >
             {isImageLabel(style.label) ? (

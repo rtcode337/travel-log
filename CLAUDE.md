@@ -152,9 +152,17 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 `spot_type_settings`の`category_styles`キー(`CATEGORY_STYLES_SETTING_KEY`)に
 JSON文字列(`CategoryStyleDefinition[]` = `{ category, shape? , path? }`の配列)を
 保存する。`shape`は`PIN_SHAPES`(`circle` / `rounded-square` / `diamond` / `pentagon` /
-`hexagon` / `castle`)のいずれか。**シリーズと違い既定は空配列**(=すべて既定の丸)で、
+`hexagon` / `castle`)のいずれか(`icon`だけ書いて形を省くと丸いピンに絵が入る)。**シリーズと違い既定は空配列**(=すべて既定の丸)で、
 使いたい種別だけが設定するもの。取得は`useCategoryStyles(typeKey)`フック
 (`useSeriesStyles`のカテゴリ版)。
+
+**ピンの中にカテゴリのアイコンを描ける**(`icon`。24×24の箱に描いたSVGのパス)。
+`icon`があるカテゴリのスポットは、**シリーズの文字(A〜E)の代わりに**そのアイコンが出る
+—— シリーズは色で分かるので、中身は「何の場所か」に使うほうが地図が読めるため。
+塗りはラベルと同じ文字色(ピンの色に対して読める色)なので、**穴や隙間があってよい**
+(鳥居のように抜けのある絵が描ける。輪郭で形を表す`path`ではこれができない)。
+**訪問済み(緑+✓)のときは出さない** —— 訪問済みかどうかを優先する。
+アイコンも形と同じく設定の配列順で最初に一致したものを使う(`findPinIcon`)。
 
 **組み込みの形で足りないときは`path`にSVGのパス(`d`)を書ける**(`shape`より優先。
 アプリを直さずに設定側で形を増やせるようにするため)。**幅100・高さ145の箱**に描き、
@@ -199,7 +207,7 @@ PATCH `/api/spot-types/[id]`は`series_styles`・`categories`と同じく、保�
 
 絞り込みUI(`components/SeriesFilter.tsx`。地図・一覧の`FilterBar`と「シリーズから探す」タブで共用)は**シリーズの数で見た目が変わる**。`SERIES_FILTER_BUTTONS_MAX`(12)以下なら横並びのボタン列、それを超えると**検索欄つきの一覧**(`SearchableSeriesFilter`)になる。一覧は選択中のシリーズをチップで出し、検索欄で部分一致(大文字小文字は無視)に絞った候補をタップでトグルする複数選択で、一度に描くのは`SEARCH_RESULT_LIMIT`(60)件まで(超過分は件数だけ出す)。かつては単一選択のプルダウンだったが、アニメ聖地(anime_seichi、685シリーズ)のようにシリーズが数百ある種別では目当ての値を探せず、複数選択もできなかったため置き換えた。**シリーズ数が増える種別を足すときはこのUIで選べるかを確認すること。**
 
-**シリーズ未設定(null/空)のスポットは「マイスポット」という仮想シリーズとして描画する**(`lib/seriesStyle.ts`の`MY_SPOT_SERIES`/`findSeriesStyle`)。見た目は「赤ピンの中に白丸」(fill `#dc2626`)で、大きさはAランクと同じ(size 26。地名検索の赤マーカーと色が被るが意図した見た目)。DBには保存せず(seriesはnullのまま)、`findSeriesStyle`が`null`/空文字を受けたときにこのスタイルを返すことで実現する。`SeriesBadge`もnullシリーズをマイスポットのバッジで表示する。スポット追加フォーム(`AddSpotModal`)では**シリーズは自由入力ではなくこの種別の`series_styles`から選ぶセレクト**にし、**非公開スポット以外(公開・承認待ち)はシリーズを必須**にした(`seriesRequired = 実効status !== 'private'`)。非公開はシリーズ未選択=マイスポット扱いを許す。
+**シリーズ未設定(null/空)のスポットは「未設定」という仮想シリーズとして描画する**(`lib/seriesStyle.ts`の`UNSET_SERIES`/`findSeriesStyle`)。見た目は**白いピンに青い丸**(fill `#ffffff`・縁 `#9ca3af`・丸 `#2563eb`)で、大きさはAランクと同じ(size 26)。丸はラベル画像(data URLのSVG)として持たせてある —— 文字のラベル(A〜E)と同じ枠に収まり、`SeriesBadge`にもそのまま使えるため。DBには保存せず(seriesはnullのまま)、`findSeriesStyle`が`null`/空文字を受けたときにこのスタイルを返すことで実現する。`SeriesBadge`もnullシリーズを「未設定」のバッジで表示する。**かつては「マイスポット」という別名の仮想シリーズにして赤ピン+白丸で描いていたが、未設定はあくまで未設定であって別の分類ではないため、名前を「未設定」に戻し、見た目もシリーズの文字を持たないこと自体が分かる白+丸にした**(赤は地名検索のマーカーとも色が被っていた)。スポット追加フォーム(`AddSpotModal`)では**シリーズは自由入力ではなくこの種別の`series_styles`から選ぶセレクト**にし、**非公開スポット以外(公開・承認待ち)はシリーズを必須**にした(`seriesRequired = 実効status !== 'private'`)。非公開はシリーズ未選択のままにできる。
 
 `app/api/spot-types/[id]/route.ts`のPATCHの`settings`は文字列値(`series_styles`)も受け付けるよう`boolean | string`に拡張し、保存前に`parseSeriesStyles`で妥当性を検証する。管理画面からのスポット種別JSON作成(`SpotTypeDefinitionFile`)の`series`フィールドもこの形式で、省略時・手入力フォームでの追加時はDEFAULT_SERIES_STYLESのままになる。
 

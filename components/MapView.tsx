@@ -46,6 +46,7 @@ import {
 } from "@/lib/seriesStyle";
 import { resolveCategories } from "@/lib/category";
 import {
+  findPinIcon,
   findPinShape,
   resolveCategoryStyles,
   type CategoryStyleDefinition,
@@ -835,7 +836,8 @@ function buildClusterGeoJSON(
           visitedIds.has(spot.id),
           spot.status === "private",
           seriesStyles,
-          findPinShape(spot.categories, categoryStyles)
+          findPinShape(spot.categories, categoryStyles),
+          findPinIcon(spot.categories, categoryStyles)
         ),
         stack: stacks.get(stackKey(spot)) ?? 1,
       },
@@ -2525,7 +2527,8 @@ export default function MapView({
             visitedIds.has(spot.id),
             spot.status === "private",
             seriesStyles,
-            findPinShape(spot.categories, categoryStyles)
+            findPinShape(spot.categories, categoryStyles),
+            findPinIcon(spot.categories, categoryStyles)
           )
         )
       );
@@ -2732,7 +2735,8 @@ export default function MapView({
                 visitedIds.has(spot.id),
                 false,
                 styles,
-                findPinShape(spot.categories, catStyles)
+                findPinShape(spot.categories, catStyles),
+                findPinIcon(spot.categories, catStyles)
               )
             )
           );
