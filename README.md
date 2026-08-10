@@ -129,7 +129,7 @@ docker compose pull && docker compose up -d
 - Composeのプロジェクト名は本番・開発・standaloneとも`travel-log`。以前は
   `travel-log-prod`/`travel-log-dev`に分けていたため、**それ以前から動かしている
   ホストでは初回だけ旧スタックを止めてから起動すること**(止めずに`up`すると、
-  同じ`db/data`を奪い合う新旧2つのスタックが並ぶ)
+  同じ`data`を奪い合う新旧2つのスタックが並ぶ)
 
   ```bash
   docker compose -p travel-log-prod down          # 開発機では -p travel-log-dev -f docker-compose.dev.yml
@@ -137,7 +137,11 @@ docker compose pull && docker compose up -d
   ```
 - 公開されるイメージは2つ。`ghcr.io/rtcode337/travel-log`(アプリ本体)と
   `ghcr.io/rtcode337/travel-log-db-init`(スキーマ・マイグレーション適用。`init`サービスが使う)
-- **PostgreSQL 16 時代の`db/data`を持つ既存環境は、更新前に1回だけデータ移行が必要**
+- **Postgresの実データの置き場は`data/`**(リポジトリ直下)。かつては`db/data/`だったので、
+  それ以前から動かしているホストでは更新時に1回だけ移すこと(`docker compose down`のあと
+  `mv db/data data`。standaloneはYAML冒頭の`x-db-data-dir`も新しいパスに書き換える)。
+  移さずに起動すると空のDBが作られ、初期状態のアプリが立ち上がる(旧データは消えない)
+- **PostgreSQL 16 時代のデータを持つ既存環境は、更新前に1回だけデータ移行が必要**
   ([docs/postgres-18-upgrade.md](docs/postgres-18-upgrade.md))。移行せずに起動すると
   dbコンテナが起動に失敗する(データは壊れない)
 - **DBスキーマの更新は自動**。`docker compose up`すると`init`サービスが未適用の
@@ -167,7 +171,7 @@ docker compose pull && docker compose up -d
 `${...}`を使わず値を直書きし、bindマウントを絶対パスで書いたもの(サービス構成・
 起動順は`docker-compose.yml`と同じ)。`docker-compose.standalone.yml`としてコピーし
 (コピー側は`.gitignore`済み。秘密を直書きするため雛形は直接編集しない)、冒頭の
-「ここだけ編集」——3つの置き場(`db` / `db/data` / `photos`)の絶対パスと
+「ここだけ編集」——3つの置き場(`db` / `data` / `photos`)の絶対パスと
 `SESSION_SECRET`——を書き換えて貼り付ければ起動する。
 
 `SESSION_SECRET`は空のままだとログイン時に`SESSION_SECRET is not set`で失敗するので、

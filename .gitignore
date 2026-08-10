@@ -31,10 +31,10 @@ yarn-error.log*
 # (docker-compose.yml)が起動時にmkdirするので.gitkeepは不要。中身ではなく
 # ディレクトリごと無視することで、postgresユーザー所有で権限が絞られた
 # 中身をgitが読みに行かず「could not open directory」警告が出ないようにする
-/db/data/
+/data/
 
 # 訪問記録の写真ファイル(docker-compose.ymlのbindマウント先、lib/photos.ts参照)
-# db/data と同じ理由で、中身はコミットせずフォルダだけ .gitkeep で残す
+# data と同じ理由で、中身はコミットせずフォルダだけ .gitkeep で残す
 /photos/*
 !/photos/.gitkeep
 

@@ -4,7 +4,7 @@
 #
 # mainへのpushでGitHub Actions(.github/workflows/docker-publish.yml)が
 # ghcr.io/<repo>-db-init として公開する。本番はこのイメージをpullして使う
-# (かつては db/data の準備(prepare)も担っていた名残でこのイメージ名。
+# (かつては データディレクトリの準備(prepare)も担っていた名残でこのイメージ名。
 #  サービス名を変えてもイメージ名を変えると GHCR 側の整理が要るため据え置き)
 FROM postgres:18-alpine
 

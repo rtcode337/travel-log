@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   },
   // 本番用Dockerイメージ(Dockerfileのprodステージ)を最小構成にするため
   output: "standalone",
-  // Postgresの実データ(db/data)と訪問写真(photos)はプロジェクト直下にbind
+  // Postgresの実データ(data)と訪問写真(photos)はプロジェクト直下にbind
   // マウントされるため、既定のままだとDB書き込みのたびにnext devのファイル監視が
   // 再コンパイルを走らせてしまう(再コンパイル中は処理中のAPIリクエストが壊れる
   // ことがあり、CSVインポートのような連続リクエストが途中で失敗する)。
@@ -22,7 +22,7 @@ const nextConfig: NextConfig = {
           "**/node_modules/**",
           "**/.git/**",
           "**/.next/**",
-          "**/db/data/**",
+          "**/data/**",
           "**/photos/**",
           "**/tsconfig.tsbuildinfo",
         ],

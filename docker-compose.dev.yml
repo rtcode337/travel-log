@@ -16,7 +16,7 @@ services:
       #  スキーマを更新したときにgit pullが失敗するようになるため)
       # マウント先が /var/lib/postgresql/data ではなく1段上なのは本番用と同じ理由
       # (docker-compose.ymlのdbサービスのコメント参照)
-      - ./db/data:/var/lib/postgresql
+      - ./data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s
