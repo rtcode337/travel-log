@@ -38,6 +38,11 @@ yarn-error.log*
 /photos/*
 !/photos/.gitkeep
 
+# 訪問記録エクスポートのZIP(docker-compose.ymlのbindマウント先、lib/exportStorage.ts)
+# 中身は個人情報そのもの。写真と同じくフォルダだけ .gitkeep で残す
+/exports/*
+!/exports/.gitkeep
+
 # MapLibre GL JSのワーカースクリプト(scripts/copy-maplibre-worker.mjsが
 # node_modulesからコピーする生成物。理由はlib/maplibre.tsのコメント参照)
 /public/maplibre-gl/

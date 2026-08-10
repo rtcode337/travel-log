@@ -282,6 +282,27 @@ export function parseSpotTypeDefinition(
  *   pending→published/rejectedへの変更はadmin/spot_adminのみ(本人以外の分も可)
  * - published: 誰でも閲覧可能。編集(削除含む)・新規作成はadmin/spot_adminのみ
  */
+/**
+ * 訪問記録エクスポートのジョブ(`export_jobs`)。管理者が対象ユーザーを指定して
+ * 実行し、生成はバックグラウンドで進む。ファイルの実パスはAPIから返さない
+ * (ダウンロードは `/api/exports/[id]/download` 経由)
+ */
+export interface ExportJob {
+  id: string;
+  /** エクスポートの対象ユーザー */
+  user_id: string;
+  user_email: string;
+  /** 実行した管理者(退会するとnull) */
+  requested_by: string | null;
+  status: "running" | "done" | "failed";
+  file_size: number | null;
+  visit_count: number | null;
+  photo_count: number | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
 export type Role = "admin" | "spot_admin" | "moderator" | "user";
 
 export const ROLE_LABELS: Record<Role, string> = {
