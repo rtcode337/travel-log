@@ -350,14 +350,14 @@ export default function FilterBar({
       {showRouteToggle && (
         <div className="border-t border-gray-100 pt-3">
           <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-gray-500">
-            ルート
+            経路
             <HelpTip>
-              オンにすると、巡った順の矢印(ルート)を地図に表示します。シリーズ・カテゴリで絞り込み中は、該当するルートだけに絞られます。
+              オンにすると、巡った順の矢印(経路)を地図に表示します。シリーズ・カテゴリで絞り込み中は、該当する経路だけに絞られます。
             </HelpTip>
           </span>
           <div className="flex flex-wrap gap-1.5">
             <Chip
-              label="ルートを表示"
+              label="経路を表示"
               active={filters.showRoutes}
               activeClassName={ALL_CHIP_ACTIVE_CLASS}
               onClick={() =>

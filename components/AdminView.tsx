@@ -1269,7 +1269,7 @@ export default function AdminView({
         throw new Error("インポートに失敗しました: " + error.message);
       }
       return (
-        `${changed.length}本のルートを追加・更新しました` +
+        `${changed.length}本の経路を追加・更新しました` +
         (unchangedCount > 0
           ? `(${unchangedCount}本は既存と同一のためスキップ)。`
           : "。")
@@ -1489,7 +1489,7 @@ export default function AdminView({
     if (
       !confirm(
         `「${repo}」から「${entry.label}」(${key})のデータを取得して適用します。` +
-          `スポット種別が無ければ作成し、あれば設定・スポット・ルートを上書きします。` +
+          `スポット種別が無ければ作成し、あれば設定・スポット・経路を上書きします。` +
           `よろしいですか?`
       )
     )
@@ -1569,7 +1569,7 @@ export default function AdminView({
           ]);
         if (spotsError || routesError) {
           throw new Error(
-            "ルート検証用のデータ取得に失敗しました: " +
+            "経路の検証用のデータ取得に失敗しました: " +
               (spotsError?.message ?? routesError?.message ?? "")
           );
         }
@@ -1605,7 +1605,7 @@ export default function AdminView({
   const handleDeleteRoute = async (route: SpotRoute) => {
     if (
       !confirm(
-        `ルート「${route.name}」(経由地${route.points.length}件)を削除しますか?` +
+        `経路「${route.name}」(経由地${route.points.length}件)を削除しますか?` +
           `スポット自体は削除されません。`
       )
     )
@@ -1996,7 +1996,7 @@ export default function AdminView({
                   {regionFieldLabel(currentRegionScope)})を入れる。
                   series/categoriesは自由入力で空でも可。categoriesは1スポットに複数
                   付けられ、パイプ区切りで書く(例: 自然|夜景|展望)。keyは省略可の
-                  種別内一意な参照キーで、ルートCSVからスポットを指すのに使う)。
+                  種別内一意な参照キーで、経路のCSVからスポットを指すのに使う)。
                 </HelpTip>
               </h3>
 
@@ -2161,7 +2161,7 @@ export default function AdminView({
                   「{currentTypeLabel}」({typeKey})の公開スポットを全件削除する
                   (承認待ち・却下・非公開のスポットは残る)。削除される公開スポットに
                   紐づく訪問記録・訪問予定・口コミ・写真は全ユーザー分まとめて削除され、
-                  元に戻せない(ルートも全て削除される)。CSVインポート用データを外部で
+                  元に戻せない(経路も全て削除される)。CSVインポート用データを外部で
                   作り直した際などに、一度空にしてから入れ直す用途を想定。
                 </HelpTip>
               </h3>
@@ -2216,24 +2216,24 @@ export default function AdminView({
 
             <div className="mt-3 border-t border-gray-100 pt-3">
               <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
-                ルート(巡った順の矢印)のインポート
+                経路(巡った順の矢印)のインポート
                 <HelpTip>
-                  スポットを巡った順に矢印で繋ぐルートをCSVで取り込み、地図に表示する。
+                  スポットを巡った順に矢印で繋ぐ経路をCSVで取り込み、地図に表示する。
                   CSV列は {ROUTE_CSV_COLUMNS.join(", ")}(series・description・
                   leg_descriptionは省略可)。
-                  routeはルート名、seqは巡った順の番号(ルート内で一意なら飛び番でもよい)、
+                  routeは経路名、seqは巡った順の番号(経路内で一意なら飛び番でもよい)、
                   spot_keyはスポットCSVのkey列の値。seriesにこの種別のシリーズ値を入れると、
                   矢印がそのシリーズの縁取り色で描かれ、地図のシリーズ絞り込みにも
-                  連動する(表示中のルートの経由地は、スポット自体のシリーズが
-                  絞り込みで外れていてもピンが表示される)。descriptionはルート全体の説明文で、
-                  地図でルートの線をタップすると出る詳細の先頭に表示される。
-                  series・descriptionはルート単位の値なので、同じrouteの行には
+                  連動する(経由地のピンは絞り込みに従うが、線は絞り込みで消えた
+                  経由地もそのまま通る)。descriptionは経路全体の説明文で、
+                  地図で経路の線をタップすると出る詳細の先頭に表示される。
+                  series・descriptionは経路単位の値なので、同じrouteの行には
                   すべて同じ値を書く(空欄なら既定色・説明なし)。
                   leg_descriptionは行単位の値で、その行のスポットから次のスポットへの
-                  区間の説明(移動手段など)。ルート詳細の経由地一覧で2点の間に表示される
+                  区間の説明(移動手段など)。経路詳細の経由地一覧で2点の間に表示される
                   (次の区間が無い最終地点の行は空欄にする)。
-                  差分更新: 既存と同名のルートは
-                  シリーズ・説明・経由地を丸ごと置き換え、CSVに無いルートには触らない。
+                  差分更新: 既存と同名の経路は
+                  シリーズ・説明・経由地を丸ごと置き換え、CSVに無い経路には触らない。
                   取り込みの前に、spot_keyが指すスポットをスポットCSVでインポートして
                   おくこと(key未設定のスポットは参照できない)。
                 </HelpTip>
@@ -2247,7 +2247,7 @@ export default function AdminView({
 
               <div className="mb-3">
                 <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
-                  {importingRoutes ? "インポート中…" : "ルートCSVインポート"}
+                  {importingRoutes ? "インポート中…" : "経路CSVインポート"}
                   <input
                     type="file"
                     accept=".csv,text/csv"
@@ -2299,7 +2299,7 @@ export default function AdminView({
                   スポット種別の一覧を取得して表示する(mainブランチ)。一覧から
                   種別を選ぶと、そのフォルダの settings.json・spots.csv・
                   exclude.txt・routes.csv が順に適用される。スポット種別が
-                  無ければ作成し、あれば設定・スポット・ルートを上書きする
+                  無ければ作成し、あれば設定・スポット・経路を上書きする
                   (それぞれ個別インポートと同じ差分更新)。exclude.txtによる削除は、
                   削除件数の確認ダイアログにOKしたときだけ実行される。
                 </HelpTip>

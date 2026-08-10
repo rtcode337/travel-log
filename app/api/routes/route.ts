@@ -126,7 +126,7 @@ export async function POST(request: Request) {
       )
     ) {
       return NextResponse.json(
-        { error: "各ルートには name と2件以上の points が必要です。" },
+        { error: "各経路には name と2件以上の points が必要です。" },
         { status: 400 }
       );
     }
@@ -154,7 +154,7 @@ export async function POST(request: Request) {
   );
   if (validRows.length !== allSpotIds.length) {
     return NextResponse.json(
-      { error: "この種別に存在しないスポットがルートに含まれています。" },
+      { error: "この種別に存在しないスポットが経路に含まれています。" },
       { status: 400 }
     );
   }
