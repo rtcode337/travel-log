@@ -193,7 +193,7 @@ PATCH `/api/spot-types/[id]`は`series_styles`・`categories`と同じく、保�
 
 カテゴリの一覧(種別ごとに使える値の定義)も同じパターンでスポット種別ごとに持つ(`lib/category.ts`)。`spot_type_settings`の`categories`キー(`CATEGORIES_SETTING_KEY`)にJSON文字列(`string[]`。見た目は持たない)を保存し、行が無い・parse失敗時は`DEFAULT_CATEGORIES`(観光地の現行カテゴリ、旧`lib/types.ts`の`CATEGORIES`ハードコードの後継)にフォールバックする(`resolveCategories`)。明示的に空配列`"[]"`を保存した種別は「定義済みカテゴリなし」の扱い。配列の並び順がカテゴリの並び順(`getCategoryOrder`)で、地図・スポット一覧の絞り込みチップ(`components/FilterBar.tsx`の`SpotFilters.categories`。シリーズと同じ複数選択+「すべて」チップ(訪問状況は「すべて」チップ無しで既定=未訪問のみ)、選択肢は実データに存在する値から作る)と、スポット追加・編集フォーム(`AddSpotModal`)の選択チップ(複数選択のトグル。設定の一覧を先頭に、設定外の既存値を後ろに合成し、一覧に無い値は下の入力欄から足せる)がこの並びを使う。取得は`useCategories(typeKey)`フック(`useSeriesStyles`のカテゴリ版)。管理画面`/[type]/admin`「スポット種別の設定」のカテゴリ欄(カンマ・読点区切りで入力、admin専用)と、スポット種別JSON作成の`categories`フィールド(文字列配列)から設定でき、PATCH `/api/spot-types/[id]`が`parseCategories`で妥当性を検証する。`categories`列自体は従来どおり自由入力で、一覧に無い値も動く(並びは末尾)。
 
-### ルート(`spot_routes`/`spot_route_points`)とスポット参照キー(`spots.key`)
+### 経路(`spot_routes`/`spot_route_points`)とスポット参照キー(`spots.key`)
 
 スポットを「巡った順」に矢印で繋ぐルート機能(訪問順に意味がある種別向け)。スキーマは`db/init/01_schema.sql`(他のテーブルと同じファイル)。`spot_routes`(種別ごとのルート名、`(spot_type_id, name)`一意。加えて色分け・絞り込み連動に使う`series`列、ルート詳細に表示するルート全体の説明文の`description`列、spotsと同じ公開状態の`status`/`created_by`列 — 公開=全員、非公開=作成者本人のみ、承認待ち・却下=本人+moderator以上がGET/DELETEの権限判定に使われる。ルートCSVインポートはスポットと同じく常に`status: 'published'`を明示する)+`spot_route_points`(route_id, seq, spot_id, description — 点側の`description`はその経由地から次の経由地への**区間の説明**(移動手段など)で、次の区間が無い最終地点は常にnull)の2テーブルで、経由地はスポット削除時にFKカスケードで点だけ抜け、ルートは残る。公開スポットの全削除(purge)はルートも丸ごと消し、種別削除は`spot_types`へのFKカスケードで消える。
 
@@ -219,7 +219,16 @@ PATCH `/api/spot-types/[id]`は`series_styles`・`categories`と同じく、保�
 
 同じ仕組みで、絞り込みモーダルの訪問日の下に**「訪問予定リスト」セレクト**があり、選んだリスト(旅程)のスポットを**リスト順に矢印(紫`PLAN_LIST_PATH_COLOR`=`#9333ea`)で結んだ経路**を描く(`filters.planListId`・`buildPlanListPath`。**訪問済みの経由スポットは経路に載せない** —— 済んだ場所を通り続ける線が残ると次にどこへ行くかが読めないため。リスト自体からは消えない)。訪問日の経路と同じ`spot-routes`ソース/レイヤーに色違いで重ねるだけで(`buildRouteGeoJSON`は色付き経路の配列`extraPaths`を受け取る)、選んだときに`handleSelectPlanList`が経路全体へ`fitBounds`する点も訪問日と同じ(**経路上でもピンは絞り込みに従う**。上記「ピンの表示と線の表示を分ける」)。**現在地(GeolocateControlの青丸)を表示中は、現在地からリスト先頭のスポットまでも線・矢印で結ぶ。この区間だけは青丸と同じ青(`CURRENT_LOCATION_PATH_COLOR`=maplibre-gl既定の`#1da1f2`)で描き、現在地から出ている線だと分かるようにする**(`buildRouteGeoJSON`の`start`に`currentLocation` stateを、`startColor`にこの青を渡すと、この区間が独立したLineStringとして経路の先頭に繋がる。現在地は`geolocate`イベントで更新し(約1m未満の移動は再レンダー抑制のため無視)、青丸ごと消えるOFFへの遷移で忘れる — `trackuserlocationend`はBACKGROUND=青丸が残る遷移でも発火するため、青丸のDOM要素の有無でOFFを見分ける)。リストは`MapView`が`api.visitPlanLists.list`で読み(1件以上あるときだけセレクトを出す)、選択は`loadSavedFilters`/`saveFilters`で保存する(削除済み等で見つからないIDは描画側で無視)。訪問予定リストのセクションのリセットボタンが`planListId`を`null`に戻す(見出し行のリセットは絞り込みのみで触らない)。
 
-### ルート・経路をGoogle マップで開く
+### 経路・訪問順・訪問予定リストをGoogle マップで開く
+
+### スポットについて生成AIに聞く(`lib/askAi.ts`)
+
+スポット詳細に**Claude**(Wikipediaアイコンの隣)と**Gemini**(Google マップの経路アイコンの隣)のボタンを置いてある。押すと**質問文を入れた状態**でそれぞれのページが新しいタブで開く。質問文は`buildSpotQuestion`が組み、**所在地と座標を添える** —— 「光明寺」のように同名の場所が各地にあるため、名前だけだと別のスポットについて答えられてしまう。
+
+- **Claudeは`https://claude.ai/new?q=<質問文>`**。`q`はプロンプト欄を埋めるだけで送信はしない公式のパラメータ(送る前に読み返せる)
+- **Geminiは`https://www.google.com/search?udm=50&q=<質問文>`(検索のAIモード)**。**`gemini.google.com`はURLでプロンプトを渡せない**(Chrome拡張で補う方法しか無い)ため、同じモデルが答えるAIモードを開いている。gemini.google.com側が対応したら差し替えられるよう、URLの組み立ては`lib/askAi.ts`に寄せてある
+- アイコンはWikipedia・Google マップと同じくSimple Icons(CC0)のロゴマークをインラインSVGで持つ
+- **Wikipediaボタンと違い、種別の設定で消さない**(`wikipedia_enabled`のような出し分けをしない) —— Wikipedia記事が無いスポットでも何か分かる可能性があるため
 
 ### 用語: 「経路」と、記録から引かれる線
 
