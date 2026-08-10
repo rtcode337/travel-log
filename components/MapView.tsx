@@ -79,6 +79,7 @@ import SpotDownloadDialogs, {
   DownloadProgressDialog,
 } from "@/components/SpotDownloadDialogs";
 import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
+import SeriesBadge from "@/components/SeriesBadge";
 
 const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
@@ -1687,6 +1688,19 @@ export default function MapView({
     return m;
   }, [overlayData]);
 
+  /**
+   * 重ね表示スポットのID→そのスポットの種別キー。経路・ルートの詳細に出す
+   * ランク(シリーズ)のバッジで、**そのスポットが属する種別の設定**を当てるのに使う
+   * (経路には別種別のスポットが混じるため、本体の設定で描くと色もラベルもずれる)
+   */
+  const overlayTypeKeyBySpotId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [key, data] of overlayData) {
+      for (const spot of data.spots) m.set(spot.id, key);
+    }
+    return m;
+  }, [overlayData]);
+
   /** 重ね表示中の全種別のルート(タップされたルートの解決に使う) */
   const overlayRoutesAll = useMemo(
     () => [...overlayData.values()].flatMap((d) => d.routes),
@@ -2462,54 +2476,38 @@ export default function MapView({
     if (!map) return;
     let cancelled = false;
 
-    // 表示対象のルートの経由地は、スポット自体のシリーズ・カテゴリが絞り込みで
-    // 外れていてもピンを表示する(別のシリーズ・カテゴリに属する経由地の上を、
-    // 線だけ通ってピンが無い状態になるのを防ぐ)。免除するのはルートの表示条件と
-    // 同じシリーズ・カテゴリのみで、訪問状況の絞り込みは通常どおり適用する。
-    const routeMemberIds = new Set(
-      filterVisibleRoutes(routes, filters, seriesStyles, spotById).flatMap((route) =>
-        route.points.map((p) => p.spot_id)
-      )
-    );
-    // 選んだ日に訪問したスポット(訪問順の経路)・選んだ訪問予定リストのスポットは、
-    // 絞り込みで外れていても必ず表示する(経路を辿るための表示のため全条件を免除)。
-    // 訪問側は経路(並び順つき)ではなく訪問記録のIDから作る —— 座標の補完を待たずに
-    // 判定でき、本体種別のスポットだけを絞る用途では並び順が要らないため
-    const visitPathIds = visitedSpotIdsOn(visits, filters);
-    // 作成モード中は、下書きの経由スポットも経路と同様に絞り込みから免除する
-    const planPathIds = new Set([
-      ...buildPlanListPath(planLists, filters, pathSpotById).map((s) => s.id),
-      ...(buildDraft?.spotIds ?? []),
-    ]);
     // 「これだけを表示」中は、その経路のスポットだけに絞る(他のスポット・ルート・
-    // もう一方の経路は隠す)。それ以外は従来どおり絞り込み+経路+ルート経由地で出す
+    // もう一方の経路は隠す)。**ユーザーが明示的に選ぶ表示モード**なので、これだけは
+    // 絞り込みより優先する —— 絞り込みも重ねると、訪問状況の既定(未訪問のみ)では
+    // 訪問順の経路が1件も残らず、選んでも何も出ないことになるため
     const isolate = effectiveIsolate(filters);
     const isolateIds =
-      isolate === "visit" ? visitPathIds : isolate === "plan" ? planPathIds : null;
-    const pathIds = new Set([...visitPathIds, ...planPathIds]);
-    // 自分が非表示にしたスポットは絞り込み・ルート経由地の免除より前に除外する。
-    // ただし経路(訪問順・訪問予定リスト・作成中の下書き)の対象は、ユーザーが
-    // 明示的に選んで辿っている表示のため非表示でも出す(他の免除条件と同じ扱い)
-    const filteredSpots = isolateIds
-      ? spots.filter((spot) => isolateIds.has(spot.id))
-      : spots.filter(
-          (spot) =>
-            pathIds.has(spot.id) ||
-            (!hiddenIds.has(spot.id) &&
-              (passesFilters(
-                filters,
-                spot.series,
-                spot.categories,
-                visitedIds.has(spot.id)
-              ) ||
-                (routeMemberIds.has(spot.id) &&
-                  passesFilters(
-                    { ...filters, series: [], categories: [] },
-                    spot.series,
-                    spot.categories,
-                    visitedIds.has(spot.id)
-                  ))))
-        );
+      isolate === "visit"
+        ? visitedSpotIdsOn(visits, filters)
+        : isolate === "plan"
+          ? new Set([
+              ...buildPlanListPath(planLists, filters, pathSpotById).map((s) => s.id),
+              ...(buildDraft?.spotIds ?? []),
+            ])
+          : null;
+    // **ピンの表示は絞り込み(シリーズ・カテゴリ・訪問状況)と非表示に全部従う。**
+    // ルート・経路に含まれるスポットも例外にしない —— かつては「線が通っているのに
+    // ピンが無い」のを避けるため経路・ルートの経由地を免除していたが、どのスポットが
+    // なぜ出ているのかが絞り込みから読めなくなっていた。
+    // **線の方は経由地が絞り込み・非表示で消えても、そのスポットを通る形のまま描く**
+    // (ルートは route.points の座標、経路は spots 全件から解決しており、どちらも
+    //  ここで絞ったピンの集合とは無関係。道のりが歪まないようにするため)
+    const filteredSpots = spots.filter(
+      (spot) =>
+        (!isolateIds || isolateIds.has(spot.id)) &&
+        !hiddenIds.has(spot.id) &&
+        passesFilters(
+          filters,
+          spot.series,
+          spot.categories,
+          visitedIds.has(spot.id)
+        )
+    );
 
     const renderSpots = async () => {
       ensureClusterLayers(map, overlayKeysRef, handleSpotSelect, handleStackSelect);
@@ -2651,19 +2649,16 @@ export default function MapView({
       // 含みうるので、免除が本体種別だけだと「線は通っているのにピンが無い」
       // (非表示にした別種別のスポットがまさにそれ)が起きる。
       // 判定は membership(ID の集合)だけで、絞り込み・ルートは見ない
+      // 「これだけを表示」中は、その経路のメンバーだけを残す(本体と同じ扱い)
       const isolate = effectiveIsolate(filters);
-      const visitPathIds = visitedSpotIdsOn(visits, filters);
-      const planListIds = new Set(
-        planLists.find((l) => l.id === filters.planListId)?.spot_ids ?? []
-      );
-      // 「これだけを表示」中は、その経路のメンバーだけを残す
       const isolateIds =
         isolate === "visit"
-          ? visitPathIds
+          ? visitedSpotIdsOn(visits, filters)
           : isolate === "plan"
-            ? planListIds
+            ? new Set(
+                planLists.find((l) => l.id === filters.planListId)?.spot_ids ?? []
+              )
             : null;
-      const pathIds = new Set([...visitPathIds, ...planListIds]);
       const active = overlayTypeKeys;
       // 選択が外れた(・注視で消した)種別は、作成済みレイヤーのデータを空にする
       // (レイヤー自体は残しても害がない。ensureOverlayLayers参照)
@@ -2700,30 +2695,19 @@ export default function MapView({
           const visibleRoutes = isolateIds
             ? []
             : filterVisibleRoutes(data.routes, typeFilters, styles, spotById);
-          const routeMemberIds = new Set(
-            visibleRoutes.flatMap((route) => route.points.map((p) => p.spot_id))
-          );
-          // 非表示スポットは重ね表示側でも除外する(スポットIDによるユーザーごとの
-          // 設定のため種別をまたいで共通に効く)。ただし経路のメンバーは本体と
-          // 同じく免除する(pathIds を hiddenIds より先に見る)
-          const filtered = data.spots.filter((spot) =>
-            isolateIds
-              ? isolateIds.has(spot.id)
-              : pathIds.has(spot.id) ||
-                (!hiddenIds.has(spot.id) &&
-                  (passesFilters(
-                    typeFilters,
-                    spot.series,
-                    spot.categories,
-                    visitedIds.has(spot.id)
-                  ) ||
-                    (routeMemberIds.has(spot.id) &&
-                      passesFilters(
-                        { ...typeFilters, series: [], categories: [] },
-                        spot.series,
-                        spot.categories,
-                        visitedIds.has(spot.id)
-                      ))))
+          // ピンは絞り込みと非表示に全部従う(本体と同じ規則)。経路・ルートの
+          // メンバーも例外にしない。非表示はスポットIDによるユーザーごとの設定
+          // なので種別をまたいで共通に効く
+          const filtered = data.spots.filter(
+            (spot) =>
+              (!isolateIds || isolateIds.has(spot.id)) &&
+              !hiddenIds.has(spot.id) &&
+              passesFilters(
+                typeFilters,
+                spot.series,
+                spot.categories,
+                visitedIds.has(spot.id)
+              )
           );
 
           // クラスタは重ね先の種別の先頭シリーズの色で塗り、本体の青いクラスタや
@@ -2815,10 +2799,40 @@ export default function MapView({
       ? overlayRoutesAll.find((r) => r.id === overlayDetailRouteId)
       : undefined) ??
     null;
+  /**
+   * 経路・ルートの詳細に出す1地点ぶんのランク(シリーズ)のバッジ。
+   * スポットを手元(本体・経路の補完・重ね表示)から引き、**そのスポットの種別の
+   * シリーズ設定**でバッジを描く。引けないスポット(未ダウンロード等)は出さない
+   */
+  const pointBadge = useCallback(
+    (spotId: string) => {
+      const spot = pathSpotById.get(spotId) ?? overlaySpotById.get(spotId);
+      if (!spot) return null;
+      const overlayKey = spotById.has(spotId)
+        ? null
+        : overlayTypeKeyBySpotId.get(spotId);
+      return {
+        series: spot.series,
+        isPrivate: spot.status === "private",
+        seriesStyles: overlayKey ? overlaySeriesStylesOf(overlayKey) : seriesStyles,
+      };
+    },
+    [
+      pathSpotById,
+      overlaySpotById,
+      spotById,
+      overlayTypeKeyBySpotId,
+      overlaySeriesStylesOf,
+      seriesStyles,
+    ]
+  );
   // ルート・訪問順の経路・訪問予定リストの経路を、同じ詳細モーダルで出すための共通形。
   // ルートは経由地(区間の説明つき)、経路は地点の並びを表示する
   const routeDetailView: {
     title: string;
+    /** 何の線の詳細を見ているか(見出しの上に出すラベル)。3種を同じ見た目の
+     *  モーダルで出すため、種類が分からないと現在地を見失う */
+    kindLabel: string;
     description?: string | null;
     pointNoun: string;
     /** 訪問予定リストの経路のときだけ、編集リンク用にそのリストを持つ */
@@ -2831,10 +2845,12 @@ export default function MapView({
       lng: number;
       lat: number;
       legDescription?: string | null;
+      badge: ReturnType<typeof pointBadge>;
     }[];
   } | null = detailRoute
     ? {
         title: detailRoute.name,
+        kindLabel: "経路",
         description: detailRoute.description,
         pointNoun: "経由地",
         points: detailRoute.points.map((p) => ({
@@ -2844,6 +2860,7 @@ export default function MapView({
           lng: p.lng,
           lat: p.lat,
           legDescription: p.description,
+          badge: pointBadge(p.spot_id),
         })),
       }
     : detailPathKind === "visit"
@@ -2856,7 +2873,8 @@ export default function MapView({
             days.find((d) => d.date === detailPathDate) ?? days[0] ?? null;
           if (!day) return null;
           return {
-            title: `訪問順の経路(${formatVisitDate(day.date)})`,
+            title: `訪問順(${formatVisitDate(day.date)})`,
+            kindLabel: "訪問順",
             description: `${formatVisitDate(day.date)}に訪問したスポットを、訪問した順に並べています。`,
             pointNoun: "地点",
             points: day.path.map((s, i) => ({
@@ -2865,6 +2883,7 @@ export default function MapView({
               name: s.name,
               lng: s.lng,
               lat: s.lat,
+              badge: pointBadge(s.id),
             })),
           };
         })()
@@ -2875,6 +2894,7 @@ export default function MapView({
             if (!list || path.length === 0) return null;
             return {
               title: list.title,
+              kindLabel: "訪問予定リスト",
               description: list.description,
               pointNoun: "地点",
               editList: list,
@@ -2884,6 +2904,7 @@ export default function MapView({
                 name: s.name,
                 lng: s.lng,
                 lat: s.lat,
+                badge: pointBadge(s.id),
               })),
             };
           })()
@@ -3304,7 +3325,7 @@ export default function MapView({
                   <p className="flex items-center gap-1.5 text-sm font-medium">
                     別の種別を重ねて表示
                     <HelpTip>
-                      選んだ種別の公開スポットとルートを半透明で重ねて表示します(複数選べます。未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは種別ごとに、その種別の地図で自分が設定した内容に従います。
+                      選んだ種別の公開スポットと経路を半透明で重ねて表示します(複数選べます。未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは種別ごとに、その種別の地図で自分が設定した内容に従います。
                     </HelpTip>
                   </p>
                   {/* このセクションだけのリセット(すべて「重ねない」へ戻す) */}
@@ -3444,7 +3465,7 @@ export default function MapView({
                 </div>
                 <p className="text-xs text-gray-500">
                   重ねて表示している「{overlayType?.label ?? typeKey}」の
-                  絞り込み・ルート表示です。ここでの変更はこの種別の地図にも保存されます。
+                  絞り込み・経路表示です。ここでの変更はこの種別の地図にも保存されます。
                 </p>
                 <FilterBar
                   spots={data.spots}
@@ -3696,7 +3717,14 @@ export default function MapView({
             className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
           >
             <div className="flex items-start justify-between gap-2">
-              <h2 className="font-bold">{routeDetailView.title}</h2>
+              <div className="min-w-0">
+                {/* 3種(ルート/訪問順の経路/訪問予定リスト)を同じ見た目のモーダルで
+                    出すため、何の線を見ているのかを見出しの上に必ず出す */}
+                <p className="text-xs font-medium text-gray-500">
+                  {routeDetailView.kindLabel}
+                </p>
+                <h2 className="font-bold">{routeDetailView.title}</h2>
+              </div>
               <div className="flex shrink-0 items-center gap-3">
                 {/* 訪問予定リストの経路のときは、そのリストの基本情報編集へ遷移する */}
                 {routeDetailView.editList && (
@@ -3735,10 +3763,21 @@ export default function MapView({
                 <ol className="space-y-0.5">
                   {routeDetailView.points.map((point, i) => (
                     <li key={point.key}>
-                      <div className="flex items-baseline gap-2">
+                      <div className="flex items-center gap-2">
                         <span className="w-6 shrink-0 text-right text-xs font-medium tabular-nums text-gray-500">
                           {i + 1}
                         </span>
+                        {/* ランク(シリーズ)のバッジ。地点がどのランクなのかは
+                            経路を辿るときの判断材料になるため名前の隣に出す。
+                            手元に無いスポット(未ダウンロード等)は出さない */}
+                        {point.badge && (
+                          <SeriesBadge
+                            series={point.badge.series}
+                            seriesStyles={point.badge.seriesStyles}
+                            isPrivate={point.badge.isPrivate}
+                            size="sm"
+                          />
+                        )}
                         {/* スポット名のタップでその位置へ飛び、続けてそのスポットの
                             詳細を開く(一覧から辿ったときに、そこが何なのかを
                             見に行くまでが1タップで済むように)。詳細は本体種別の
