@@ -1755,13 +1755,16 @@ export default function MapView({
     setAddCandidateInfo(false);
   }, []);
 
-  // 作成中パネルに渡す解決用マップ。本体スポットに重ね表示スポットを足したもの
-  // (IDが被ったら本体を優先)。これで別種別スポットも名前つきで一覧表示できる
+  // 作成中パネルに渡す解決用マップ。本体スポットに重ね表示スポットと、IDから
+  // 個別に取り直した分(pathExtraSpots)を足したもの(IDが被ったら本体を優先)。
+  // **補完を混ぜないと、下書きの経路(線)には出ているのにパネルだけ
+  // 「(読み込み中のスポット)」のままになる** —— 重ねていない別種別のスポットは
+  // 補完でしか名前が手に入らないため
   const buildPanelSpotById = useMemo(() => {
-    const m = new Map(overlaySpotById);
+    const m = new Map([...overlaySpotById, ...pathExtraSpots]);
     for (const [id, s] of spotById) m.set(id, s);
     return m;
-  }, [overlaySpotById, spotById]);
+  }, [overlaySpotById, pathExtraSpots, spotById]);
 
   // 作成モード中の下書きの経路(選択済みスポットを選んだ順に繋いだもの)。地図に
   // 訪問予定リストと同じ紫の矢印で描き、追加・削除・並び替えに即追従する。

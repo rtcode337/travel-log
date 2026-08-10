@@ -6,6 +6,7 @@ import { formatPlanDateRange } from "@/lib/planListDraft";
 import type { Spot, VisitPlanList } from "@/lib/types";
 import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
 import SeriesBadge from "@/components/SeriesBadge";
+import HelpTip from "@/components/HelpTip";
 import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
 
 /**
@@ -160,43 +161,55 @@ export default function VisitPlanListDetailModal({
                     key={spotId}
                     className={`flex items-center ${visited ? "bg-gray-50" : ""}`}
                   >
-                    <button
-                      type="button"
-                      disabled={!spot}
-                      onClick={() => spot && onOpenSpot(spot.id)}
-                      className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50 disabled:opacity-60"
-                    >
-                      <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums text-gray-400">
-                        {i + 1}
-                      </span>
-                      {spot ? (
-                        <>
-                          <SeriesBadge
-                            series={spot.series}
-                            seriesStyles={seriesStyles}
-                            isPrivate={spot.status === "private"}
-                            size="sm"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p
-                              className={`truncate text-sm font-medium ${
-                                visited ? "text-gray-400 line-through" : ""
-                              }`}
-                            >
-                              {spot.name}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {spot.region}
-                            </p>
-                          </div>
-                          <span className="shrink-0 text-gray-400">›</span>
-                        </>
-                      ) : (
-                        <span className="text-sm text-gray-400">
+                    {/* 解決できたスポットだけタップで詳細へ。解決できていない行は
+                        ボタンにしない —— 説明の「?」を入れ子のボタンにできないため
+                        (押せなくなるうえHTMLとしても不正) */}
+                    {spot ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenSpot(spot.id)}
+                        className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50"
+                      >
+                        <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums text-gray-400">
+                          {i + 1}
+                        </span>
+                        <SeriesBadge
+                          series={spot.series}
+                          seriesStyles={seriesStyles}
+                          isPrivate={spot.status === "private"}
+                          size="sm"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={`truncate text-sm font-medium ${
+                              visited ? "text-gray-400 line-through" : ""
+                            }`}
+                          >
+                            {spot.name}
+                          </p>
+                          <p className="text-xs text-gray-500">{spot.region}</p>
+                        </div>
+                        <span className="shrink-0 text-gray-400">›</span>
+                      </button>
+                    ) : (
+                      <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-sm text-gray-400">
+                        <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums">
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0 flex-1">
                           (読み込まれていないスポット)
                         </span>
-                      )}
-                    </button>
+                        <HelpTip sheet>
+                          そのスポットの情報が手元に無いときの表示です。IDから
+                          取り直している最中なら、終わりしだい名前に変わります。
+                          いつまでも変わらないときは、
+                          <b>スポットが削除された</b>・
+                          <b>他の人の非公開スポットで見られない</b>・
+                          <b>通信に失敗した</b>のいずれかです。
+                          名前が出ていなくてもリストからは外れず、経路にも出ます。
+                        </HelpTip>
+                      </div>
+                    )}
                     {/* 訪問済みの付け外し。訪問記録を付ければ自動で付くが、ここでも直せる
                         (訪問済みは経路から外れるだけで、リストからは消えない) */}
                     <button
