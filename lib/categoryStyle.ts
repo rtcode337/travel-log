@@ -72,10 +72,23 @@ export interface CategoryStyleDefinition {
    * 訪問済み(緑+✓)のときは出さない —— 訪問済みかどうかを優先する。
    */
   icon?: string;
+  /**
+   * `icon`のパスが描かれている正方形の一辺(SVGの`viewBox`の大きさ)。既定は24。
+   * **配布されているアイコンのSVGは`viewBox`がまちまち**(24・48・1000など)なので、
+   * パスを書き換えずにそのまま貼れるようにここで指定する。
+   */
+  iconViewSize?: number;
 }
 
-/** ピンの中に描くアイコンの座標系(24×24。Simple Iconsなどと同じ感覚で描ける) */
+/** `iconViewSize`を省いたときの座標系(Simple Iconsなどと同じ24×24) */
 export const PIN_ICON_VIEW_SIZE = 24;
+
+/** ピンの中に描くアイコン(解決済み) */
+export interface PinIconSpec {
+  path: string;
+  /** パスが描かれている正方形の一辺 */
+  viewSize: number;
+}
 
 /** 解決済みの形。文字列なら組み込み、オブジェクトなら自前のパス */
 export type PinShapeSpec = PinShape | { path: string };
@@ -99,6 +112,14 @@ export function isValidCategoryStyle(v: unknown): v is CategoryStyleDefinition {
   if (typeof o.category !== "string" || !o.category) return false;
   // pathがあればそちらを使う(shapeは省略可)。両方無い・両方不正なら無効
   if (o.icon !== undefined && !isValidPinPath(o.icon)) return false;
+  if (
+    o.iconViewSize !== undefined &&
+    (typeof o.iconViewSize !== "number" ||
+      !Number.isFinite(o.iconViewSize) ||
+      o.iconViewSize <= 0)
+  ) {
+    return false;
+  }
   if (o.path !== undefined) return isValidPinPath(o.path);
   // 形の指定が無くアイコンだけ、というのも有効(丸いピンに絵だけ入る)
   if (o.shape === undefined && o.icon !== undefined) return true;
@@ -152,10 +173,14 @@ export function findPinShape(
 export function findPinIcon(
   categories: Category[] | null | undefined,
   styles: CategoryStyleDefinition[]
-): string | null {
+): PinIconSpec | null {
   if (!categories || categories.length === 0 || styles.length === 0) return null;
   const found = styles.find(
     (s) => s.icon !== undefined && categories.includes(s.category)
   );
-  return found?.icon ?? null;
+  if (!found?.icon) return null;
+  return {
+    path: found.icon,
+    viewSize: found.iconViewSize ?? PIN_ICON_VIEW_SIZE,
+  };
 }

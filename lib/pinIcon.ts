@@ -3,9 +3,9 @@ import type { Series } from "./types";
 import { autoTextColor, findSeriesStyle, isImageLabel, type SeriesStyleDefinition } from "./seriesStyle";
 import {
   DEFAULT_PIN_SHAPE,
-  PIN_ICON_VIEW_SIZE,
   PIN_PATH_VIEW_HEIGHT,
   PIN_PATH_VIEW_WIDTH,
+  type PinIconSpec,
   type PinShapeSpec,
 } from "./categoryStyle";
 
@@ -65,14 +65,14 @@ export function pinIconId(
   /** 頭の形(カテゴリ由来)。**IDに混ぜないと、形を変えても既存の画像が使われ続ける** */
   shape: PinShapeSpec = DEFAULT_PIN_SHAPE,
   /** 中に描くカテゴリのアイコン(カテゴリ由来)。これもIDに混ぜる */
-  icon: string | null = null
+  icon: PinIconSpec | null = null
 ): string {
   const sig = styleSignature(findSeriesStyle(series, seriesStyles));
   const base = `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}`;
   // 自前のパスはそのまま混ぜるとIDが長くなるうえ、MapLibreの画像IDに使えない
   // 文字が入りうるのでハッシュにする
   const shapeKey = typeof shape === "string" ? shape : `p${fnv1a(shape.path)}`;
-  const iconKey = icon ? `-i${fnv1a(icon)}` : "";
+  const iconKey = icon ? `-i${fnv1a(`${icon.viewSize}|${icon.path}`)}` : "";
   return `${base}-${sig}-${shapeKey}${iconKey}-${series ?? "__null__"}`;
 }
 
@@ -94,8 +94,8 @@ export async function ensurePinImage(
   seriesStyles: SeriesStyleDefinition[],
   /** 頭の形(カテゴリ由来。lib/categoryStyle.ts の findPinShape で解決したもの) */
   shape: PinShapeSpec = DEFAULT_PIN_SHAPE,
-  /** 中に描くカテゴリのアイコン(24×24のSVGパス)。あるときはシリーズの文字の代わりに出す */
-  icon: string | null = null
+  /** 中に描くカテゴリのアイコン。あるときはシリーズの文字の代わりに出す */
+  icon: PinIconSpec | null = null
 ): Promise<string> {
   const id = pinIconId(series, visited, isPrivate, seriesStyles, shape, icon);
   if (map.hasImage(id)) return id;
@@ -222,9 +222,9 @@ export async function ensurePinImage(
     // (シリーズは色で分かるので、中身は「何の場所か」に使う)。
     // 塗りは文字色と同じ = ピンの色に対して読める色
     const iconSize = size * 0.62;
-    const scale = iconSize / PIN_ICON_VIEW_SIZE;
+    const scale = iconSize / icon.viewSize;
     const placed = new Path2D();
-    placed.addPath(new Path2D(icon), {
+    placed.addPath(new Path2D(icon.path), {
       a: scale,
       b: 0,
       c: 0,
