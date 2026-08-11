@@ -55,6 +55,9 @@ export const NO_RANK_STYLE: RankStyle = {
   textColor: "#374151",
 };
 
+/** ランクの絞り込みで選べる値(A〜E と「なし」) */
+export type RankFilterValue = Rank | typeof NO_RANK;
+
 export function isRank(value: unknown): value is Rank {
   return typeof value === "string" && (RANKS as readonly string[]).includes(value);
 }

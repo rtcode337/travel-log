@@ -8,14 +8,13 @@ import {
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
 import { getCategoryOrder } from "@/lib/category";
-import { NO_RANK, NO_RANK_LABEL, RANKS, type Rank } from "@/lib/rank";
+import { NO_RANK, type Rank, type RankFilterValue } from "@/lib/rank";
 import SeriesFilter from "@/components/SeriesFilter";
+import RankFilter from "@/components/RankFilter";
+import ChoiceRow from "@/components/ChoiceRow";
 import HelpTip from "@/components/HelpTip";
 
 export type VisitedValue = "visited" | "unvisited";
-
-/** ランクの絞り込みチップの値(A〜E と「なし」) */
-export type RankFilterValue = Rank | typeof NO_RANK;
 
 export interface SpotFilters {
   /**
@@ -208,11 +207,6 @@ function toggleSelection<T>(current: T[], clicked: T): T[] {
     : [...current, clicked];
 }
 
-export const RANK_FILTER_OPTIONS: { value: RankFilterValue; label: string }[] = [
-  ...RANKS.map((r) => ({ value: r as RankFilterValue, label: r })),
-  { value: NO_RANK, label: NO_RANK_LABEL },
-];
-
 const VISITED_OPTIONS: { value: VisitedValue; label: string }[] = [
   { value: "visited", label: "訪問済み" },
   { value: "unvisited", label: "未訪問" },
@@ -306,36 +300,15 @@ export default function FilterBar({
         </div>
       )}
 
-      {/* ランクは値が決め打ち(A〜E+なし)なので、実データに無い段階もチップを出す
-          —— 「Dが1件も無い」ことは押してみて0件で分かるほうが、選択肢が
-          データによって増減するより読みやすい */}
       {rankEnabled && (
         <div>
           <span className="mb-1 block text-xs font-medium text-gray-500">
             ランク
           </span>
-          <div className="flex flex-wrap gap-1.5">
-            {RANK_FILTER_OPTIONS.map((opt) => (
-              <Chip
-                key={opt.value}
-                label={opt.label}
-                active={filters.ranks.includes(opt.value)}
-                activeClassName={ALL_CHIP_ACTIVE_CLASS}
-                onClick={() =>
-                  onChange({
-                    ...filters,
-                    ranks: toggleSelection(filters.ranks, opt.value),
-                  })
-                }
-              />
-            ))}
-            <Chip
-              label="すべて"
-              active={filters.ranks.length === 0}
-              activeClassName={ALL_CHIP_ACTIVE_CLASS}
-              onClick={() => onChange({ ...filters, ranks: [] })}
-            />
-          </div>
+          <RankFilter
+            selected={filters.ranks}
+            onChange={(ranks) => onChange({ ...filters, ranks })}
+          />
         </div>
       )}
 
@@ -387,23 +360,16 @@ export default function FilterBar({
         <span className="mb-1 block text-xs font-medium text-gray-500">
           訪問状況
         </span>
-        {/* 「すべて」チップは無し(両方選択=全件表示)。空選択は「何も選んでいない
-            見た目なのに全件表示」になって分かりにくいため、最後の1つは外せない */}
-        <div className="flex flex-wrap gap-1.5">
-          {VISITED_OPTIONS.map((opt) => (
-            <Chip
-              key={opt.value}
-              label={opt.label}
-              active={filters.visited.includes(opt.value)}
-              activeClassName={ALL_CHIP_ACTIVE_CLASS}
-              onClick={() => {
-                const visited = toggleSelection(filters.visited, opt.value);
-                if (visited.length === 0) return;
-                onChange({ ...filters, visited });
-              }}
-            />
-          ))}
-        </div>
+        {/* シリーズ・ランクと同じ扱い。「すべて」=空配列で、全部選んでも
+            「すべて」には切り替わらない(既定は「未訪問」のみ) */}
+        <ChoiceRow
+          options={VISITED_OPTIONS.map((opt) => ({
+            value: opt.value,
+            content: opt.label,
+          }))}
+          selected={filters.visited}
+          onChange={(visited) => onChange({ ...filters, visited })}
+        />
       </div>
 
       {showRouteToggle && (

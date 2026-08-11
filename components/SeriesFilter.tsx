@@ -6,20 +6,10 @@ import type { Series } from "@/lib/types";
 import { type SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { resolveSeriesChip } from "@/lib/spotStyle";
 import SpotMarkGlyph from "@/components/SpotMarkGlyph";
+import ChoiceRow, { toggleChoice } from "@/components/ChoiceRow";
 
 /** シリーズの選択肢がこれを超える種別(放送回番号など)はボタン列を並べきれないためselectにする */
 export const SERIES_FILTER_BUTTONS_MAX = 12;
-
-/**
- * 「すべて」(空配列)の状態から特定の1件を選ぶと、それ単独の絞り込みになる
- * (他をすべて手で外す手間を省くため)。それ以外は通常のトグル(追加/除外)。
- */
-function toggleSelection(current: Series[], clicked: Series): Series[] {
-  if (current.length === 0) return [clicked];
-  return current.includes(clicked)
-    ? current.filter((v) => v !== clicked)
-    : [...current, clicked];
-}
 
 /**
  * シリーズによる複数選択の絞り込みUI。地図・一覧の絞り込み(FilterBar)と
@@ -54,58 +44,29 @@ export default function SeriesFilter({
     );
   }
 
+  // **選択中は青**(「すべて」と同じ)。シリーズの色で塗らないのは、
+  // ランクを使う種別ではシリーズが色を持たないため —— 持たない種別だけ
+  // 灰色や白で塗られると、選んだかどうかが読めないうえ意味も無い
   return (
-    <div className="flex divide-x divide-gray-300 overflow-hidden rounded-l-lg border border-gray-300 bg-white text-sm">
-      <button
-        type="button"
-        onClick={() => onChange([])}
-        // 角丸は左端だけ(枠も rounded-l-lg)。**右端は直角**にする ——
-        // 枠が角丸だと overflow-hidden が最後のチップの角を丸く切ってしまい、
-        // そこだけ形が違って見えるため
-        className={`flex-1 rounded-l-lg px-2 py-1.5 font-medium ${
-          selected.length === 0
-            ? "bg-blue-600 text-white"
-            : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-        }`}
-      >
-        すべて
-      </button>
-      {series.map((r) => {
-        const { face, mark } = resolveSeriesChip(r, seriesStyles);
-        const active = selected.includes(r);
-        return (
-          <button
-            key={r}
-            type="button"
-            title={r}
-            onClick={() => onChange(toggleSelection(selected, r))}
-            // 選択中はそのシリーズの色で塗る。**未選択側を灰色にしてある**のは、
-            // 白いシリーズ(シリーズ未設定)だと塗っても地の白と同じで、
-            // 選んだかどうかが分からなくなるため。あわせて選択中は下辺に
-            // 縁取り色の帯を敷き、白でも選択が分かるようにする
-            // (**四辺を囲むリングにはしない** —— 1つ1つが独立した四角の箱に
-            //  見えて、ひと続きの切り替えとして読めなくなる)
-            style={
-              active
-                ? {
-                    backgroundColor: face.color,
-                    color: face.textColor,
-                    boxShadow: `inset 0 -3px 0 ${face.borderColor}`,
-                  }
-                : undefined
-            }
-            className={`flex-1 px-2 py-1.5 font-medium ${
-              active ? "" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-            }`}
-          >
-            {/* 中身が無いシリーズ(アイコンも文字も未設定)はシリーズ名をそのまま出す
-                —— チップは押す対象なので、空の四角では選べない */}
-            <SpotMarkGlyph mark={mark} alt={r} className="mx-auto h-4 w-4" />
-            {mark.kind === "none" && r}
-          </button>
-        );
+    <ChoiceRow
+      options={series.map((r) => {
+        const { mark } = resolveSeriesChip(r, seriesStyles);
+        return {
+          value: r,
+          title: r,
+          // 中身が無いシリーズ(アイコンも文字も未設定)はシリーズ名をそのまま出す
+          // —— チップは押す対象なので、空の四角では選べない
+          content:
+            mark.kind === "none" ? (
+              r
+            ) : (
+              <SpotMarkGlyph mark={mark} alt={r} className="mx-auto h-4 w-4" />
+            ),
+        };
       })}
-    </div>
+      selected={selected}
+      onChange={onChange}
+    />
   );
 }
 
@@ -139,21 +100,18 @@ function SearchableSeriesFilter({
     <div className="rounded-lg border border-gray-300 bg-white">
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 border-b border-gray-100 p-2">
-          {selected.map((r) => {
-            const { face } = resolveSeriesChip(r, seriesStyles);
-            return (
-              <button
-                key={r}
-                type="button"
-                onClick={() => onChange(selected.filter((v) => v !== r))}
-                style={{ backgroundColor: face.color, color: face.textColor }}
-                className="max-w-full truncate rounded-full px-2 py-0.5 text-xs font-medium"
-                title={`${r} を外す`}
-              >
-                {r} ✕
-              </button>
-            );
-          })}
+          {/* 選択中のシリーズ。ボタン列と同じく**青で塗る**(シリーズの色は使わない) */}
+          {selected.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => onChange(selected.filter((v) => v !== r))}
+              className="max-w-full truncate rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white"
+              title={`${r} を外す`}
+            >
+              {r} ✕
+            </button>
+          ))}
           <button
             type="button"
             onClick={() => onChange([])}
@@ -181,7 +139,7 @@ function SearchableSeriesFilter({
             <li key={r}>
               <button
                 type="button"
-                onClick={() => onChange(toggleSelection(selected, r))}
+                onClick={() => onChange(toggleChoice(selected, r))}
                 className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm ${
                   active ? "bg-blue-50 font-medium" : "hover:bg-gray-50"
                 }`}

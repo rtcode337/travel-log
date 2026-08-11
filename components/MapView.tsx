@@ -56,7 +56,7 @@ import {
 } from "@/lib/useSpotCache";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import { useRankEnabled } from "@/lib/useRankEnabled";
-import { isRank, NO_RANK } from "@/lib/rank";
+import { isRank, NO_RANK, type RankFilterValue } from "@/lib/rank";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useCategories } from "@/lib/useCategories";
 import FilterBar, {
@@ -66,7 +66,6 @@ import FilterBar, {
   hasActiveFilters,
   passesFilters,
   toVisitDateKey,
-  type RankFilterValue,
   type SpotFilters,
   type VisitedValue,
 } from "@/components/FilterBar";
@@ -86,6 +85,14 @@ const CLUSTER_COUNT_LAYER_ID = "spots-cluster-count";
 const UNCLUSTERED_LAYER_ID = "spots-unclustered-point";
 /** 同じ座標に複数のスポットが重なっているピンに出す「+N」バッジ */
 const STACK_BADGE_LAYER_ID = "spots-stack-badge";
+/**
+ * 描いている線が通るスポット専用のソース・レイヤー。**クラスタ化しない** ——
+ * GeoJSONソースの`cluster`はソース単位でしか切り替えられないので、
+ * まとめたくないスポットは別のソースに分ける必要がある
+ */
+const PATH_PIN_SOURCE_ID = "spots-path";
+const PATH_PIN_LAYER_ID = "spots-path-point";
+const PATH_STACK_BADGE_LAYER_ID = "spots-path-stack-badge";
 
 const ROUTES_SOURCE_ID = "spot-routes";
 const ROUTE_LINE_LAYER_ID = "spot-routes-line";
@@ -113,7 +120,7 @@ function overlayIds(typeKey: string) {
 const OVERLAY_OPACITY = 0.55;
 const OVERLAY_LINE_OPACITY = 0.45;
 
-const MAIN_PIN_LAYERS = [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID];
+const MAIN_PIN_LAYERS = [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_ID];
 
 /** 指定した重ね表示種別のピン・クラスタのレイヤーID */
 function overlayPinLayerIds(typeKeys: string[]): string[] {
@@ -807,19 +814,29 @@ function stackKey(spot: Pick<Spot, "lat" | "lng">): string {
   return `${spot.lat.toFixed(6)},${spot.lng.toFixed(6)}`;
 }
 
-function buildClusterGeoJSON(
-  spots: Spot[],
-  visitedIds: Set<string>,
-  seriesStyles: SeriesStyleDefinition[],
-  rankEnabled: boolean
-): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
-  // クラスタが解ける拡大率(clusterMaxZoom)より先では座標が同じピンが完全に
-  // 重なってしまい、下のピンはタップも目視もできなくなる。件数を持たせておく
+/** 座標が同じスポットの件数(「+N」バッジ用)。**表示するスポット全体で数える** */
+function countStacks(spots: Spot[]): Map<string, number> {
   const stacks = new Map<string, number>();
   for (const spot of spots) {
     const k = stackKey(spot);
     stacks.set(k, (stacks.get(k) ?? 0) + 1);
   }
+  return stacks;
+}
+
+function buildClusterGeoJSON(
+  spots: Spot[],
+  visitedIds: Set<string>,
+  seriesStyles: SeriesStyleDefinition[],
+  rankEnabled: boolean,
+  /**
+   * 重なり件数。**ソースを分けても表示中の全スポットで数えたものを渡す** ——
+   * 分けたあとの集合ごとに数えると、経路上のピンと重なっている普通のピンが
+   * 「+N」に出てこなくなる(クラスタが解けた拡大率では完全に重なるので、
+   * 数が出ないと下のピンの存在に気づけない)
+   */
+  stacks: Map<string, number>
+): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
   return {
     type: "FeatureCollection",
     features: spots.map((spot) => ({
@@ -840,6 +857,60 @@ function buildClusterGeoJSON(
       },
     })),
   };
+}
+
+/**
+ * ピンと「+N」バッジのレイヤーを、指定のソースに同じ見た目で足す。
+ * クラスタ用(`clustered`)は集約された点を除く filter が要る一方、
+ * 経路用のソースには集約が無いので filter を付けない。
+ * **2つのソースで見た目が割れないよう、レイアウトはここ1か所に置く。**
+ */
+function addPinLayers(
+  map: maplibregl.Map,
+  sourceId: string,
+  pinLayerId: string,
+  badgeLayerId: string,
+  clustered: boolean
+) {
+  const notCluster: maplibregl.FilterSpecification = ["!", ["has", "point_count"]];
+  map.addLayer({
+    id: pinLayerId,
+    type: "symbol",
+    source: sourceId,
+    ...(clustered ? { filter: notCluster } : {}),
+    layout: {
+      "icon-image": ["get", "icon"],
+      "icon-anchor": "bottom",
+      // 画像下端の影用余白の分だけ押し下げ、とんがりの先端を座標に一致させる
+      "icon-offset": [0, PIN_ICON_PAD],
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+  });
+
+  // 座標が同じスポットが2件以上あるピンの右肩に「+N」(Nは隠れている件数)を出す。
+  // これが無いと、下に重なっているスポットの存在に気づけない
+  const stacked: maplibregl.FilterSpecification = [">", ["get", "stack"], 1];
+  map.addLayer({
+    id: badgeLayerId,
+    type: "symbol",
+    source: sourceId,
+    filter: clustered ? ["all", notCluster, stacked] : stacked,
+    layout: {
+      "text-field": ["concat", "+", ["to-string", ["-", ["get", "stack"], 1]]],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 11,
+      "text-anchor": "bottom",
+      "text-offset": [1.3, -1.6],
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+    },
+    paint: {
+      "text-color": "#ffffff",
+      "text-halo-color": "#1f2937",
+      "text-halo-width": 2,
+    },
+  });
 }
 
 /** クラスタ用のsource/layerを(まだなければ)追加する。冪等 */
@@ -898,44 +969,22 @@ function ensureClusterLayers(
 
   // 下がとんがった吹き出し型のピン画像(シリーズ文字・チェックマーク込みで
   // lib/pinIcon.tsが生成し、GeoJSON側のiconプロパティでIDを指定する)。
-  // とんがりの先端がスポットの座標を指すようにicon-anchorはbottomにする
-  map.addLayer({
-    id: UNCLUSTERED_LAYER_ID,
-    type: "symbol",
-    source: CLUSTER_SOURCE_ID,
-    filter: ["!", ["has", "point_count"]],
-    layout: {
-      "icon-image": ["get", "icon"],
-      "icon-anchor": "bottom",
-      // 画像下端の影用余白の分だけ押し下げ、とんがりの先端を座標に一致させる
-      "icon-offset": [0, PIN_ICON_PAD],
-      "icon-allow-overlap": true,
-      "icon-ignore-placement": true,
-    },
-  });
+  // とんがりの先端がスポットの座標を指すようにicon-anchorはbottomにする。
+  // **クラスタ用と経路用の2つのソースに同じ見た目で載せる**(addPinLayers)
+  addPinLayers(map, CLUSTER_SOURCE_ID, UNCLUSTERED_LAYER_ID, STACK_BADGE_LAYER_ID, true);
 
-  // 座標が同じスポットが2件以上あるピンの右肩に「+N」(Nは隠れている件数)を出す。
-  // これが無いと、下に重なっているスポットの存在に気づけない
-  map.addLayer({
-    id: STACK_BADGE_LAYER_ID,
-    type: "symbol",
-    source: CLUSTER_SOURCE_ID,
-    filter: ["all", ["!", ["has", "point_count"]], [">", ["get", "stack"], 1]],
-    layout: {
-      "text-field": ["concat", "+", ["to-string", ["-", ["get", "stack"], 1]]],
-      "text-font": ["Noto Sans Regular"],
-      "text-size": 11,
-      "text-anchor": "bottom",
-      "text-offset": [1.3, -1.6],
-      "text-allow-overlap": true,
-      "text-ignore-placement": true,
-    },
-    paint: {
-      "text-color": "#ffffff",
-      "text-halo-color": "#1f2937",
-      "text-halo-width": 2,
-    },
+  // 描いている線が通るスポットは、クラスタ化しない別ソースに載せる
+  map.addSource(PATH_PIN_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
   });
+  addPinLayers(
+    map,
+    PATH_PIN_SOURCE_ID,
+    PATH_PIN_LAYER_ID,
+    PATH_STACK_BADGE_LAYER_ID,
+    false
+  );
 
   map.on("click", CLUSTER_LAYER_ID, async (e) => {
     // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
@@ -957,24 +1006,33 @@ function ensureClusterLayers(
     });
   });
 
-  map.on("click", UNCLUSTERED_LAYER_ID, (e) => {
-    // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
-    if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
-      return;
-    // タップ位置に複数のピンが重なっているときは、どれを開くか選ばせる
-    // (e.featuresには重なっている分がすべて入る。上のピンだけ開くと下は永久に開けない)
-    const ids = Array.from(
-      new Set(
-        (e.features ?? [])
-          .map((f) => f.properties?.id)
-          .filter((id): id is string => typeof id === "string")
-      )
-    );
-    if (ids.length > 1) onSelectStack(ids);
-    else if (ids.length === 1) onSelectSpot(ids[0]);
-  });
+  // ピンのタップ。**クラスタ用と経路用の両方のレイヤーに同じ処理を付ける**
+  for (const layerId of [UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_ID]) {
+    map.on("click", layerId, (e) => {
+      // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
+      if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
+        return;
+      // タップ位置に複数のピンが重なっているときは、どれを開くか選ばせる
+      // (上のピンだけ開くと下は永久に開けない)。**2つのピンレイヤーをまとめて
+      // 見る** —— 経路上のスポットは別ソースなので、e.features には片方しか入らない
+      const ids = Array.from(
+        new Set(
+          map
+            .queryRenderedFeatures(e.point, {
+              layers: [UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_ID].filter((id) =>
+                map.getLayer(id)
+              ),
+            })
+            .map((f) => f.properties?.id)
+            .filter((id): id is string => typeof id === "string")
+        )
+      );
+      if (ids.length > 1) onSelectStack(ids);
+      else if (ids.length === 1) onSelectSpot(ids[0]);
+    });
+  }
 
-  for (const layerId of [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID]) {
+  for (const layerId of [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_ID]) {
     map.on("mouseenter", layerId, () => {
       map.getCanvas().style.cursor = "pointer";
     });
@@ -990,6 +1048,8 @@ function showClusterLayers(map: maplibregl.Map) {
     CLUSTER_COUNT_LAYER_ID,
     UNCLUSTERED_LAYER_ID,
     STACK_BADGE_LAYER_ID,
+    PATH_PIN_LAYER_ID,
+    PATH_STACK_BADGE_LAYER_ID,
   ]) {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible");
   }
@@ -1068,9 +1128,10 @@ function loadSavedFilters(typeKey: string): SpotFilters {
       ),
       series: strings(obj.series),
       categories: strings(obj.categories),
-      // 空(「すべて」チップがあった頃の保存値・キー欠落)は既定=未訪問のみに倒す
-      // (現行UIに空選択の状態は無い。全件表示は両方選択で保存される)
-      visited: visited.length > 0 ? visited : [...DEFAULT_FILTERS.visited],
+      // **空配列は「すべて」として保存された値**なのでそのまま使う。
+      // キー自体が無いとき(この項目より前の保存データ)だけ既定=未訪問のみに倒す
+      // —— 空を既定へ倒すと、「すべて」を選んで地図を開き直すたびに未訪問へ戻る
+      visited: Array.isArray(obj.visited) ? visited : [...DEFAULT_FILTERS.visited],
       // "none"=表示しない、"today"=(その日ではなく)常に今日、日付=その日、
       // それ以外(旧null・キー欠落など)=今日
       visitedDate:
@@ -2471,6 +2532,48 @@ export default function MapView({
     );
   }, [openFilterParam, spotTypeKey, returnTypeKey]);
 
+  // いま地図に描いている線(ルート・訪問順の経路・訪問予定リストの経路)。
+  // **線を描くところと、その経由地をクラスタから外すところの両方が読む**ので、
+  // どれを描くかの判断はここ1か所に置く(別々に書くと、線は出ているのに
+  // ピンはクラスタに丸められる、という食い違いが起きる)
+  const drawnLines = useMemo(() => {
+    // 「これだけを表示」中は、注視している経路以外(ルート・もう一方の経路)は描かない
+    const isolate = effectiveIsolate(filters);
+    const visibleRoutes =
+      isolate === null
+        ? filterVisibleRoutes(routes, filters, seriesStyles, spotById)
+        : [];
+    // 訪問順の経路は日ごとに別の線にする(日をまたいで結ばない)
+    const visitPathsByDay =
+      isolate === "plan"
+        ? []
+        : buildVisitPathsByDay(visits, filters, pathSpotById);
+    // 作成モード中に編集対象のリスト自身を経路表示していた場合は、更新前の経路が
+    // 下書きの経路と古い形のまま二重に残らないよう、保存済み側は描かない
+    const planListPath =
+      isolate === "visit" ||
+      (buildDraft !== null && filters.planListId === buildDraft.editingId)
+        ? []
+        : buildPlanListPath(planLists, filters, pathSpotById);
+    return { visibleRoutes, visitPathsByDay, planListPath };
+  }, [routes, filters, seriesStyles, spotById, visits, pathSpotById, planLists, buildDraft]);
+
+  /**
+   * 描いている線が通るスポットのID。**この集合のピンはクラスタにまとめない** ——
+   * 経路を辿っているときに経由地が「N件」の丸へ吸い込まれると、どこへ行くのかが
+   * 読めなくなるため(線だけが残り、止まる場所が消える)。
+   */
+  const pathMemberIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const route of drawnLines.visibleRoutes)
+      for (const point of route.points) ids.add(point.spot_id);
+    for (const day of drawnLines.visitPathsByDay)
+      for (const spot of day.path) ids.add(spot.id);
+    for (const spot of drawnLines.planListPath) ids.add(spot.id);
+    for (const id of buildDraft?.spotIds ?? []) ids.add(id);
+    return ids;
+  }, [drawnLines, buildDraft]);
+
   // マーカーの生成・フィルタ反映。
   // 公開スポットも自分の非公開スポットも同じWebGLクラスタ表示で描画する
   // (非公開はピン画像を破線縁取りにして見分ける)。
@@ -2531,11 +2634,22 @@ export default function MapView({
         )
       );
       if (cancelled) return;
-      const source = map.getSource(CLUSTER_SOURCE_ID) as
+      // **線が通るスポットはクラスタ化しないソースへ回す**(経路を辿るときに
+      // 経由地が「N件」の丸へ吸い込まれると、どこへ行くのかが読めなくなるため)。
+      const onPath = filteredSpots.filter((spot) => pathMemberIds.has(spot.id));
+      const offPath = filteredSpots.filter((spot) => !pathMemberIds.has(spot.id));
+      const stacks = countStacks(filteredSpots);
+      const clusterSource = map.getSource(CLUSTER_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
-      source?.setData(
-        buildClusterGeoJSON(filteredSpots, visitedIds, seriesStyles, rankEnabled)
+      clusterSource?.setData(
+        buildClusterGeoJSON(offPath, visitedIds, seriesStyles, rankEnabled, stacks)
+      );
+      const pathSource = map.getSource(PATH_PIN_SOURCE_ID) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      pathSource?.setData(
+        buildClusterGeoJSON(onPath, visitedIds, seriesStyles, rankEnabled, stacks)
       );
       // 本体のレイヤーを重ね表示より後に作った場合でも、重ね表示を上に保つ
       moveOverlayLayersToTop(map, overlayKeysRef.current);
@@ -2550,6 +2664,7 @@ export default function MapView({
     spots,
     spotById,
     pathSpotById,
+    pathMemberIds,
     visits,
     planLists,
     buildDraft,
@@ -2568,25 +2683,7 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
-    // 「これだけを表示」中は、注視している経路以外(ルート・もう一方の経路)は描かない
-    const isolate = effectiveIsolate(filters);
-    const visibleRoutes =
-      isolate === null
-        ? filterVisibleRoutes(routes, filters, seriesStyles, spotById)
-        : [];
-    // 訪問順の経路は日ごとに別の線にする(日をまたいで結ばない)
-    const visitPathsByDay =
-      isolate === "plan"
-        ? []
-        : buildVisitPathsByDay(visits, filters, pathSpotById);
-    // 作成モード中に編集対象のリスト自身を経路表示していた場合は、更新前の経路が
-    // 下書きの経路と古い形のまま二重に残らないよう、保存済み側は描かない
-    const planListPath =
-      isolate === "visit" ||
-      (buildDraft !== null && filters.planListId === buildDraft.editingId)
-        ? []
-        : buildPlanListPath(planLists, filters, pathSpotById);
+    const { visibleRoutes, visitPathsByDay, planListPath } = drawnLines;
 
     runWhenMapReady(() => {
       ensureRouteLayers(map, overlayKeysRef, openRouteDetail, openPathDetail);
@@ -2624,16 +2721,10 @@ export default function MapView({
       );
     });
   }, [
-    routes,
-    filters,
+    drawnLines,
     seriesStyles,
     runWhenMapReady,
-    visits,
-    planLists,
-    spotById,
-    pathSpotById,
     currentLocation,
-    buildDraft,
     buildDraftPath,
     openRouteDetail,
     openPathDetail,
@@ -2741,7 +2832,15 @@ export default function MapView({
           if (cancelled) return;
           (
             map.getSource(ids.source) as maplibregl.GeoJSONSource | undefined
-          )?.setData(buildClusterGeoJSON(filtered, visitedIds, styles, overlayRank));
+          )?.setData(
+            buildClusterGeoJSON(
+              filtered,
+              visitedIds,
+              styles,
+              overlayRank,
+              countStacks(filtered)
+            )
+          );
           (
             map.getSource(ids.routeSource) as maplibregl.GeoJSONSource | undefined
           )?.setData(buildRouteGeoJSON(map, visibleRoutes, styles, []));

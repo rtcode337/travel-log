@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api-client";
 import { formatPlanDateRange } from "@/lib/planListDraft";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
+import { formatSpotMeta } from "@/lib/spotMeta";
 import type { Spot, VisitPlanList } from "@/lib/types";
 import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
 import SpotBadge from "@/components/SpotBadge";
@@ -247,7 +248,9 @@ export default function VisitPlanListDetailModal({
                           >
                             {spot.name}
                           </p>
-                          <p className="text-xs text-gray-500">{spot.region}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatSpotMeta(spot, { rankEnabled })}
+                          </p>
                         </div>
                         <span className="shrink-0 text-gray-400">›</span>
                       </button>

@@ -23,10 +23,10 @@ import { useRegionScope } from "@/lib/useRegionScope";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
-  RANK_FILTER_OPTIONS,
-  type RankFilterValue,
   type SpotFilters,
 } from "@/components/FilterBar";
+import RankFilter from "@/components/RankFilter";
+import type { RankFilterValue } from "@/lib/rank";
 import SpotBadge from "@/components/SpotBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
@@ -39,7 +39,7 @@ import SeriesFilter from "@/components/SeriesFilter";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useRankEnabled } from "@/lib/useRankEnabled";
 import { useCategories } from "@/lib/useCategories";
-import { formatCategoriesForDisplay } from "@/lib/category";
+import { formatSpotMeta } from "@/lib/spotMeta";
 import { useSpotCache } from "@/lib/useSpotCache";
 
 type SortKey = "series" | "name" | "visited";
@@ -558,7 +558,9 @@ export default function SpotsView({
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
-                          <p className="text-xs text-gray-500">{spot.region}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatSpotMeta(spot, { rankEnabled, categories })}
+                          </p>
                         </div>
                         <span className="shrink-0 text-xs text-gray-400">
                           {new Date(plan.created_at).toLocaleDateString("ja-JP")}
@@ -657,7 +659,9 @@ export default function SpotsView({
                         />
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-medium">{spot.name}</p>
-                              <p className="text-xs text-gray-500">{spot.region}</p>
+                              <p className="text-xs text-gray-500">
+                            {formatSpotMeta(spot, { rankEnabled, categories })}
+                          </p>
                             </div>
                             {/* 未訪問記録(訪問済みに数えない記録)はバッジで見分ける */}
                             {visit.unvisited && (
@@ -708,7 +712,16 @@ export default function SpotsView({
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{review.spot_name}</p>
-                          <p className="text-xs text-gray-500">{review.spot_region}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatSpotMeta(
+                              {
+                                region: review.spot_region,
+                                rank: review.spot_rank,
+                                series: review.spot_series,
+                              },
+                              { rankEnabled }
+                            )}
+                          </p>
                           <p className="mt-1 line-clamp-2 text-sm text-gray-700">
                             {review.body}
                           </p>
@@ -753,7 +766,9 @@ export default function SpotsView({
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
-                          <p className="text-xs text-gray-500">{spot.region}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatSpotMeta(spot, { rankEnabled, categories })}
+                          </p>
                         </div>
                         <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
                           非公開
@@ -799,7 +814,9 @@ export default function SpotsView({
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
-                          <p className="text-xs text-gray-500">{spot.region}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatSpotMeta(spot, { rankEnabled, categories })}
+                          </p>
                         </div>
                         <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
                           非表示中
@@ -896,47 +913,15 @@ export default function SpotsView({
                     検索
                   </button>
                 </form>
-                {/* ランクの絞り込み。値が決め打ちなので、シリーズと違い
-                    実データに無い段階もチップを出す(FilterBarと同じ規則) */}
                 {rankEnabled && (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {RANK_FILTER_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => {
-                          setManagementPage(1);
-                          setManagementRanks((prev) =>
-                            prev.length === 0
-                              ? [opt.value]
-                              : prev.includes(opt.value)
-                                ? prev.filter((v) => v !== opt.value)
-                                : [...prev, opt.value]
-                          );
-                        }}
-                        className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                          managementRanks.includes(opt.value)
-                            ? "border-transparent bg-blue-600 text-white"
-                            : "border-gray-300 bg-white text-gray-500"
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => {
+                  <div className="mb-2">
+                    <RankFilter
+                      selected={managementRanks}
+                      onChange={(ranks) => {
                         setManagementPage(1);
-                        setManagementRanks([]);
+                        setManagementRanks(ranks);
                       }}
-                      className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                        managementRanks.length === 0
-                          ? "border-transparent bg-blue-600 text-white"
-                          : "border-gray-300 bg-white text-gray-500"
-                      }`}
-                    >
-                      すべて
-                    </button>
+                    />
                   </div>
                 )}
                 {managementAvailableSeries.length > 1 && (
@@ -979,8 +964,7 @@ export default function SpotsView({
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{spot.name}</p>
                             <p className="text-xs text-gray-500">
-                              {spot.region} ・{" "}
-                              {formatCategoriesForDisplay(spot.categories, categories)}
+                              {formatSpotMeta(spot, { rankEnabled, categories })}
                             </p>
                           </div>
                           {spot.status !== "published" && (
@@ -1128,7 +1112,12 @@ export default function SpotsView({
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{spot.name}</p>
                 <p className="text-xs text-gray-500">
-                  {formatCategoriesForDisplay(spot.categories, categories)}
+                  {/* 都道府県の中の一覧なので地域は出さない(見出しに出ている) */}
+                  {formatSpotMeta(spot, {
+                    rankEnabled,
+                    categories,
+                    includeRegion: false,
+                  })}
                 </p>
               </div>
               {spot.status === "private" && (
