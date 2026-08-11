@@ -327,11 +327,9 @@ export default function FilterBar({
           <span className="mb-1 block text-xs font-medium text-gray-500">
             カテゴリ
           </span>
-          {/* シリーズ・ランク・訪問状況と同じ器。**カテゴリだけ折り返しを許す**
-              —— 値が長く数も多い種別(飲食店の12個など)があり、1行に詰めると
-              1つあたりの幅が足りずに文字が潰れる */}
+          {/* シリーズ・ランク・訪問状況と同じ器。カテゴリは値が長く数も多い種別
+              (飲食店の12個など)があるため、`compact`を付けずに文字ぶんの幅を取る */}
           <ChoiceRow
-            wrap
             options={availableCategories.map((category) => ({
               value: category,
               content: category,

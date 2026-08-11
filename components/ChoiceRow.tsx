@@ -7,6 +7,11 @@ import type { SpotFace } from "@/lib/spotStyle";
  * 「すべて」+ 選択肢が横に連なった絞り込みの行。**選択中はその選択肢自身の色で塗る**。
  * シリーズ(`SeriesFilter`)とランク(`RankFilter`)で共用する —— 同じ見た目を
  * 2か所に書くと、片方を直したときにもう片方だけ古い見た目で残るため。
+ *
+ * **行は常に折り返す。** 選択肢の数は種別の設定で決まる(観光地のシリーズは10個)ので、
+ * 1行に収まる前提を置くと狭い画面で最後の選択肢が器から出て**押せなくなる**
+ * ——器は`overflow-hidden`なので、はみ出した分は見えないまま切られる。
+ * 1つあたりの最小幅は`compact`で選ぶ。
  */
 export interface ChoiceRowOption<T extends string> {
   value: T;
@@ -15,6 +20,11 @@ export interface ChoiceRowOption<T extends string> {
   /** 選択中に塗る面。省略時は青(汎用のチップと同じ) */
   face?: SpotFace;
   title?: string;
+  /**
+   * 中身が短く、折り返す余地の無い選択肢(アイコン・1〜2文字)。詰めて並べる。
+   * 既定はカテゴリ名のような長い文字向けの幅で、そちらを狭くすると1文字ずつに潰れる
+   */
+  compact?: boolean;
 }
 
 /**
@@ -28,36 +38,36 @@ export function toggleChoice<T extends string>(current: T[], clicked: T): T[] {
     : [...current, clicked];
 }
 
+/**
+ * 1つあたりの最小幅(これを下回るときに折り返す)。**`flex-1`ではなく`grow`と組む**
+ * ——`flex-1`は`flex-basis: 0`も指定するため、`basis-*`と並べるとどちらが効くかが
+ * Tailwindの出力順に左右される
+ */
+const BASIS = "basis-20";
+/** アイコン・1〜2文字用。中身の幅(アイコン16px+左右の余白)にそろえてある */
+const BASIS_COMPACT = "basis-9 whitespace-nowrap";
+
 export default function ChoiceRow<T extends string>({
   options,
   selected,
   onChange,
-  wrap = false,
 }: {
   options: ChoiceRowOption<T>[];
   /** 空配列 = 絞り込みなし(既定では「すべて」選択中) */
   selected: T[];
   onChange: (selected: T[]) => void;
-  /**
-   * 折り返しを許す(選択肢が多い・名前が長い軸向け)。
-   * 1行に詰め込むと1つあたりの幅が足りず、文字が数字1つ分まで潰れるため
-   */
-  wrap?: boolean;
 }) {
   if (options.length === 0) return null;
   return (
-    <div
-      className={`flex overflow-hidden rounded-l-lg border border-gray-300 bg-gray-300 text-sm ${
-        wrap ? "flex-wrap gap-px" : "gap-px"
-      }`}
-    >
+    <div className="flex flex-wrap gap-px overflow-hidden rounded-l-lg border border-gray-300 bg-gray-300 text-sm">
       <button
         type="button"
         onClick={() => onChange([])}
         // 角丸は左端だけ(枠も rounded-l-lg)。**右端は直角**にする ——
         // 枠が角丸だと overflow-hidden が最後のチップの角を丸く切ってしまい、
-        // そこだけ形が違って見えるため
-        className={`flex-1 rounded-l-lg px-2 py-1.5 font-medium ${wrap ? "basis-20 " : ""}${
+        // そこだけ形が違って見えるため(折り返した2行目以降の先頭も直角のまま)。
+        // 「すべて」は3文字固定なので詰めてよい(折り返させない)
+        className={`grow ${BASIS_COMPACT} rounded-l-lg px-2 py-1.5 font-medium ${
           selected.length === 0
             ? "bg-blue-600 text-white"
             : "bg-gray-100 text-gray-500 hover:bg-gray-200"
@@ -88,7 +98,7 @@ export default function ChoiceRow<T extends string>({
                   }
                 : undefined
             }
-            className={`flex-1 px-2 py-1.5 font-medium ${wrap ? "basis-20 " : ""}${
+            className={`grow ${opt.compact ? BASIS_COMPACT : BASIS} px-2 py-1.5 font-medium ${
               active
                 ? opt.face
                   ? ""

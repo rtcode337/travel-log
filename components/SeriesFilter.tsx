@@ -55,7 +55,13 @@ export default function SeriesFilter({
           value: r,
           title: r,
           // 中身が無いシリーズ(アイコンも文字も未設定)はシリーズ名をそのまま出す
-          // —— チップは押す対象なので、空の四角では選べない
+          // —— チップは押す対象なので、空の四角では選べない。
+          // 詰めて並べるのはアイコン・画像と1〜2文字のラベルまで。それより長い
+          // 文字(シリーズ名・長いラベル)は折り返す幅が要る(`label`は自由入力)
+          compact:
+            mark.kind === "icon" ||
+            mark.kind === "image" ||
+            (mark.kind === "text" && mark.text.length <= 2),
           content:
             mark.kind === "none" ? (
               r
