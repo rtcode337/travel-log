@@ -196,17 +196,6 @@ export function FilterResetButton({
   );
 }
 
-/**
- * 「すべて」(空配列)の状態から特定の1件を選ぶと、それ単独の絞り込みになる
- * (他をすべて手で外す手間を省くため)。それ以外は通常のトグル(追加/除外)。
- */
-function toggleSelection<T>(current: T[], clicked: T): T[] {
-  if (current.length === 0) return [clicked];
-  return current.includes(clicked)
-    ? current.filter((v) => v !== clicked)
-    : [...current, clicked];
-}
-
 const VISITED_OPTIONS: { value: VisitedValue; label: string }[] = [
   { value: "visited", label: "訪問済み" },
   { value: "unvisited", label: "未訪問" },
@@ -331,28 +320,18 @@ export default function FilterBar({
           <span className="mb-1 block text-xs font-medium text-gray-500">
             カテゴリ
           </span>
-          <div className="flex flex-wrap gap-1.5">
-            {availableCategories.map((category) => (
-              <Chip
-                key={category}
-                label={category}
-                active={filters.categories.includes(category)}
-                activeClassName={ALL_CHIP_ACTIVE_CLASS}
-                onClick={() =>
-                  onChange({
-                    ...filters,
-                    categories: toggleSelection(filters.categories, category),
-                  })
-                }
-              />
-            ))}
-            <Chip
-              label="すべて"
-              active={filters.categories.length === 0}
-              activeClassName={ALL_CHIP_ACTIVE_CLASS}
-              onClick={() => onChange({ ...filters, categories: [] })}
-            />
-          </div>
+          {/* シリーズ・ランク・訪問状況と同じ器。**カテゴリだけ折り返しを許す**
+              —— 値が長く数も多い種別(飲食店の12個など)があり、1行に詰めると
+              1つあたりの幅が足りずに文字が潰れる */}
+          <ChoiceRow
+            wrap
+            options={availableCategories.map((category) => ({
+              value: category,
+              content: category,
+            }))}
+            selected={filters.categories}
+            onChange={(categories) => onChange({ ...filters, categories })}
+          />
         </div>
       )}
 
