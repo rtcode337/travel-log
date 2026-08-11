@@ -32,22 +32,32 @@ export default function ChoiceRow<T extends string>({
   options,
   selected,
   onChange,
+  wrap = false,
 }: {
   options: ChoiceRowOption<T>[];
   /** 空配列 = 絞り込みなし(既定では「すべて」選択中) */
   selected: T[];
   onChange: (selected: T[]) => void;
+  /**
+   * 折り返しを許す(選択肢が多い・名前が長い軸向け)。
+   * 1行に詰め込むと1つあたりの幅が足りず、文字が数字1つ分まで潰れるため
+   */
+  wrap?: boolean;
 }) {
   if (options.length === 0) return null;
   return (
-    <div className="flex divide-x divide-gray-300 overflow-hidden rounded-l-lg border border-gray-300 bg-white text-sm">
+    <div
+      className={`flex overflow-hidden rounded-l-lg border border-gray-300 bg-gray-300 text-sm ${
+        wrap ? "flex-wrap gap-px" : "gap-px"
+      }`}
+    >
       <button
         type="button"
         onClick={() => onChange([])}
         // 角丸は左端だけ(枠も rounded-l-lg)。**右端は直角**にする ——
         // 枠が角丸だと overflow-hidden が最後のチップの角を丸く切ってしまい、
         // そこだけ形が違って見えるため
-        className={`flex-1 rounded-l-lg px-2 py-1.5 font-medium ${
+        className={`flex-1 rounded-l-lg px-2 py-1.5 font-medium ${wrap ? "basis-20 " : ""}${
           selected.length === 0
             ? "bg-blue-600 text-white"
             : "bg-gray-100 text-gray-500 hover:bg-gray-200"
@@ -78,7 +88,7 @@ export default function ChoiceRow<T extends string>({
                   }
                 : undefined
             }
-            className={`flex-1 px-2 py-1.5 font-medium ${
+            className={`flex-1 px-2 py-1.5 font-medium ${wrap ? "basis-20 " : ""}${
               active
                 ? opt.face
                   ? ""
