@@ -59,6 +59,7 @@ import {
   useSpotCache,
   type DownloadProgress,
 } from "@/lib/useSpotCache";
+import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useCategories } from "@/lib/useCategories";
 import { useCategoryStyles } from "@/lib/useCategoryStyles";
@@ -1953,11 +1954,6 @@ export default function MapView({
   const [addSpotAt, setAddSpotAt] = useState<{ lat: number; lng: number } | null>(
     null
   );
-  // 「探訪スポットを追加」(スポット追加と同時に訪問記録をつける)の対象座標
-  const [visitSpotAt, setVisitSpotAt] = useState<{
-    lat: number;
-    lng: number;
-  } | null>(null);
   const [pendingSpots, setPendingSpots] = useState<
     { id: string; lat: number; lng: number; name: string; status: string }[]
   >([]);
@@ -2905,8 +2901,11 @@ export default function MapView({
               description: list.description,
               pointNoun: "地点",
               editList: list,
-              points: path.map((s, i) => ({
-                key: `${s.id}-${i}`,
+              // 並び替えでドラッグ中も行の要素を作り直さないよう、キーは位置ではなく
+              // スポットのID(リスト内で一意)にする —— 作り直すとポインタの捕捉が
+              // 外れて、指を離すまで追従しなくなる
+              points: path.map((s) => ({
+                key: s.id,
                 spotId: s.id,
                 name: s.name,
                 lng: s.lng,
@@ -2916,7 +2915,66 @@ export default function MapView({
             };
           })()
         : null;
+  // 訪問予定リストの経路詳細だけ、地点をつかんで回る順番を入れ替えられる
+  // (ルートと訪問順は記録・取り込み済みの事実なので並べ替えない)。
+  // ドラッグ中は手元のリストを差し替えて地図の紫の矢印もその場で追従させ、
+  // 指を離した時点で1回だけPATCHする
+  const detailPanelRef = useRef<HTMLDivElement | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const reorderList = routeDetailView?.editList ?? null;
+  /** 経路に出ている地点の新しい並びを、リスト全体(訪問済み・手元に無いスポットを
+   *  含む`spot_ids`)へ書き戻す。経路に出ていない行は元の位置のまま動かさない */
+  const applyPathOrder = (list: VisitPlanList, orderedIds: string[]) => {
+    const shown = new Set(orderedIds);
+    let i = 0;
+    return list.spot_ids.map((id) => (shown.has(id) ? orderedIds[i++] : id));
+  };
+  const {
+    setRowRef: setPointRowRef,
+    dragIndex: pointDragIndex,
+    handleProps: pointHandleProps,
+  } = useDragReorder({
+    items: reorderList ? routeDetailView!.points : [],
+    onReorder: (points) => {
+      if (!reorderList) return;
+      const spotIds = applyPathOrder(
+        reorderList,
+        points.map((p) => p.spotId)
+      );
+      setPlanLists((prev) =>
+        prev.map((l) => (l.id === reorderList.id ? { ...l, spot_ids: spotIds } : l))
+      );
+    },
+    onCommit: async (points) => {
+      if (!reorderList) return;
+      const spotIds = applyPathOrder(
+        reorderList,
+        points.map((p) => p.spotId)
+      );
+      setSavingOrder(true);
+      setOrderError(null);
+      // PATCHは経由スポットを丸ごと置き換えるので基本情報も送り直す
+      // (送らないと題名・期間が消える。訪問済みはAPI側が控えて戻す)
+      const { error } = await api.visitPlanLists.update(reorderList.id, {
+        title: reorderList.title,
+        description: reorderList.description,
+        start_date: reorderList.start_date,
+        end_date: reorderList.end_date,
+        spot_ids: spotIds,
+      });
+      setSavingOrder(false);
+      if (error) {
+        setOrderError("並び順の保存に失敗しました: " + error.message);
+      }
+      // 成否によらずサーバーの状態に合わせ直す(失敗時は保存できていない並びを残さない)
+      loadPlanLists();
+    },
+    scrollRef: detailPanelRef,
+  });
+
   const closeRouteDetail = () => {
+    setOrderError(null);
     setDetailRouteId(null);
     setOverlayDetailRouteId(null);
     setDetailPathKind(null);
@@ -3637,15 +3695,6 @@ export default function MapView({
             >
               ここにスポットを追加
             </button>
-            <button
-              onClick={() => {
-                setVisitSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
-                setContextMenu(null);
-              }}
-              className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
-            >
-              探訪スポットを追加
-            </button>
           </div>
         </>
       )}
@@ -3659,7 +3708,7 @@ export default function MapView({
           spots={spots}
           role={role}
           onClose={() => setAddSpotAt(null)}
-          onSaved={(spot) => {
+          onSaved={(spot, visitRecorded) => {
             if (spot.status === "private") {
               // 非公開は自分にだけ常に見えるので、通常のスポットと同じように取り直して表示する
               loadPrivateSpots();
@@ -3675,39 +3724,9 @@ export default function MapView({
                 },
               ]);
             }
+            // 追加と同時に訪問を記録したときは、訪問済み表示・訪問日の経路も更新する
+            if (visitRecorded) loadVisits();
             setAddSpotAt(null);
-          }}
-        />
-      )}
-
-      {/* 探訪スポット追加モーダル(スポット追加と同時に訪問記録をつける) */}
-      {visitSpotAt && (
-        <AddSpotModal
-          lat={visitSpotAt.lat}
-          lng={visitSpotAt.lng}
-          spotTypeKey={spotTypeKey}
-          spots={spots}
-          role={role}
-          withVisit
-          onClose={() => setVisitSpotAt(null)}
-          onSaved={(spot) => {
-            if (spot.status === "private") {
-              loadPrivateSpots();
-            } else {
-              setPendingSpots((prev) => [
-                ...prev,
-                {
-                  id: spot.id,
-                  lat: spot.lat,
-                  lng: spot.lng,
-                  name: spot.name,
-                  status: spot.status,
-                },
-              ]);
-            }
-            // 訪問記録も同時についたので、訪問済み表示・訪問日の経路を更新する
-            loadVisits();
-            setVisitSpotAt(null);
           }}
         />
       )}
@@ -3720,6 +3739,7 @@ export default function MapView({
           onClick={closeRouteDetail}
         >
           <div
+            ref={detailPanelRef}
             onClick={(e) => e.stopPropagation()}
             className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
           >
@@ -3769,8 +3789,23 @@ export default function MapView({
                 {/* 全地点を巡った順に並べ、2点の間にその区間の説明(ルートのみ)を挟む */}
                 <ol className="space-y-0.5">
                   {routeDetailView.points.map((point, i) => (
-                    <li key={point.key}>
-                      <div className="flex items-center gap-2">
+                    <li key={point.key} ref={setPointRowRef(i)}>
+                      <div
+                        className={`flex items-center gap-2 ${
+                          pointDragIndex === i ? "bg-blue-100" : ""
+                        }`}
+                      >
+                        {/* 訪問予定リストのときだけ、つかんで回る順番を入れ替えられる。
+                            touch-action: noneはハンドルにだけ当てる(行本体まで
+                            当てると一覧がタッチスクロールできなくなる) */}
+                        {reorderList && (
+                          <span
+                            {...pointHandleProps(i)}
+                            className={`${REORDER_HANDLE_CLASS} self-stretch py-1 pl-0.5 pr-0.5 text-base leading-none`}
+                          >
+                            <span className="flex h-full items-center">≡</span>
+                          </span>
+                        )}
                         <span className="w-6 shrink-0 text-right text-xs font-medium tabular-nums text-gray-500">
                           {i + 1}
                         </span>
@@ -3812,6 +3847,8 @@ export default function MapView({
                       {/* 区間の説明は次の地点との間に表示(最終地点には次の区間が無い) */}
                       {i < routeDetailView.points.length - 1 && (
                         <div className="flex items-baseline gap-2 py-0.5 text-xs text-gray-500">
+                          {/* 並び替えハンドルのぶんの空き(番号の列を上下でそろえる) */}
+                          {reorderList && <span className="w-5 shrink-0" />}
                           <span className="w-6 shrink-0 text-right">↓</span>
                           {point.legDescription && (
                             <span className="min-w-0 whitespace-pre-wrap">
@@ -3826,7 +3863,15 @@ export default function MapView({
                 <p className="pt-2 text-xs text-gray-500">
                   {routeDetailView.pointNoun}
                   {routeDetailView.points.length}件。スポット名をタップすると、その位置へ移動して詳細を開きます。
+                  {reorderList &&
+                    routeDetailView.points.length > 1 &&
+                    (savingOrder
+                      ? "並び順を保存中…"
+                      : "左端の≡をつかんで動かすと、回る順番を入れ替えられます(訪問済みのスポットは経路に出ないため動きません)。")}
                 </p>
+                {orderError && (
+                  <p className="pt-1 text-xs text-red-600">{orderError}</p>
+                )}
                 {/* 経路全体をGoogle マップの経路検索で開く(先頭が出発地、
                     途中が経由地、最後が目的地) */}
                 <div className="pt-2">

@@ -29,7 +29,6 @@ export default function AddSpotModal({
   spot,
   spots,
   role,
-  withVisit = false,
   onClose,
   onSaved,
   onDeleted,
@@ -46,11 +45,10 @@ export default function AddSpotModal({
   spots: Spot[];
   /** 選べるstatusの選択肢を決める(新規作成時のみ使用。nullなら非公開のみ扱う) */
   role: Role | null;
-  /** trueにすると「探訪スポットを追加」モード:名前とよみがなの間に訪問記録
-   * (訪問日時・写真・メモ)の入力欄を出し、スポット作成と同時に訪問を1件記録する */
-  withVisit?: boolean;
   onClose: () => void;
-  onSaved: (spot: Spot) => void;
+  /** `visitRecorded`は「訪問を記録」を開いたまま送信し、訪問記録も1件付けたとき。
+   *  呼び出し側が訪問済みの表示・訪問順の経路を取り直すのに使う */
+  onSaved: (spot: Spot, visitRecorded: boolean) => void;
   onDeleted?: () => void;
 }) {
   const isEdit = !!spot;
@@ -82,7 +80,10 @@ export default function AddSpotModal({
   const [error, setError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
 
-  // 探訪スポット追加(withVisit)のときだけ使う、同時に付ける訪問記録の入力値
+  // 追加と同時に付ける訪問記録。既定は畳んであり、**開いたまま送信したときだけ**
+  // 記録する(開く操作自体が「ここへ行った」の意思表示。畳んだまま送れば
+  // 入力欄に既定値が入っていても記録は付かない)
+  const [recordVisit, setRecordVisit] = useState(false);
   const [visitedOn, setVisitedOn] = useState(() =>
     toDateTimeLocalValue(new Date())
   );
@@ -185,8 +186,9 @@ export default function AddSpotModal({
       setError("送信に失敗しました: " + (error?.message ?? "unknown error"));
       return;
     }
-    // 探訪スポット追加のときは、作成したスポットに訪問記録を1件つける(口コミは無し)
-    if (withVisit && !isEdit) {
+    // 「訪問を記録」を開いていたときは、作成したスポットに訪問記録を1件つける(口コミは無し)
+    const withVisit = recordVisit && !isEdit;
+    if (withVisit) {
       const { error: visitError } = await api.visits.create({
         spot_id: data.id,
         visited_on: visitedOn ? new Date(visitedOn).toISOString() : null,
@@ -203,7 +205,7 @@ export default function AddSpotModal({
       }
     }
     setSaving(false);
-    onSaved(data);
+    onSaved(data, withVisit);
   };
 
   const handleDelete = async () => {
@@ -231,11 +233,7 @@ export default function AddSpotModal({
         className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
       >
         <h2 className="font-bold">
-          {isEdit
-            ? "スポットを編集"
-            : withVisit
-              ? "この場所に探訪スポットを追加"
-              : "この場所にスポットを追加"}
+          {isEdit ? "スポットを編集" : "この場所にスポットを追加"}
         </h2>
         {!isEdit && lat != null && lng != null && (
           <p className="text-xs text-gray-500">
@@ -289,19 +287,45 @@ export default function AddSpotModal({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </div>
-        {/* 探訪スポット追加: 名前とよみがなの間に訪問記録の入力欄を出す */}
-        {withVisit && !isEdit && (
-          <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/40 p-3">
-            <p className="text-sm font-medium text-blue-800">訪問を記録</p>
-            <VisitFields
-              visitedOn={visitedOn}
-              onVisitedOnChange={setVisitedOn}
-              memo={visitMemo}
-              onMemoChange={setVisitMemo}
-              photos={visitPhotos}
-              onPhotosChange={setVisitPhotos}
-              onProcessingChange={setProcessingPhotos}
-            />
+        {/* 追加と同時に訪問を記録する欄。「探訪スポットを追加」だった頃と同じく
+            名前とよみがなの間・同じ体裁(青の見出しと薄青の面)で置き、
+            **既定は畳んでおく**(ふだんの追加では使わないため)。
+            かつては長押しメニューの別の入口だったが、同じフォームの折り畳みにして
+            入口を1つにした */}
+        {!isEdit && (
+          <div className="rounded-lg border border-blue-100 bg-blue-50/40">
+            <button
+              type="button"
+              onClick={() => setRecordVisit((prev) => !prev)}
+              aria-expanded={recordVisit}
+              className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium text-blue-800"
+            >
+              <span>
+                訪問を記録
+                <span className="ml-1 text-xs font-normal text-blue-700/70">
+                  (任意)
+                </span>
+              </span>
+              <span className="text-xs text-blue-700/70">
+                {recordVisit ? "▲" : "▼"}
+              </span>
+            </button>
+            {recordVisit && (
+              <div className="space-y-3 border-t border-blue-100 p-3">
+                <p className="text-xs text-gray-500">
+                  開いたまま送信すると、追加したスポットに訪問記録が1件つきます(口コミは無し)。畳むと記録しません。
+                </p>
+                <VisitFields
+                  visitedOn={visitedOn}
+                  onVisitedOnChange={setVisitedOn}
+                  memo={visitMemo}
+                  onMemoChange={setVisitMemo}
+                  photos={visitPhotos}
+                  onPhotosChange={setVisitPhotos}
+                  onProcessingChange={setProcessingPhotos}
+                />
+              </div>
+            )}
           </div>
         )}
         <div>
