@@ -41,9 +41,15 @@ export type SpotMark =
 
 /**
  * 面(色・大きさ)を決める。
- * **ランクを使う種別**はランクがそのまま面になる(シリーズの色は無視)。
- * **使わない種別**は大きさをランクなし相当に固定し、色だけシリーズから取る
- * (シリーズ未設定・色の指定なしはランクなしの白)。
+ *
+ * - **大きさはランク**。使わない種別はランクなし相当で固定
+ * - **色はシリーズに指定があればそれを優先**し、無ければランクの色
+ *
+ * 色をシリーズに譲るのは、**ランクと色を別の軸に使いたい種別がある**ため ——
+ * アニメ聖地は「作品ごとに色を分けたうえで、知名度で大きさを変えたい」。
+ * かつてはランクを使う種別ではランクの色で塗り切っていたが、それだと
+ * シリーズの色を設定しても黙って無視されていた。
+ * 観光地のようにシリーズが色を持たない種別は、今までどおりランクの色になる。
  */
 export function resolveSpotFace(
   rank: Rank | null,
@@ -51,14 +57,14 @@ export function resolveSpotFace(
   seriesStyles: SeriesStyleDefinition[],
   rankEnabled: boolean
 ): SpotFace {
-  if (rankEnabled) return rankStyleOf(rank);
+  const base = rankEnabled ? rankStyleOf(rank) : NO_RANK_STYLE;
   const style = findSeriesStyle(series, seriesStyles);
-  const color = style?.color ?? NO_RANK_STYLE.color;
+  if (!style?.color) return base;
   return {
-    color,
-    borderColor: style?.borderColor ?? NO_RANK_STYLE.borderColor,
-    size: NO_RANK_STYLE.size,
-    textColor: style?.textColor ?? autoTextColor(color),
+    color: style.color,
+    borderColor: style.borderColor ?? base.borderColor,
+    size: base.size,
+    textColor: style.textColor ?? autoTextColor(style.color),
   };
 }
 
