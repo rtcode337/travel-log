@@ -8,12 +8,22 @@ import {
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
 import { getCategoryOrder } from "@/lib/category";
+import { NO_RANK, NO_RANK_LABEL, RANKS, type Rank } from "@/lib/rank";
 import SeriesFilter from "@/components/SeriesFilter";
 import HelpTip from "@/components/HelpTip";
 
 export type VisitedValue = "visited" | "unvisited";
 
+/** ランクの絞り込みチップの値(A〜E と「なし」) */
+export type RankFilterValue = Rank | typeof NO_RANK;
+
 export interface SpotFilters {
+  /**
+   * 空配列 = ランクによる絞り込みなし(「すべて」選択中、全件表示)。
+   * `'none'`(`NO_RANK`)はランクなしのスポットを指す。
+   * ランクを使わない種別では選択肢を出さないので常に空
+   */
+  ranks: RankFilterValue[];
   /** 空配列 = シリーズによる絞り込みなし(「すべて」選択中、全件表示) */
   series: Series[];
   /** 空配列 = カテゴリによる絞り込みなし(「すべて」選択中、全件表示) */
@@ -62,6 +72,7 @@ export interface SpotFilters {
 }
 
 export const DEFAULT_FILTERS: SpotFilters = {
+  ranks: [],
   series: [],
   categories: [],
   visited: ["unvisited"],
@@ -107,8 +118,13 @@ export function passesFilters(
   filters: SpotFilters,
   series: Series | null,
   categories: Category[],
-  isVisited: boolean
+  isVisited: boolean,
+  /** ランク。使わない種別・渡されない呼び出しはランクなし扱い */
+  rank: Rank | null = null
 ): boolean {
+  if (filters.ranks.length > 0) {
+    if (!filters.ranks.includes(rank ?? NO_RANK)) return false;
+  }
   if (filters.series.length > 0) {
     // シリーズ未設定(null/空)は「未設定」として突き合わせる
     const effective = series && series.length > 0 ? series : UNSET_SERIES;
@@ -134,6 +150,7 @@ export function passesFilters(
  */
 export function hasActiveFilters(filters: SpotFilters): boolean {
   return (
+    filters.ranks.length > 0 ||
     filters.series.length > 0 ||
     filters.categories.length > 0 ||
     !isDefaultVisited(filters.visited)
@@ -165,6 +182,7 @@ export function FilterResetButton({
       onClick={() =>
         onChange({
           ...filters,
+          ranks: [],
           series: [],
           categories: [],
           visited: [...DEFAULT_FILTERS.visited],
@@ -189,6 +207,11 @@ function toggleSelection<T>(current: T[], clicked: T): T[] {
     ? current.filter((v) => v !== clicked)
     : [...current, clicked];
 }
+
+export const RANK_FILTER_OPTIONS: { value: RankFilterValue; label: string }[] = [
+  ...RANKS.map((r) => ({ value: r as RankFilterValue, label: r })),
+  { value: NO_RANK, label: NO_RANK_LABEL },
+];
 
 const VISITED_OPTIONS: { value: VisitedValue; label: string }[] = [
   { value: "visited", label: "訪問済み" },
@@ -229,6 +252,7 @@ export default function FilterBar({
   onChange,
   seriesStyles,
   categories,
+  rankEnabled = false,
   showReset = true,
   showRouteToggle = false,
 }: {
@@ -240,6 +264,8 @@ export default function FilterBar({
   seriesStyles: SeriesStyleDefinition[];
   /** このスポット種別のカテゴリ設定(並び順に使う。lib/useCategories.ts参照) */
   categories: Category[];
+  /** その種別がランクを使うか。使うときだけランクのチップを出す(lib/useRankEnabled.ts) */
+  rankEnabled?: boolean;
   /** falseにすると内蔵のリセットボタンを出さない(呼び出し側で別の場所に置く場合) */
   showReset?: boolean;
   /**
@@ -277,6 +303,39 @@ export default function FilterBar({
       {showReset && (
         <div className="flex justify-end">
           <FilterResetButton filters={filters} onChange={onChange} />
+        </div>
+      )}
+
+      {/* ランクは値が決め打ち(A〜E+なし)なので、実データに無い段階もチップを出す
+          —— 「Dが1件も無い」ことは押してみて0件で分かるほうが、選択肢が
+          データによって増減するより読みやすい */}
+      {rankEnabled && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-gray-500">
+            ランク
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {RANK_FILTER_OPTIONS.map((opt) => (
+              <Chip
+                key={opt.value}
+                label={opt.label}
+                active={filters.ranks.includes(opt.value)}
+                activeClassName={ALL_CHIP_ACTIVE_CLASS}
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    ranks: toggleSelection(filters.ranks, opt.value),
+                  })
+                }
+              />
+            ))}
+            <Chip
+              label="すべて"
+              active={filters.ranks.length === 0}
+              activeClassName={ALL_CHIP_ACTIVE_CLASS}
+              onClick={() => onChange({ ...filters, ranks: [] })}
+            />
+          </div>
         </div>
       )}
 

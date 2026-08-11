@@ -17,6 +17,8 @@ import { DEFAULT_REGION_SCOPE, regionFieldLabel } from "@/lib/region";
 import { useRegionScope } from "@/lib/useRegionScope";
 import { useCategories } from "@/lib/useCategories";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
+import { useRankEnabled } from "@/lib/useRankEnabled";
+import { RANKS, type Rank } from "@/lib/rank";
 import { UNSET_SERIES } from "@/lib/seriesStyle";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
@@ -69,6 +71,7 @@ export default function AddSpotModal({
   const [spotLat, setSpotLat] = useState(String(spot?.lat ?? lat ?? ""));
   const [spotLng, setSpotLng] = useState(String(spot?.lng ?? lng ?? ""));
   const [region, setRegion] = useState(spot?.region ?? "");
+  const [rank, setRank] = useState<Rank | "">(spot?.rank ?? "");
   const [series, setSeries] = useState<Series>(spot?.series ?? "");
   const [categories, setCategories] = useState<Category[]>(spot?.categories ?? []);
   // 一覧に無いカテゴリを手入力で足すための欄(確定するとcategoriesに入る)
@@ -99,6 +102,8 @@ export default function AddSpotModal({
   // シリーズはこの種別のJSON設定(series_styles)から選ぶ(自由入力を廃止)。
   // 編集中スポットの既存シリーズが設定一覧に無い場合は、選択を保てるよう末尾に足す
   const seriesStyles = useSeriesStyles(typeKey);
+  // ランクを使わない種別では欄ごと出さない(常に「なし」)
+  const rankEnabled = useRankEnabled(typeKey);
   const seriesOptions = useMemo(() => {
     const configured = seriesStyles.map((s) => s.series);
     return series && !configured.includes(series)
@@ -174,6 +179,7 @@ export default function AddSpotModal({
       lat: Number(spotLat),
       lng: Number(spotLng),
       region: region.trim(),
+      rank: rank || null,
       series: series.trim() || null,
       categories,
       description: description.trim() || null,
@@ -402,6 +408,27 @@ export default function AddSpotModal({
             </>
           )}
         </div>
+        {/* ランクはピンの色と大きさを決める段階(A〜E)。使う種別でだけ出す */}
+        {rankEnabled && (
+          <div>
+            <label className="mb-1 block text-sm font-medium">ランク</label>
+            <select
+              value={rank}
+              onChange={(e) => setRank(e.target.value as Rank | "")}
+              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+            >
+              <option value="">なし</option>
+              {RANKS.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              地図のピンの色と大きさを決めます(Aが最も大きく目立ちます)。なしは白で、Bと同じ大きさになります。
+            </p>
+          </div>
+        )}
         <div>
           <label className="mb-1 block text-sm font-medium">
             シリーズ {seriesRequired && "*"}
@@ -424,7 +451,7 @@ export default function AddSpotModal({
           </select>
           {!seriesRequired && (
             <p className="mt-1 text-xs text-gray-500">
-              非公開スポットではシリーズを選ばなくてもかまいません(白いピンに青丸で表示されます)。
+              非公開スポットではシリーズを選ばなくてもかまいません(ピンの中身が空になります)。
             </p>
           )}
         </div>

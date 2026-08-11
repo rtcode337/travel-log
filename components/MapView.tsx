@@ -45,12 +45,7 @@ import {
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
 import { resolveCategories } from "@/lib/category";
-import {
-  findPinIcon,
-  findPinShape,
-  resolveCategoryStyles,
-  type CategoryStyleDefinition,
-} from "@/lib/categoryStyle";
+import { resolveSpotFace, resolveSpotMark, resolveSpotShape } from "@/lib/spotStyle";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import {
   downloadSpotCacheFor,
@@ -60,9 +55,10 @@ import {
   type DownloadProgress,
 } from "@/lib/useSpotCache";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
+import { useRankEnabled } from "@/lib/useRankEnabled";
+import { isRank, NO_RANK } from "@/lib/rank";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useCategories } from "@/lib/useCategories";
-import { useCategoryStyles } from "@/lib/useCategoryStyles";
 import FilterBar, {
   DEFAULT_FILTERS,
   FilterResetButton,
@@ -70,6 +66,7 @@ import FilterBar, {
   hasActiveFilters,
   passesFilters,
   toVisitDateKey,
+  type RankFilterValue,
   type SpotFilters,
   type VisitedValue,
 } from "@/components/FilterBar";
@@ -81,7 +78,7 @@ import SpotDownloadDialogs, {
   DownloadProgressDialog,
 } from "@/components/SpotDownloadDialogs";
 import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
-import SeriesBadge from "@/components/SeriesBadge";
+import SpotBadge from "@/components/SpotBadge";
 
 const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
@@ -814,7 +811,7 @@ function buildClusterGeoJSON(
   spots: Spot[],
   visitedIds: Set<string>,
   seriesStyles: SeriesStyleDefinition[],
-  categoryStyles: CategoryStyleDefinition[]
+  rankEnabled: boolean
 ): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
   // クラスタが解ける拡大率(clusterMaxZoom)より先では座標が同じピンが完全に
   // 重なってしまい、下のピンはタップも目視もできなくなる。件数を持たせておく
@@ -833,12 +830,11 @@ function buildClusterGeoJSON(
         series: spot.series,
         visited: visitedIds.has(spot.id),
         icon: pinIconId(
-          spot.series,
+          resolveSpotFace(spot.rank, spot.series, seriesStyles, rankEnabled),
+          resolveSpotMark(spot.series, seriesStyles),
+          resolveSpotShape(spot.series, seriesStyles),
           visitedIds.has(spot.id),
-          spot.status === "private",
-          seriesStyles,
-          findPinShape(spot.categories, categoryStyles),
-          findPinIcon(spot.categories, categoryStyles)
+          spot.status === "private"
         ),
         stack: stacks.get(stackKey(spot)) ?? 1,
       },
@@ -1065,6 +1061,11 @@ function loadSavedFilters(typeKey: string): SpotFilters {
       (v): v is VisitedValue => v === "visited" || v === "unvisited"
     );
     return {
+      // ランクの保存値。A〜Eと"none"(ランクなし)以外は捨てる
+      // (キー欠落=この項目より前の保存データは絞り込みなし)
+      ranks: strings(obj.ranks).filter((v): v is RankFilterValue =>
+        v === NO_RANK || isRank(v)
+      ),
       series: strings(obj.series),
       categories: strings(obj.categories),
       // 空(「すべて」チップがあった頃の保存値・キー欠落)は既定=未訪問のみに倒す
@@ -1260,7 +1261,7 @@ export default function MapView({
   // 種別のカテゴリ設定。絞り込みチップの並び順に使う
   const categories = useCategories(spotTypeKey);
   // カテゴリごとのピンの形。設定が無い種別では空配列(=すべて既定の丸)
-  const categoryStyles = useCategoryStyles(spotTypeKey);
+  const rankEnabled = useRankEnabled(spotTypeKey);
   // 種別の対象地域スコープ。地名検索の対象国と、初回表示時の挙動
   // (日本=現在地へズーム、それ以外=スポット全体にフィット)に使う
   const regionScope = useRegionScope(spotTypeKey);
@@ -1668,8 +1669,9 @@ export default function MapView({
     (key: string) => resolveCategories(spotTypes.find((t) => t.key === key)),
     [spotTypes]
   );
-  const overlayCategoryStylesOf = useCallback(
-    (key: string) => resolveCategoryStyles(spotTypes.find((t) => t.key === key)),
+  const overlayRankEnabledOf = useCallback(
+    (key: string) =>
+      getSpotTypeSetting(spotTypes.find((t) => t.key === key), "rank_enabled"),
     [spotTypes]
   );
 
@@ -2506,7 +2508,8 @@ export default function MapView({
           filters,
           spot.series,
           spot.categories,
-          visitedIds.has(spot.id)
+          visitedIds.has(spot.id),
+          spot.rank
         )
     );
 
@@ -2519,12 +2522,11 @@ export default function MapView({
         filteredSpots.map((spot) =>
           ensurePinImage(
             map,
-            spot.series,
+            resolveSpotFace(spot.rank, spot.series, seriesStyles, rankEnabled),
+            resolveSpotMark(spot.series, seriesStyles),
+            resolveSpotShape(spot.series, seriesStyles),
             visitedIds.has(spot.id),
-            spot.status === "private",
-            seriesStyles,
-            findPinShape(spot.categories, categoryStyles),
-            findPinIcon(spot.categories, categoryStyles)
+            spot.status === "private"
           )
         )
       );
@@ -2533,7 +2535,7 @@ export default function MapView({
         | maplibregl.GeoJSONSource
         | undefined;
       source?.setData(
-        buildClusterGeoJSON(filteredSpots, visitedIds, seriesStyles, categoryStyles)
+        buildClusterGeoJSON(filteredSpots, visitedIds, seriesStyles, rankEnabled)
       );
       // 本体のレイヤーを重ね表示より後に作った場合でも、重ね表示を上に保つ
       moveOverlayLayersToTop(map, overlayKeysRef.current);
@@ -2556,7 +2558,7 @@ export default function MapView({
     filters,
     runWhenMapReady,
     seriesStyles,
-    categoryStyles,
+    rankEnabled,
     routes,
   ]);
 
@@ -2689,7 +2691,7 @@ export default function MapView({
 
           const ids = overlayIds(typeKey);
           const styles = overlaySeriesStylesOf(typeKey);
-          const catStyles = overlayCategoryStylesOf(typeKey);
+          const overlayRank = overlayRankEnabledOf(typeKey);
           const typeFilters = overlayFilters.get(typeKey) ?? DEFAULT_FILTERS;
           const spotById = new Map(data.spots.map((s) => [s.id, s]));
           // 「これだけを表示」中は重ね表示のルートも隠す
@@ -2708,7 +2710,8 @@ export default function MapView({
                 typeFilters,
                 spot.series,
                 spot.categories,
-                visitedIds.has(spot.id)
+                visitedIds.has(spot.id),
+                spot.rank
               )
           );
 
@@ -2727,19 +2730,18 @@ export default function MapView({
             filtered.map((spot) =>
               ensurePinImage(
                 map,
-                spot.series,
+                resolveSpotFace(spot.rank, spot.series, styles, overlayRank),
+                resolveSpotMark(spot.series, styles),
+                resolveSpotShape(spot.series, styles),
                 visitedIds.has(spot.id),
-                false,
-                styles,
-                findPinShape(spot.categories, catStyles),
-                findPinIcon(spot.categories, catStyles)
+                false
               )
             )
           );
           if (cancelled) return;
           (
             map.getSource(ids.source) as maplibregl.GeoJSONSource | undefined
-          )?.setData(buildClusterGeoJSON(filtered, visitedIds, styles, catStyles));
+          )?.setData(buildClusterGeoJSON(filtered, visitedIds, styles, overlayRank));
           (
             map.getSource(ids.routeSource) as maplibregl.GeoJSONSource | undefined
           )?.setData(buildRouteGeoJSON(map, visibleRoutes, styles, []));
@@ -2757,7 +2759,7 @@ export default function MapView({
     overlayData,
     overlayFilters,
     overlaySeriesStylesOf,
-    overlayCategoryStylesOf,
+    overlayRankEnabledOf,
     visitedIds,
     hiddenIds,
     runWhenMapReady,
@@ -2817,7 +2819,11 @@ export default function MapView({
       return {
         series: spot.series,
         isPrivate: spot.status === "private",
+        // 色はランク由来なので、ランクとその種別の設定も一緒に渡す
+        // (重ね表示のスポットは、そのスポット自身の種別の設定で描く)
+        rank: spot.rank,
         seriesStyles: overlayKey ? overlaySeriesStylesOf(overlayKey) : seriesStyles,
+        rankEnabled: overlayKey ? overlayRankEnabledOf(overlayKey) : rankEnabled,
       };
     },
     [
@@ -2826,7 +2832,9 @@ export default function MapView({
       spotById,
       overlayTypeKeyBySpotId,
       overlaySeriesStylesOf,
+      overlayRankEnabledOf,
       seriesStyles,
+      rankEnabled,
     ]
   );
   // ルート・訪問順の経路・訪問予定リストの経路を、同じ詳細モーダルで出すための共通形。
@@ -3218,6 +3226,7 @@ export default function MapView({
               onChange={setFilters}
               showReset={false}
               seriesStyles={seriesStyles}
+              rankEnabled={rankEnabled}
               categories={categories}
               showRouteToggle={routes.length > 0}
             />
@@ -3538,6 +3547,7 @@ export default function MapView({
                   onChange={(next) => setOverlayFiltersAndSave(typeKey, next)}
                   showReset={false}
                   seriesStyles={overlaySeriesStylesOf(typeKey)}
+                  rankEnabled={overlayRankEnabledOf(typeKey)}
                   categories={overlayCategoriesOf(typeKey)}
                   showRouteToggle={data.routes.length > 0}
                 />
@@ -3813,9 +3823,11 @@ export default function MapView({
                             経路を辿るときの判断材料になるため名前の隣に出す。
                             手元に無いスポット(未ダウンロード等)は出さない */}
                         {point.badge && (
-                          <SeriesBadge
+                          <SpotBadge
+                            rank={point.badge.rank}
                             series={point.badge.series}
                             seriesStyles={point.badge.seriesStyles}
+                            rankEnabled={point.badge.rankEnabled}
                             isPrivate={point.badge.isPrivate}
                             size="sm"
                           />

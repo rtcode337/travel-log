@@ -1,23 +1,20 @@
 import type * as maplibregl from "maplibre-gl";
-import type { Series } from "./types";
-import { autoTextColor, findSeriesStyle, isImageLabel, type SeriesStyleDefinition } from "./seriesStyle";
 import {
-  DEFAULT_PIN_SHAPE,
   PIN_PATH_VIEW_HEIGHT,
   PIN_PATH_VIEW_WIDTH,
-  type PinIconSpec,
   type PinShapeSpec,
-} from "./categoryStyle";
+} from "./pinShape";
+import { spotMarkKey, type SpotFace, type SpotMark } from "./spotStyle";
 
 /**
  * 地図ピン(下がとんがった吹き出し型)の画像をcanvasで生成し、
  * MapLibreのスタイル画像として登録する。とんがりの先端が画像の下端中央に
  * 来るように描くので、symbolレイヤー側は `icon-anchor: "bottom"` で使う。
- * 縁取り線は常に描き、非公開スポットだけ破線にする(色・大きさ・ラベルは
- * シリーズのまま変えない)。
+ * 縁取り線は常に描き、非公開スポットだけ破線にする。
  *
- * 頭の形(丸 / 角丸四角)はカテゴリで切り替わる(lib/categoryStyle.ts)。色・大きさ・
- * ラベルをシリーズが握っているので、カテゴリに渡せる直交したチャネルが形しかないため。
+ * **何を描くかは決めない。** 面(色・大きさ)・形・中身は`lib/spotStyle.ts`が
+ * ランクとシリーズから解決したものを受け取るだけ —— 地図とバッジで判断が
+ * 食い違わないようにするため。
  */
 
 const PIXEL_RATIO = 2;
@@ -33,13 +30,6 @@ function pinTailHeight(size: number): number {
   return Math.max(5, Math.round(size * 0.45));
 }
 
-/**
- * 見た目そのものを短いハッシュにした値。画像IDに混ぜることで、同じシリーズでも
- * 見た目が変われば別の画像IDになる(=作り直される)ようにする。
- * seriesStylesは`/api/spot-types`の取得完了まで暫定でDEFAULT_SERIES_STYLESになるため、
- * シリーズ名だけをIDにすると暫定の見た目で登録した画像がそのまま使われ続けてしまう
- * (ensurePinImageはmap.hasImage()で早期returnする)。
- */
 /** FNV-1a。長い値(画像のbase64・自前のパス)をIDに入れず固定長にするために使う */
 function fnv1a(raw: string): string {
   let h = 0x811c9dc5;
@@ -50,30 +40,28 @@ function fnv1a(raw: string): string {
   return (h >>> 0).toString(36);
 }
 
-function styleSignature(style: SeriesStyleDefinition): string {
-  const label = isImageLabel(style.label) ? `img:${style.label.image}` : `txt:${style.label}`;
-  return fnv1a(
-    `${style.color}|${style.borderColor}|${style.size}|${style.textColor ?? ""}|${label}`
-  );
-}
-
+/**
+ * ピン画像のID。**見た目そのものを混ぜる** —— `ensurePinImage`は
+ * `map.hasImage(id)`で早期returnするので、面・形・中身のどれかがIDに入って
+ * いないと、設定を変えても古い画像が使われ続ける。種別の設定は
+ * `/api/spot-types`の取得完了までは既定値なので、名前だけをIDにすると
+ * 暫定の見た目のまま固まってしまう。
+ */
 export function pinIconId(
-  series: Series | null,
+  face: SpotFace,
+  mark: SpotMark,
+  shape: PinShapeSpec,
   visited: boolean,
-  isPrivate: boolean,
-  seriesStyles: SeriesStyleDefinition[],
-  /** 頭の形(カテゴリ由来)。**IDに混ぜないと、形を変えても既存の画像が使われ続ける** */
-  shape: PinShapeSpec = DEFAULT_PIN_SHAPE,
-  /** 中に描くカテゴリのアイコン(カテゴリ由来)。これもIDに混ぜる */
-  icon: PinIconSpec | null = null
+  isPrivate: boolean
 ): string {
-  const sig = styleSignature(findSeriesStyle(series, seriesStyles));
   const base = `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}`;
-  // 自前のパスはそのまま混ぜるとIDが長くなるうえ、MapLibreの画像IDに使えない
+  const faceKey = fnv1a(
+    `${face.color}|${face.borderColor}|${face.size}|${face.textColor}`
+  );
+  // 自前のパス・画像はそのまま混ぜるとIDが長くなるうえ、MapLibreの画像IDに使えない
   // 文字が入りうるのでハッシュにする
   const shapeKey = typeof shape === "string" ? shape : `p${fnv1a(shape.path)}`;
-  const iconKey = icon ? `-i${fnv1a(`${icon.viewSize}|${icon.path}`)}` : "";
-  return `${base}-${sig}-${shapeKey}${iconKey}-${series ?? "__null__"}`;
+  return `${base}-${faceKey}-${shapeKey}-m${fnv1a(spotMarkKey(mark))}`;
 }
 
 /** data URL画像をHTMLImageElementとして読み込む(base64は同期的に近いが、確実性のためdecode()を待つ) */
@@ -84,30 +72,28 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   return img;
 }
 
-/** ピン画像を(未登録なら)生成して登録し、そのIDを返す。冪等。ラベルが画像の場合は非同期で読み込む */
+/** ピン画像を(未登録なら)生成して登録し、そのIDを返す。冪等。中身が画像の場合は非同期で読み込む */
 export async function ensurePinImage(
   map: maplibregl.Map,
-  series: Series | null,
+  /** 面(色・大きさ)。lib/spotStyle.ts の resolveSpotFace で解決したもの */
+  face: SpotFace,
+  /** 中に描く印。同じく resolveSpotMark で解決したもの */
+  mark: SpotMark,
+  /** 頭の形。同じく resolveSpotShape で解決したもの */
+  shape: PinShapeSpec,
   visited: boolean,
   /** 自分だけの非公開スポット。公開スポットと見分けられるよう破線で縁取る */
-  isPrivate: boolean,
-  seriesStyles: SeriesStyleDefinition[],
-  /** 頭の形(カテゴリ由来。lib/categoryStyle.ts の findPinShape で解決したもの) */
-  shape: PinShapeSpec = DEFAULT_PIN_SHAPE,
-  /** 中に描くカテゴリのアイコン。あるときはシリーズの文字の代わりに出す */
-  icon: PinIconSpec | null = null
+  isPrivate: boolean
 ): Promise<string> {
-  const id = pinIconId(series, visited, isPrivate, seriesStyles, shape, icon);
+  const id = pinIconId(face, mark, shape, visited, isPrivate);
   if (map.hasImage(id)) return id;
 
-  const style = findSeriesStyle(series, seriesStyles);
-  // 訪問済みは(シリーズの色より視認性を優先し)ピン全体を緑+チェックマークにする
-  const fill = visited ? "#16a34a" : style.color;
-  const borderColor = visited ? "#15803d" : style.borderColor;
-  const label = visited ? "✓" : style.label;
-  const textColor = visited ? "#ffffff" : style.textColor ?? autoTextColor(style.color);
+  // 訪問済みは(ランク・シリーズの色より視認性を優先し)ピン全体を緑+チェックマークにする
+  const fill = visited ? "#16a34a" : face.color;
+  const borderColor = visited ? "#15803d" : face.borderColor;
+  const textColor = visited ? "#ffffff" : face.textColor;
 
-  const size = style.size;
+  const size = face.size;
   const tail = pinTailHeight(size);
   const w = size + PIN_ICON_PAD * 2;
   const h = size + tail + PIN_ICON_PAD * 2;
@@ -217,14 +203,15 @@ export async function ensurePinImage(
   ctx.stroke(path);
   ctx.setLineDash([]);
 
-  if (!visited && icon) {
-    // カテゴリのアイコン。**シリーズの文字の代わり**に中央へ描く
-    // (シリーズは色で分かるので、中身は「何の場所か」に使う)。
-    // 塗りは文字色と同じ = ピンの色に対して読める色
+  // 中身。訪問済みのときは印より「訪問済みかどうか」を優先して✓を描く
+  const drawn: SpotMark = visited ? { kind: "text", text: "✓" } : mark;
+  if (drawn.kind === "icon") {
+    // アイコンは中央へ。塗りは文字色と同じ = ピンの色に対して読める色なので、
+    // 穴や隙間があってもピンの色が透けて見えるだけで問題ない
     const iconSize = size * 0.62;
-    const scale = iconSize / icon.viewSize;
+    const scale = iconSize / drawn.icon.viewSize;
     const placed = new Path2D();
-    placed.addPath(new Path2D(icon.path), {
+    placed.addPath(new Path2D(drawn.icon.path), {
       a: scale,
       b: 0,
       c: 0,
@@ -234,28 +221,27 @@ export async function ensurePinImage(
     });
     ctx.fillStyle = textColor;
     ctx.fill(placed);
-  } else if (!visited && isImageLabel(label)) {
+  } else if (drawn.kind === "image") {
     try {
-      const img = await loadImage(label.image);
+      const img = await loadImage(drawn.src);
       const imgSize = size * 0.7;
       ctx.drawImage(img, cx - imgSize / 2, cy - imgSize / 2, imgSize, imgSize);
     } catch {
       // 画像の読み込みに失敗した場合はラベル無しのまま(ピン自体は表示する)
     }
-  } else {
-    const text = visited ? "✓" : typeof label === "string" ? label : "";
-    if (text) {
-      // seriesは自由入力で複数文字もありうるので、その場合は少し小さくして収める
-      const fontSize = Math.max(
-        8,
-        Math.round(size * (text.length > 1 ? 0.38 : 0.6))
-      );
-      ctx.font = `bold ${fontSize}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = textColor;
-      ctx.fillText(text, cx, cy + fontSize * 0.05);
-    }
+  } else if (drawn.kind === "text") {
+    // シリーズもカテゴリの文字も自由入力で複数文字もありうるので、
+    // その場合は少し小さくして収める
+    const text = drawn.text;
+    const fontSize = Math.max(
+      8,
+      Math.round(size * (text.length > 1 ? 0.38 : 0.6))
+    );
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = textColor;
+    ctx.fillText(text, cx, cy + fontSize * 0.05);
   }
 
   // 生成に時間がかかる(画像読み込み等)間に同じidで別の呼び出しが先に登録している

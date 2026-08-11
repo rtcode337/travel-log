@@ -46,7 +46,8 @@ export async function GET(request: Request) {
     }
     const { rows } = await query<MyReview>(
       `select r.id, r.spot_id, r.body, r.created_at,
-         s.name as spot_name, s.region as spot_region, s.series as spot_series
+         s.name as spot_name, s.region as spot_region, s.series as spot_series,
+         s.rank as spot_rank
        from reviews r
        join spots s on s.id = r.spot_id
        where r.user_id = $1 and s.spot_type_id = $2

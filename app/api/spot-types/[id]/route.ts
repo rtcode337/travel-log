@@ -7,10 +7,6 @@ import { deleteVisitPhotos } from "@/lib/photos";
 import { parseSeriesStyles, SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import { CATEGORIES_SETTING_KEY, parseCategories } from "@/lib/category";
 import {
-  CATEGORY_STYLES_SETTING_KEY,
-  parseCategoryStyles,
-} from "@/lib/categoryStyle";
-import {
   isValidRegionScope,
   isValidWikipediaLang,
   REGION_SCOPE_SETTING_KEY,
@@ -81,17 +77,6 @@ export async function PATCH(
       return NextResponse.json(
         {
           error: `${CATEGORIES_SETTING_KEY}は文字列配列のJSONである必要があります。`,
-        },
-        { status: 400 }
-      );
-    }
-    if (
-      key === CATEGORY_STYLES_SETTING_KEY &&
-      (typeof value !== "string" || parseCategoryStyles(value) === null)
-    ) {
-      return NextResponse.json(
-        {
-          error: `${CATEGORY_STYLES_SETTING_KEY}は { category, shape } の配列のJSONである必要があります。`,
         },
         { status: 400 }
       );

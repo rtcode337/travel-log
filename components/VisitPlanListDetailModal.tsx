@@ -6,7 +6,7 @@ import { formatPlanDateRange } from "@/lib/planListDraft";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import type { Spot, VisitPlanList } from "@/lib/types";
 import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
-import SeriesBadge from "@/components/SeriesBadge";
+import SpotBadge from "@/components/SpotBadge";
 import HelpTip from "@/components/HelpTip";
 import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
 
@@ -20,6 +20,7 @@ export default function VisitPlanListDetailModal({
   listId,
   spotsById,
   seriesStyles,
+  rankEnabled = false,
   onClose,
   onEdit,
   onDeleted,
@@ -29,6 +30,8 @@ export default function VisitPlanListDetailModal({
   listId: string;
   spotsById: Map<string, Spot>;
   seriesStyles: SeriesStyleDefinition[];
+  /** その種別がランクを使うか(バッジの色の出どころが変わる。lib/useRankEnabled.ts) */
+  rankEnabled?: boolean;
   onClose: () => void;
   /** 「編集」で呼ばれる。読み込み済みのリスト内容を渡す(呼び出し側で編集フローへ) */
   onEdit: (list: VisitPlanList) => void;
@@ -228,9 +231,11 @@ export default function VisitPlanListDetailModal({
                         <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums text-gray-400">
                           {i + 1}
                         </span>
-                        <SeriesBadge
+                        <SpotBadge
+                          rank={spot.rank}
                           series={spot.series}
                           seriesStyles={seriesStyles}
+                          rankEnabled={rankEnabled}
                           isPrivate={spot.status === "private"}
                           size="sm"
                         />

@@ -23,17 +23,21 @@ import { useRegionScope } from "@/lib/useRegionScope";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
+  RANK_FILTER_OPTIONS,
+  type RankFilterValue,
   type SpotFilters,
 } from "@/components/FilterBar";
-import SeriesBadge from "@/components/SeriesBadge";
+import SpotBadge from "@/components/SpotBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
 import { formatPlanDateRange } from "@/lib/planListDraft";
 import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getSeriesOrder } from "@/lib/seriesStyle";
+import { rankOrder } from "@/lib/rank";
 import SeriesFilter from "@/components/SeriesFilter";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
+import { useRankEnabled } from "@/lib/useRankEnabled";
 import { useCategories } from "@/lib/useCategories";
 import { formatCategoriesForDisplay } from "@/lib/category";
 import { useSpotCache } from "@/lib/useSpotCache";
@@ -192,6 +196,7 @@ export default function SpotsView({
   // 未ダウンロードのままなら公開スポット抜き=自分のスポットだけの一覧になる)
   const spotCache = useSpotCache(spotTypeKey, { autoPrompt: false });
   const seriesStyles = useSeriesStyles(spotTypeKey);
+  const rankEnabled = useRankEnabled(spotTypeKey);
   // 種別のカテゴリ設定。絞り込みチップの並び順に使う
   const categories = useCategories(spotTypeKey);
   // 種別の対象地域スコープ。地域タブの名称(都道府県/州・県/国)と並び順に使う
@@ -230,6 +235,7 @@ export default function SpotsView({
   const [managementSearch, setManagementSearch] = useState("");
   // すべて(空配列)を既定にする(種別によらず全件から探し始められるように)
   const [managementSeries, setManagementSeries] = useState<Series[]>([]);
+  const [managementRanks, setManagementRanks] = useState<RankFilterValue[]>([]);
   const [managementPage, setManagementPage] = useState(1);
 
   const loadManagementSpots = useCallback(async () => {
@@ -239,6 +245,7 @@ export default function SpotsView({
       page: managementPage,
       search: managementSearch || undefined,
       series: managementSeries,
+      ranks: managementRanks,
     });
     if (data) {
       setManagementItems(data.items);
@@ -251,7 +258,14 @@ export default function SpotsView({
     }
     setManagementLoaded(true);
     setManagementLoading(false);
-  }, [spotTypeKey, managementPage, managementSearch, managementSeries, seriesStyles]);
+  }, [
+    spotTypeKey,
+    managementPage,
+    managementSearch,
+    managementSeries,
+    managementRanks,
+    seriesStyles,
+  ]);
 
   useEffect(() => {
     if (browseMode === "series") loadManagementSpots();
@@ -449,12 +463,21 @@ export default function SpotsView({
     const list = spots.filter((s) => {
       if (s.region !== selectedRegion) return false;
       if (hiddenIds.has(s.id)) return false;
-      return passesFilters(filters, s.series, s.categories, visitedIds.has(s.id));
+      return passesFilters(
+        filters,
+        s.series,
+        s.categories,
+        visitedIds.has(s.id),
+        s.rank
+      );
     });
     list.sort((a, b) => {
       switch (sortKey) {
         case "series":
+          // ランクを使う種別ではランク(A→E→なし)を先に見る。使わない種別は
+          // 全部ランクなしなので、この項は差が出ずシリーズ順のまま
           return (
+            rankOrder(a.rank) - rankOrder(b.rank) ||
             getSeriesOrder(a.series, seriesStyles) - getSeriesOrder(b.series, seriesStyles) ||
             (a.name_kana ?? a.name).localeCompare(b.name_kana ?? b.name, "ja")
           );
@@ -525,9 +548,11 @@ export default function SpotsView({
                         onClick={() => setDetailSpotId(spot.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
-                        <SeriesBadge
+                        <SpotBadge
+                          rank={spot.rank}
                           series={spot.series}
                           seriesStyles={seriesStyles}
+                          rankEnabled={rankEnabled}
                           isPrivate={spot.status === "private"}
                           size="sm"
                         />
@@ -622,9 +647,11 @@ export default function SpotsView({
                             onClick={() => setDetailSpotId(spot.id)}
                             className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                           >
-                            <SeriesBadge
+                            <SpotBadge
+                          rank={spot.rank}
                           series={spot.series}
                           seriesStyles={seriesStyles}
+                          rankEnabled={rankEnabled}
                           isPrivate={spot.status === "private"}
                           size="sm"
                         />
@@ -672,9 +699,11 @@ export default function SpotsView({
                         onClick={() => setDetailSpotId(review.spot_id)}
                         className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
-                        <SeriesBadge
+                        <SpotBadge
+                          rank={review.spot_rank}
                           series={review.spot_series}
                           seriesStyles={seriesStyles}
+                          rankEnabled={rankEnabled}
                           size="sm"
                         />
                         <div className="min-w-0 flex-1">
@@ -714,9 +743,11 @@ export default function SpotsView({
                         onClick={() => setDetailSpotId(spot.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
-                        <SeriesBadge
+                        <SpotBadge
+                          rank={spot.rank}
                           series={spot.series}
                           seriesStyles={seriesStyles}
+                          rankEnabled={rankEnabled}
                           isPrivate={spot.status === "private"}
                           size="sm"
                         />
@@ -759,9 +790,11 @@ export default function SpotsView({
                         onClick={() => setDetailSpotId(spot.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
-                        <SeriesBadge
+                        <SpotBadge
+                          rank={spot.rank}
                           series={spot.series}
                           seriesStyles={seriesStyles}
+                          rankEnabled={rankEnabled}
                           size="sm"
                         />
                         <div className="min-w-0 flex-1">
@@ -863,6 +896,49 @@ export default function SpotsView({
                     検索
                   </button>
                 </form>
+                {/* ランクの絞り込み。値が決め打ちなので、シリーズと違い
+                    実データに無い段階もチップを出す(FilterBarと同じ規則) */}
+                {rankEnabled && (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {RANK_FILTER_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => {
+                          setManagementPage(1);
+                          setManagementRanks((prev) =>
+                            prev.length === 0
+                              ? [opt.value]
+                              : prev.includes(opt.value)
+                                ? prev.filter((v) => v !== opt.value)
+                                : [...prev, opt.value]
+                          );
+                        }}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                          managementRanks.includes(opt.value)
+                            ? "border-transparent bg-blue-600 text-white"
+                            : "border-gray-300 bg-white text-gray-500"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManagementPage(1);
+                        setManagementRanks([]);
+                      }}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                        managementRanks.length === 0
+                          ? "border-transparent bg-blue-600 text-white"
+                          : "border-gray-300 bg-white text-gray-500"
+                      }`}
+                    >
+                      すべて
+                    </button>
+                  </div>
+                )}
                 {managementAvailableSeries.length > 1 && (
                   <div className="mb-2">
                     <SeriesFilter
@@ -892,9 +968,11 @@ export default function SpotsView({
                           onClick={() => setDetailSpotId(spot.id)}
                           className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                         >
-                          <SeriesBadge
+                          <SpotBadge
+                          rank={spot.rank}
                           series={spot.series}
                           seriesStyles={seriesStyles}
+                          rankEnabled={rankEnabled}
                           isPrivate={spot.status === "private"}
                           size="sm"
                         />
@@ -966,6 +1044,7 @@ export default function SpotsView({
             listId={detailListId}
             spotsById={spotById}
             seriesStyles={seriesStyles}
+            rankEnabled={rankEnabled}
             onClose={() => setDetailListId(null)}
             onEdit={(list) => {
               setDetailListId(null);
@@ -1009,6 +1088,7 @@ export default function SpotsView({
           filters={filters}
           onChange={setFilters}
           seriesStyles={seriesStyles}
+          rankEnabled={rankEnabled}
           categories={categories}
         />
         <select
@@ -1016,7 +1096,7 @@ export default function SpotsView({
           onChange={(e) => setSortKey(e.target.value as SortKey)}
           className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
         >
-          <option value="series">シリーズ順</option>
+          <option value="series">{rankEnabled ? "ランク順" : "シリーズ順"}</option>
           <option value="name">名前順</option>
           <option value="visited">訪問日順</option>
         </select>
@@ -1037,9 +1117,11 @@ export default function SpotsView({
               onClick={() => setDetailSpotId(spot.id)}
               className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
             >
-              <SeriesBadge
+              <SpotBadge
+                rank={spot.rank}
                 series={spot.series}
                 seriesStyles={seriesStyles}
+                rankEnabled={rankEnabled}
                 isPrivate={spot.status === "private"}
                 size="sm"
               />

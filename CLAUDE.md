@@ -114,9 +114,9 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 画面は`/[type]/map`のように`spot_types.key`をURLの動的セグメントとして持ち、種別ごとに独立してアクセスする(ルート`/`アクセス時のリダイレクト先は、最後に開いていた種別のCookie `last_spot_type` — `lib/last-spot-type.ts`。`proxy.ts`が`/[type]/(map|spots|account|admin)`アクセス時に書き込み、`app/page.tsx`が読み取り時に`canViewSpotType`で検証する — を最優先し、無い・開けない場合に`app_settings.active_spot_type_id`の既定へフォールバックする。どちらも他の種別を隠すものではない)。種別の切り替えは`/[type]/map`の**左下の種別チップ(`MapView`。現在の種別名を表示し、タップすると他の種別の一覧メニューが上向きに開き、選ぶと`/[別種別]/map`へ遷移する)**から行う(かつてはアカウントタブ`AccountView`の「別のスポットを見る」一覧だったが、地図から直接切り替えられるよう移した。アカウントタブは現在のモード表示のみ残す)。他の種別が無いときはチップはタップしても何も起きない(現在名の表示だけ)。`public_visible=false`の種別はAPI(`api.spotTypes.list`)がadmin/spot_admin以外には返さないため、一般ユーザーのメニューには公開種別のみ並ぶ。種別ごとの公開範囲は`spot_type_settings`の`public_visible`設定(既定false=admin/spot_admin限定)で制御し、`lib/spot-type-access.ts`の`canViewSpotType`で判定する(`/[type]/admin`だけは`public_visible`に関わらず常にアクセス可)。かつてあった`spot_types.visibility`列(`public`/`admin_only`/`disabled`の3値)は廃止し、`disabled`(誰にも見せない)相当は種別自体の削除で代替するようにした。
 
-新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, series?, categories?, category_styles? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/series/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/series/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。
+新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, series?, categories? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/series/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/series/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。
 
-`spots.series`(1スポットに1つ・nullable text)/`spots.categories`(1スポットに複数・`text[]`)はどちらも自由入力で、`spot_type = 'tourist'`のときのみtravel-log-data/README.mdに記載のシリーズ基準(A〜E)が意味を持つ(既定値の一覧は`lib/seriesStyle.ts`の`DEFAULT_SERIES_STYLES`と`lib/category.ts`の`DEFAULT_CATEGORIES`、およびそのコメントを参照)。
+`spots.rank`(A〜Eかnull)/`spots.series`(1スポットに1つ・nullable text)/`spots.categories`(1スポットに複数・`text[]`)の3軸については「見た目の軸: ランク・シリーズ・カテゴリ」を参照。series/categoriesは自由入力で、種別ごとに使う値の一覧を設定に持つ(カテゴリの既定は`lib/category.ts`の`DEFAULT_CATEGORIES`)。
 
 ### 対象地域(`region_scope`)
 
@@ -138,40 +138,105 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 ### スポット種別ごとのON/OFF設定(EAV: `spot_type_settings`)
 
-`reviews_enabled`/`wikipedia_enabled`/`public_visible`は`spot_types`に列を持たず、EAV形式の`spot_type_settings`テーブル(`spot_type_id, key, value` — boolean設定は`'true'`/`'false'`の文字列。同じテーブルに`series_styles`・`region_scope`・`wikipedia_lang`・`categories`のような文字列値のキーも同居する)に保存する。新しい設定を増やす際にDBマイグレーションが要らないようにするための設計で、キー・既定値・表示名は`lib/types.ts`の`SPOT_TYPE_SETTING_DEFAULTS`/`SPOT_TYPE_SETTING_LABELS`に登録するだけでよい(行が存在しないキーは設定ごとの既定値扱い、`getSpotTypeSetting`参照)。`public_visible`は既定`false`(=種別追加当初は非公開・admin/spot_admin限定)で、他2つは既定`true`。`app/api/spot-types/[id]/route.ts`のPATCHは`{ settings: { key: boolean, ... } }`を受け取り`spot_type_settings`へupsertする汎用エンドポイントで、設定を増やしてもAPI自体の変更は不要。`SpotType`型の`settings`フィールド(`key→value`の文字列マップ)は`lib/spot-types-query.ts`の`SPOT_TYPE_SELECT`(`spot_type_settings`をjsonbに集約するSELECT共通部品)を使うクエリでのみ埋まる点に注意(`select * from spot_types`だけでは`settings`は付与されない)。
+`reviews_enabled`/`wikipedia_enabled`/`public_visible`/`rank_enabled`は`spot_types`に列を持たず、EAV形式の`spot_type_settings`テーブル(`spot_type_id, key, value` — boolean設定は`'true'`/`'false'`の文字列。同じテーブルに`series_styles`・`region_scope`・`wikipedia_lang`・`categories`のような文字列値のキーも同居する)に保存する。新しい設定を増やす際にDBマイグレーションが要らないようにするための設計で、キー・既定値・表示名は`lib/types.ts`の`SPOT_TYPE_SETTING_DEFAULTS`/`SPOT_TYPE_SETTING_LABELS`に登録するだけでよい(行が存在しないキーは設定ごとの既定値扱い、`getSpotTypeSetting`参照)。`public_visible`と`rank_enabled`は既定`false`(前者は種別追加当初は非公開・admin/spot_admin限定、後者はランクを使わない)で、他2つは既定`true`。`app/api/spot-types/[id]/route.ts`のPATCHは`{ settings: { key: boolean, ... } }`を受け取り`spot_type_settings`へupsertする汎用エンドポイントで、設定を増やしてもAPI自体の変更は不要。`SpotType`型の`settings`フィールド(`key→value`の文字列マップ)は`lib/spot-types-query.ts`の`SPOT_TYPE_SELECT`(`spot_type_settings`をjsonbに集約するSELECT共通部品)を使うクエリでのみ埋まる点に注意(`select * from spot_types`だけでは`settings`は付与されない)。
 
-### カテゴリごとの地図ピンの形(`category_styles`)
+### 見た目の軸: ランク・シリーズ・カテゴリ
 
-**カテゴリに握らせる見た目は「形」だけ**にしてある(`lib/categoryStyle.ts`)。色・大きさ・
-ラベルはシリーズが、塗りの上書き(緑+✓)は訪問済みが、破線の縁取りは非公開スポットが
-すでに使っており、そこへカテゴリを重ねるとどちらが効いているのか読めない見た目になるため。
-形はそれらと直交している。用途は「その場所がどういう種類か」(観光地の神社仏閣・城・
-商業施設・美術館博物館)と、**シリーズとは別の軸**(同じく`じっくり` = 立ち寄るのに
-手間がかかる)の両方。**ただし1スポットに出せる形は1つ**なので、両方を同時には示せない。
+スポットの見た目と分類の軸は3つあり、**持てる数と決めるものが違う**。
 
-`spot_type_settings`の`category_styles`キー(`CATEGORY_STYLES_SETTING_KEY`)に
-JSON文字列(`CategoryStyleDefinition[]` = `{ category, shape? , path? }`の配列)を
-保存する。`shape`は`PIN_SHAPES`(`circle` / `rounded-square` / `diamond` / `pentagon` /
-`hexagon` / `castle`)のいずれか(`icon`だけ書いて形を省くと丸いピンに絵が入る)。**シリーズと違い既定は空配列**(=すべて既定の丸)で、
-使いたい種別だけが設定するもの。取得は`useCategoryStyles(typeKey)`フック
-(`useSeriesStyles`のカテゴリ版)。
+| 軸 | 数 | 値 | 決めるもの |
+|---|---|---|---|
+| **ランク**(`spots.rank`) | 0か1 | A〜E(アプリに決め打ち) | **色・大きさ**(`lib/rank.ts`) |
+| **シリーズ**(`spots.series`) | 0か1 | 種別ごとに自由 | **中身(アイコン・文字)と形**。ランクを使わない種別では**色も**(`lib/seriesStyle.ts`) |
+| **カテゴリ**(`spots.categories`) | 0個以上 | 種別ごとに自由 | **絞り込みだけ**(見た目には効かない。`lib/category.ts`) |
 
-**ピンの中にカテゴリのアイコンを描ける**(`icon`。既定では24×24の箱に描いたSVGのパス。`iconViewSize`で一辺を変えられる —— 配布されているアイコンのSVGは`viewBox`がまちまちなので、パスを書き換えずに済むようにするため)。
-`icon`があるカテゴリのスポットは、**シリーズの文字(A〜E)の代わりに**そのアイコンが出る
-—— シリーズは色で分かるので、中身は「何の場所か」に使うほうが地図が読めるため。
-塗りはラベルと同じ文字色(ピンの色に対して読める色)なので、**穴や隙間があってよい**
-(鳥居のように抜けのある絵が描ける。輪郭で形を表す`path`ではこれができない)。
-**訪問済み(緑+✓)のときは出さない** —— 訪問済みかどうかを優先する。
-アイコンも形と同じく設定の配列順で最初に一致したものを使う(`findPinIcon`)。
+**この分け方が今の形になるまでに2回作り直している。** かつては A〜E も作品名・企画名も
+同じ「シリーズ」に入れ、シリーズが色・大きさ・ラベルの全部を握っていた。前者は種別を
+またいで同じ意味(Aが一番大きく目立つ)なのでアプリに決め打ちできるのに対し、後者は
+種別ごとに中身が違うので設定で持つしかなく、1語で説明できなくなっていた。
+**段階付けをランクとして切り出し、シリーズは「何のスポットか」だけを表す軸にした。**
+一時期はピンの形・アイコンをカテゴリ(`category_styles`)に持たせていたが、
+カテゴリは複数選べる=1スポットに複数当たりうるため「配列順で先に一致したもの」という
+説明が要り、色(シリーズ)と形(カテゴリ)で出どころも割れていた。**1つしか付かない
+シリーズへ寄せた**ことで、見た目の出どころはランクとシリーズの2つだけになっている。
 
-**組み込みの形で足りないときは`path`にSVGのパス(`d`)を書ける**(`shape`より優先。
-アプリを直さずに設定側で形を増やせるようにするため)。**幅100・高さ145の箱**に描き、
-**箱の下端中央がスポットの位置**(`icon-anchor: bottom`)。**下がとんがっている必要は
-無い**。ラベル(シリーズの文字)は頭の中心(50,50)に描かれるので、**そこは塗りで覆う**
-(文字色は塗りに対して読める色が選ばれるため、空けると地図に直接文字が乗る)。
-描画は`Path2D`に組み、自前パスは`addPath`に変換行列を渡して取り込む
-(`lib/pinIcon.ts`)。**画像ID(`pinIconId`)にはパスのハッシュを混ぜる** ——
-混ぜないとパスを書き換えても既存の画像が使われ続ける。
+**見た目の解決は`lib/spotStyle.ts`の1か所**(`resolveSpotFace` / `resolveSpotMark` /
+`resolveSpotShape`)。地図ピン(`lib/pinIcon.ts`)・バッジ(`components/SpotBadge.tsx`)・
+ミニ地図(`MiniMap`)・作成パネルの色玉(`PlanBuildPanel`)が同じ答えを使う ——
+別々に決めていると、同じスポットが地図と一覧で違う見た目になって対応が取れなくなる。
+`lib/pinIcon.ts`は**何を描くかを決めない**(解決済みの面・中身・形を受け取って描くだけ)。
+
+#### ランク(`rank_enabled`)
+
+**A〜Eと「なし」**の6段階で、値も見た目も`lib/rank.ts`に決め打ちしてある
+(種別ごとの設定にしない —— 種別をまたいで同じ意味だから)。
+
+- **色は旧シリーズ設定(観光地のA〜E)から引き継ぎ、大きさだけ底上げした**。
+  旧: 26 / 22 / 18 / 15 / 12 → 現: **30 / 26 / 23 / 20 / 18**。Eの12pxは地図上で
+  点にしか見えず、ピンの中のアイコンも潰れていた。段の差は詰めて全体を上げてある
+- **ランクなしはBと同じ大きさで白**。小さくすると「まだ決めていない」ものが埋もれる
+- **種別ごとに使うかを選ぶ**(`rank_enabled`。**既定は使わない**)。使わない種別では
+  ランクは常になし扱いで、**大きさはランクなし相当・色はシリーズが決める**
+  (作品ごとに色を分けたい種別では、色がシリーズの主要な手がかりになるため)
+- 絞り込みは**ランクを使う種別だけ**チップを出す(`FilterBar`・「シリーズから探す」タブ)。
+  **値が決め打ちなので、実データに無い段階もチップを出す** —— 「Dが1件も無い」ことは
+  押して0件で分かるほうが、選択肢がデータによって増減するより読みやすい
+- 一覧の並び(`ランク順`)とページングAPIの並びは**ランク(A→E→なし)→シリーズの定義順**。
+  SQL側も`array_position`で決め打ちの順に並べる
+- **中身(ピン・バッジの文字)にはランクを出さない。** そこはシリーズの領分なので、
+  ランクが読み取れるのは色と大きさだけ —— 代わりに**スポット詳細には「ランクA」と
+  文字でも出す**(色の段階を覚えていないと読み取れないため)
+
+#### シリーズの見た目(`series_styles`)
+
+`spot_type_settings`の`series_styles`キーにJSON文字列
+(`SeriesStyleDefinition[]` = `{ series, label?, icon?, iconViewSize?, shape?, path?, color?, borderColor?, textColor? }`)
+で保存する。**既定は空**(=シリーズ定義なし。かつては観光地のA〜Eが既定だったが、
+A〜Eはランクへ移した)。配列の並び順がそのままシリーズの並び順(`getSeriesOrder`)になり、
+`app/api/spots/route.ts`のページング一覧もSQLの`array_position`でこの並びを使う。
+取得は`useSeriesStyles(typeKey)`フック(`/api/spot-types`の結果から解決。GETキャッシュが
+効くので同一ページでの重複リクエストは無い)。**`size`は廃止した**(ランクが決めるため。
+古い設定に残っていても読まない)。
+
+- **中身は`icon`(SVGのパス。既定24×24の箱。`iconViewSize`で一辺を変えられる ——
+  配布アイコンの`viewBox`は24・48・1000などまちまちなので、パスを書き換えずに
+  貼れるようにするため)か`label`(文字列 or `{ image: base64 dataURL }`)**。
+  両方あるときは**アイコンを使う**(2つ描くと小さいピンでは潰れる)。
+  アイコンの塗りは中身の色(面の色に対して読める色)なので**穴や隙間があってよい**
+  (鳥居のように抜けのある絵が描ける。輪郭で形を表す`path`ではこれができない)
+- **シリーズ未設定・中身の指定なしは「中身なし」**(色だけの丸)。かつての
+  「未設定=白ピンに青丸」の仮想シリーズは廃止した —— 白はランクなしの色として
+  使うようになったため
+- **訪問済み(緑+✓)のときは中身を出さない** —— 訪問済みかどうかを優先する
+- **シリーズの絞り込みチップ(`SeriesFilter`)だけは常にシリーズの色と中身を出す**
+  (`resolveSeriesChip`)。あれはスポットの印ではなく、シリーズそのものを選ぶ操作だから。
+  中身が無いシリーズはシリーズ名をそのまま出す(空の四角では押せない)
+- 非公開スポット(`status='private'`)は**縁取りを破線にするだけ**で、色・大きさ・中身は
+  同じにする(公開スポットの縁取りも常に実線で描く)
+
+絞り込みUI(`components/SeriesFilter.tsx`。地図・一覧の`FilterBar`と「シリーズから探す」タブで共用)は
+**シリーズの数で見た目が変わる**。`SERIES_FILTER_BUTTONS_MAX`(12)以下なら横並びのボタン列、
+それを超えると**検索欄つきの一覧**(`SearchableSeriesFilter`)になる。一覧は選択中のシリーズを
+チップで出し、検索欄で部分一致(大文字小文字は無視)に絞った候補をタップでトグルする複数選択で、
+一度に描くのは`SEARCH_RESULT_LIMIT`(60)件まで(超過分は件数だけ出す)。かつては単一選択の
+プルダウンだったが、アニメ聖地(anime_seichi、685シリーズ)のようにシリーズが数百ある種別では
+目当ての値を探せず、複数選択もできなかったため置き換えた。
+**シリーズ数が増える種別を足すときはこのUIで選べるかを確認すること。**
+
+スポット追加フォーム(`AddSpotModal`)では**シリーズは自由入力ではなくこの種別の
+`series_styles`から選ぶセレクト**にし、**非公開スポット以外(公開・承認待ち)は
+シリーズを必須**にしている(`seriesRequired = 実効status !== 'private'`)。
+ランクの欄は**`rank_enabled`の種別でだけ**出す(A〜E + なし)。
+
+#### ピンの形(`shape` / `path`)
+
+`shape`は`PIN_SHAPES`(`circle` / `rounded-square` / `diamond` / `pentagon` / `hexagon` /
+`castle`)のいずれか(定義は`lib/pinShape.ts`)。**組み込みで足りないときは`path`にSVGの
+パス(`d`)を書ける**(`shape`より優先。アプリを直さずに設定側で形を増やせるようにするため)。
+**幅100・高さ145の箱**に描き、**箱の下端中央がスポットの位置**(`icon-anchor: bottom`)。
+**下がとんがっている必要は無い**。中身は頭の中心(50,50)に描かれるので、**そこは塗りで覆う**
+(中身の色は塗りに対して読める色が選ばれるため、空けると地図に直接文字が乗る)。
+描画は`Path2D`に組み、自前パスは`addPath`に変換行列を渡して取り込む(`lib/pinIcon.ts`)。
 **パスはcanvasで図形を描くだけでスクリプトは走らない**ので設定から受け取ってよいが、
 打ち間違いを黙って空のピンにしないよう字面を検査する(`isValidPinPath`。
 travel-log-dataの`validate_data.py`にも同じ検査がある)。
@@ -179,37 +244,21 @@ travel-log-dataの`validate_data.py`にも同じ検査がある)。
 travel-log-dataの`SHAPES`の3か所**をそろえること。多角形は**真下に頂点が来る向きに
 しない**(ピンのとんがりと重なって輪郭が潰れる)。
 
-**1スポットは複数カテゴリを持てるので、設定の配列順で最初に一致したものを採用する**
-(`findPinShape`)。シリーズの配列順が並び順を決めているのと同じ考え方。
-
 実装で踏みやすい点が2つある:
 
-- **`pinIconId`に`shape`を混ぜること。** `ensurePinImage`は`map.hasImage(id)`で早期
-  returnするため、IDに形が入っていないと**形を変えても古い画像が使われ続ける**
-  (`styleSignature`をIDに混ぜているのと同じ理由)
+- **`pinIconId`に面・形・中身を全部混ぜること。** `ensurePinImage`は`map.hasImage(id)`で
+  早期returnするため、IDに入っていないと**設定を変えても古い画像が使われ続ける**。
+  種別の設定は`/api/spot-types`の取得完了までは既定値なので、名前だけをIDにすると
+  暫定の見た目のまま固まる
 - **重ね表示(別種別を同じ地図に出す経路)にも配線すること。** 本体は
-  `useCategoryStyles`フック、重ね表示は`spotTypes`から直接解決する
-  (`overlayCategoryStylesOf`)別系統になっている。片方だけ直すと、本体は形が変わるのに
-  重ね表示は丸のまま、というちぐはぐになる
+  `useSeriesStyles`/`useRankEnabled`フック、重ね表示は`spotTypes`から直接解決する
+  (`overlaySeriesStylesOf`/`overlayRankEnabledOf`)別系統になっている。片方だけ直すと、
+  本体は変わるのに重ね表示は古いまま、というちぐはぐになる
 
-PATCH `/api/spot-types/[id]`は`series_styles`・`categories`と同じく、保存前に
-`parseCategoryStyles`で妥当性を検証する(検証しないと、壊れたJSONが保存されて
-黙って「すべて丸」にフォールバックし、設定したつもりで効いていない状態になる)。
-
-### シリーズ(`series`)とその見た目(`series_styles`)
-
-かつて「ランク」(`spots.rank`・`rank_styles`・`RankBadge`等)と呼んでいた概念は、`spot_types`が増えて序列でない使い方(並列の区分をシリーズとして持つ種別)が主になったため、**`series`(シリーズ)に全面改名した**(DB列・API・型名・UI表記・ファイル名すべて。後方互換は持たせていない)。
-
-
-シリーズの一覧・見た目(色・縁取り線の色・地図ピンの大きさ・ラベル)もスポット種別ごとにJSONで持つ(`lib/seriesStyle.ts`)。値がbooleanではないため`SpotTypeSettingKey`の仕組みとは別扱いで、`spot_type_settings`の`series_styles`キー(`SERIES_STYLES_SETTING_KEY`)にJSON文字列(`SeriesStyleDefinition[]`)を保存する。行が無い・parse失敗時は`DEFAULT_SERIES_STYLES`(観光地の現行A〜E配色)にフォールバックする(`resolveSeriesStyles`)。配列の並び順がそのままシリーズの並び順(`getSeriesOrder`、旧`lib/seriesStyle.ts`の`KNOWN_ORDER`ハードコードの後継)になり、`app/api/spots/route.ts`のページング一覧もSQLの`array_position`でこの並びをそのまま使う(旧CASE文のハードコードは廃止)。
-
-ラベルは文字列または`{ image: base64 dataURL }`のどちらか(`isImageLabel`で判定)。`textColor`は省略可で、省略時は`autoTextColor`が背景色の明度から白/濃色を自動選択する。地図ピン(`lib/pinIcon.ts`の`ensurePinImage`、画像ラベル読み込みのため非同期)・バッジ(`components/SeriesBadge.tsx`、Tailwindの動的クラスはJITに拾われないため常にinline styleで色を当てる)・ミニマップ(`components/MiniMap.tsx`)・絞り込みチップ(`components/FilterBar.tsx`)はいずれも`useSeriesStyles(typeKey)`フック(`/api/spot-types`の結果から解決、GETキャッシュにより同一ページでの重複リクエストなし)経由でこの配列を受け取って描画する。非公開スポット(`status='private'`)は縁取り線の色はそのまま破線にするだけで、色・大きさ・ラベルはシリーズと同じにする(公開スポットの縁取りも常に実線で描く。旧実装は非公開のときしか縁取り自体を描いていなかった点の修正でもある)。
-
-絞り込みUI(`components/SeriesFilter.tsx`。地図・一覧の`FilterBar`と「シリーズから探す」タブで共用)は**シリーズの数で見た目が変わる**。`SERIES_FILTER_BUTTONS_MAX`(12)以下なら横並びのボタン列、それを超えると**検索欄つきの一覧**(`SearchableSeriesFilter`)になる。一覧は選択中のシリーズをチップで出し、検索欄で部分一致(大文字小文字は無視)に絞った候補をタップでトグルする複数選択で、一度に描くのは`SEARCH_RESULT_LIMIT`(60)件まで(超過分は件数だけ出す)。かつては単一選択のプルダウンだったが、アニメ聖地(anime_seichi、685シリーズ)のようにシリーズが数百ある種別では目当ての値を探せず、複数選択もできなかったため置き換えた。**シリーズ数が増える種別を足すときはこのUIで選べるかを確認すること。**
-
-**シリーズ未設定(null/空)のスポットは「未設定」という仮想シリーズとして描画する**(`lib/seriesStyle.ts`の`UNSET_SERIES`/`findSeriesStyle`)。見た目は**白いピンに青い丸**(fill `#ffffff`・縁 `#9ca3af`・丸 `#2563eb`)で、大きさはAランクと同じ(size 26)。丸はラベル画像(data URLのSVG)として持たせてある —— 文字のラベル(A〜E)と同じ枠に収まり、`SeriesBadge`にもそのまま使えるため。DBには保存せず(seriesはnullのまま)、`findSeriesStyle`が`null`/空文字を受けたときにこのスタイルを返すことで実現する。`SeriesBadge`もnullシリーズを「未設定」のバッジで表示する。**かつては「マイスポット」という別名の仮想シリーズにして赤ピン+白丸で描いていたが、未設定はあくまで未設定であって別の分類ではないため、名前を「未設定」に戻し、見た目もシリーズの文字を持たないこと自体が分かる白+丸にした**(赤は地名検索のマーカーとも色が被っていた)。スポット追加フォーム(`AddSpotModal`)では**シリーズは自由入力ではなくこの種別の`series_styles`から選ぶセレクト**にし、**非公開スポット以外(公開・承認待ち)はシリーズを必須**にした(`seriesRequired = 実効status !== 'private'`)。非公開はシリーズ未選択のままにできる。
-
-`app/api/spot-types/[id]/route.ts`のPATCHの`settings`は文字列値(`series_styles`)も受け付けるよう`boolean | string`に拡張し、保存前に`parseSeriesStyles`で妥当性を検証する。管理画面からのスポット種別JSON作成(`SpotTypeDefinitionFile`)の`series`フィールドもこの形式で、省略時・手入力フォームでの追加時はDEFAULT_SERIES_STYLESのままになる。
+PATCH `/api/spot-types/[id]`は`series_styles`・`categories`を保存前に検証する
+(検証しないと、壊れたJSONが保存されて黙って既定へフォールバックし、
+設定したつもりで効いていない状態になる)。管理画面からのスポット種別JSON作成
+(`SpotTypeDefinitionFile`)の`series`フィールドも同じ形式。
 
 ### カテゴリ(`categories`)
 
@@ -308,7 +357,7 @@ Maps URLsの`waypoints`は9件までのため、それを超える経路は**並
 
 ### GitHubリポジトリからの一括取り込み
 
-`/[type]/admin`のadmin専用セクション「GitHubリポジトリからスポット種別取り込み」(`AdminView`の`handleGithubOpen`/`handleGithubApply`)。リポジトリ(`owner/リポジトリ名`、既定`rtcode337/travel-log-data`)を入力して「開く」を押すと、`raw.githubusercontent.com`(mainブランチ固定、CORS可)からブラウザが直接リポジトリ直下の`catalog.json`(`{ "spot_types": [ { "key", "label" }, ... ] }`形式のスポット種別カタログ)を取得して一覧表示する(既存種別かどうかを「上書き」「新規作成」バッジで示す)。一覧から種別を選んで「適用」すると、そのフォルダの `<キー>/settings.json`・`<キー>/spots.csv`・`<キー>/excluded_candidates/exclude.txt`・`<キー>/routes.csv` を取得し、この順に適用する。settings.jsonだけは必須(無ければ中止)で、他は無ければスキップ。種別が無ければ作成し、あればlabel・設定・シリーズ・カテゴリ・カテゴリの見た目を上書きする(`applyTypeDefinition`。settings.jsonのkeyとフォルダ名の不一致は中止)。**settings.jsonを読む経路は3つある**(GitHub取り込みの`applyTypeDefinition`、JSONアップロードでの新規作成`handleCreateTypeFromJson`、既存種別への反映`handleApplyTypeFromJson`)ので、`parseSpotTypeDefinition`が返すフィールドを増やしたら3つとも`settingsToApply`へ積むこと。取り出し忘れても取り込みは成功扱いのまま進み、その設定だけが黙って落ちる(`category_styles`追加時に実際に踏んだ)。spots.csv・routes.csvは個別インポートと同じ差分更新ロジックを共通関数(`runSpotsCsvImport`/`runRouteCsvImport` — 個別インポートのハンドラもこれらの薄いラッパー)で対象種別に対して実行し、exclude.txtは「キー一覧を指定して削除」と同じAPIで削除件数の確認ダイアログにOKしたときだけ実行する(キャンセルしても後続のroutes.csvは続行)。routes.csvの検証用スポットはspots.csv適用後に取り直す。バックエンドに専用エンドポイントは無く、既存APIの組み合わせのみ。
+`/[type]/admin`のadmin専用セクション「GitHubリポジトリからスポット種別取り込み」(`AdminView`の`handleGithubOpen`/`handleGithubApply`)。リポジトリ(`owner/リポジトリ名`、既定`rtcode337/travel-log-data`)を入力して「開く」を押すと、`raw.githubusercontent.com`(mainブランチ固定、CORS可)からブラウザが直接リポジトリ直下の`catalog.json`(`{ "spot_types": [ { "key", "label" }, ... ] }`形式のスポット種別カタログ)を取得して一覧表示する(既存種別かどうかを「上書き」「新規作成」バッジで示す)。一覧から種別を選んで「適用」すると、そのフォルダの `<キー>/settings.json`・`<キー>/spots.csv`・`<キー>/excluded_candidates/exclude.txt`・`<キー>/routes.csv` を取得し、この順に適用する。settings.jsonだけは必須(無ければ中止)で、他は無ければスキップ。種別が無ければ作成し、あればlabel・設定・シリーズ・カテゴリを上書きする(`applyTypeDefinition`。settings.jsonのkeyとフォルダ名の不一致は中止)。**settings.jsonを読む経路は3つある**(GitHub取り込みの`applyTypeDefinition`、JSONアップロードでの新規作成`handleCreateTypeFromJson`、既存種別への反映`handleApplyTypeFromJson`)ので、`parseSpotTypeDefinition`が返すフィールドを増やしたら3つとも`settingsToApply`へ積むこと。取り出し忘れても取り込みは成功扱いのまま進み、その設定だけが黙って落ちる(かつて`category_styles`を足したときに実際に踏んだ)。spots.csv・routes.csvは個別インポートと同じ差分更新ロジックを共通関数(`runSpotsCsvImport`/`runRouteCsvImport` — 個別インポートのハンドラもこれらの薄いラッパー)で対象種別に対して実行し、exclude.txtは「キー一覧を指定して削除」と同じAPIで削除件数の確認ダイアログにOKしたときだけ実行する(キャンセルしても後続のroutes.csvは続行)。routes.csvの検証用スポットはspots.csv適用後に取り直す。バックエンドに専用エンドポイントは無く、既存APIの組み合わせのみ。
 
 ### 登録経路(`spots.origin`)とtravel-log-dataへの還元用エクスポート
 
@@ -402,9 +451,9 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 **作成モード中は、下書きの選択済みスポットを選んだ順に紫の矢印で結んだ経路を地図に描く**(`MapView`の`buildDraftPath`。訪問予定リストの経路表示と同じ`spot-routes`ソース/色で、追加・削除・並び替えに即追従する。保存済みリストの経路表示と同じく、現在地(青丸)の表示中は現在地から下書き先頭のスポットまでも青(`CURRENT_LOCATION_PATH_COLOR`)の線・矢印で結ぶ。線のタップで詳細は開かない — 作成中のタップはピンの追加操作を優先するため`pathKind`を付けない)。編集対象のリスト自身を絞り込みの「訪問予定リスト」経路表示(`filters.planListId`)にしていた場合は、更新前の経路が古い形のまま二重に残らないよう保存済み側は描かない。下書きの経由スポットも**ピンは絞り込みに従う**(線だけがそのスポットを通る)。**作成中パネルの一覧は、本体スポット+重ね表示+補完(`pathExtraSpots`)で名前を解決する**(`buildPanelSpotById`) —— 補完を混ぜないと、線には出ているのにパネルだけ「(読み込み中のスポット)」のままになる(重ねていない別種別のスポットは補完でしか名前が手に入らない)。それでも解決できない行には**理由の説明を`HelpTip`で出す**(取得中 / 削除済み / 他人の非公開スポット / 通信失敗)—— 何が起きているのか画面から分からないため。訪問予定リストの詳細(`VisitPlanListDetailModal`)にも同じ説明を置いてある。本体種別で解決できないスポット(別種別を重ねて追加したもの)は経路表示中のリストと同じ補完(`planListExtraSpots`)で座標を解決する。編集など**スポットが既にある下書きで作成モードに入ったときは、経路全体が見えるよう一度だけ`fitBounds`する**(`buildFitPendingRef`。新規作成で最初のスポットを足したときには動かさない)。
 
-### touristのシリーズについて
+### touristのランクについて
 
-tourist spotsの`series`(A〜E)はこのリポジトリの外で一度だけ計算されたパイプラインの成果物であり、アプリ側が動的に計算するものではない。Wikipedia(ja)月次ページビュー数に基づく相対順位(パーセンタイル)の機械分類(詳細はtravel-log-data/tourist/README.md参照。シリーズの決め方自体はデータの成り立ちの話のためtravel-log本体のREADMEには置いていない)。手動でスポットを追加する場合も、この基準に沿ったシリーズを付けること。
+tourist spotsのA〜E(かつては`series`、いまは`rank`)はこのリポジトリの外で一度だけ計算されたパイプラインの成果物であり、アプリ側が動的に計算するものではない。Wikipedia(ja)月次ページビュー数に基づく相対順位(パーセンタイル)の機械分類(詳細はtravel-log-data/tourist/README.md参照。決め方自体はデータの成り立ちの話のためtravel-log本体のREADMEには置いていない)。手動でスポットを追加する場合も、この基準に沿ったランクを付けること。
 
 ## 外部データソース(Wikipedia、OSM Overpass/Nominatim、政府オープンデータ等)を扱う際の注意
 

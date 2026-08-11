@@ -18,6 +18,7 @@ export type CachedSpot = Pick<
   | "lat"
   | "lng"
   | "region"
+  | "rank"
   | "series"
   | "categories"
   | "status"
@@ -51,6 +52,7 @@ export function trimSpot(spot: Spot): CachedSpot {
     lat: spot.lat,
     lng: spot.lng,
     region: spot.region,
+    rank: spot.rank,
     series: spot.series,
     categories: spot.categories,
     status: spot.status,
@@ -89,7 +91,9 @@ const DB_NAME = "travel-log";
 // 6はエントリにroutes(公開ルート)が加わったため(旧エントリのままだと
 // 再ダウンロードするまでルートが表示されなくなるので、ストアごと作り直して
 // ダウンロードし直させる)。
-const DB_VERSION = 6;
+// 7はCachedSpotにrank(ピンの色・大きさを決める段階)が加わったため
+// (旧エントリのままだと、ランクを使う種別のピンが全部「ランクなし」の白になる)。
+const DB_VERSION = 7;
 const STORE = "public-spots"; // 値のキーはtypeKey
 const TEMP_V2_STORE = "public-spots-v2"; // 上記の一時版が作ったストア(残っていれば削除)
 const LEGACY_PREFIX = "travel-log:public-spots:"; // 旧localStorage方式のキー接頭辞

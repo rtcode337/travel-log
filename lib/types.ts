@@ -1,20 +1,20 @@
 import { isValidSeriesStyle, type SeriesStyleDefinition } from "./seriesStyle";
 import { isValidCategoryList } from "./category";
-import {
-  isValidCategoryStyle,
-  PIN_SHAPES,
-  type CategoryStyleDefinition,
-} from "./categoryStyle";
+import type { Rank } from "./rank";
 
 /**
- * series/categoriesはスポットの「種別(SpotType)」ごとに意味が異なりうるため、
- * DB上は自由入力(seriesはnullable text、categoriesはtext[])。1スポットが持てる
- * 数が違い、seriesは0または1つ(色分け・ルート名との突き合わせの単位)、
- * categoriesは0個以上。種別ごとに「使う値の一覧」を持たせる仕組みは
- * シリーズがlib/seriesStyle.ts(series_styles設定)、カテゴリがlib/category.ts
- * (categories設定)にあり、どちらも未設定時は観光地(spot_type='tourist')の
- * 現行の値にフォールバックする。他の種別は独自のseries/categoriesを使うか、
- * 全く使わなくてよい。
+ * スポットは見た目と分類に3つの軸を持つ。**それぞれ持てる数と決めるものが違う**:
+ *
+ * | 軸 | 数 | 値 | 決めるもの |
+ * |---|---|---|---|
+ * | ランク(`rank`) | 0か1 | A〜E(決め打ち) | 色・大きさ(`lib/rank.ts`) |
+ * | シリーズ(`series`) | 0か1 | 種別ごとに自由 | 中身(ラベル・アイコン)と形。ランク未使用の種別では色も(`lib/seriesStyle.ts`) |
+ * | カテゴリ(`categories`) | 0個以上 | 種別ごとに自由 | **絞り込みだけ**(見た目には効かない。`lib/category.ts`) |
+ *
+ * series/categoriesはDB上は自由入力(seriesはnullable text、categoriesはtext[])で、
+ * 種別ごとに「使う値の一覧」を設定に持つ(未設定の種別は一覧なし=入っている値が
+ * そのまま動く)。ランクだけは種別をまたいで同じ意味なのでアプリに決め打ちで持ち、
+ * 使うかどうかだけを種別ごとに選ぶ(`rank_enabled`)。
  */
 export type Series = string;
 export type Category = string;
@@ -50,6 +50,8 @@ export interface Spot {
   /** 地域。種別のregion_scope設定により意味が変わる(日本=都道府県、
    * 国指定=州・県、世界=国。lib/region.ts参照)。座標から決まる従属値 */
   region: string;
+  /** 重要度・知名度の段階(A〜E)。null=なし。種別が`rank_enabled`のときだけ意味を持つ */
+  rank: Rank | null;
   series: Series | null;
   /** このスポットが属するカテゴリ(0個以上)。順序に意味は無く、表示・並び順は
    * 種別のカテゴリ設定(lib/category.tsのgetCategoryOrder)に従う */
@@ -150,12 +152,16 @@ export interface SpotType {
 export type SpotTypeSettingKey =
   | "public_visible"
   | "reviews_enabled"
-  | "wikipedia_enabled";
+  | "wikipedia_enabled"
+  | "rank_enabled";
 
 export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
   public_visible: false,
   reviews_enabled: true,
   wikipedia_enabled: true,
+  // ランクは「段階を付けたい種別」だけのものなので既定は使わない。
+  // 使わない種別ではランクは常になし扱いで、色はシリーズが決める
+  rank_enabled: false,
 };
 
 /** 管理画面のチェックボックス・メッセージに使う短い名前(名詞句。
@@ -164,6 +170,7 @@ export const SPOT_TYPE_SETTING_LABELS: Record<SpotTypeSettingKey, string> = {
   public_visible: "一般公開(管理者以外も閲覧可能にする)",
   reviews_enabled: "口コミ",
   wikipedia_enabled: "Wikipediaリンク",
+  rank_enabled: "ランク(A〜E。ピンの色と大きさを決める)",
 };
 
 export const SPOT_TYPE_SETTING_KEYS = Object.keys(
@@ -186,9 +193,8 @@ export function getSpotTypeSetting(
  * (SPOT_TYPE_SETTING_DEFAULTS)になる点はDBのEAV設計と同じ。boolean設定のほか、
  * region_scope('jp'/国コード/'world')・wikipedia_lang('en'等)のような文字列値の
  * 設定もそのまま指定できる(妥当性はPATCH /api/spot-types/[id]側で検証される)。
- * seriesを省略した場合(または画面から手入力で種別を追加した場合)は観光地の
- * A〜E(DEFAULT_SERIES_STYLES、lib/seriesStyle.ts参照)がそのまま既定のシリーズ設定になり、
- * categoriesを省略した場合も同様に観光地の現行カテゴリ
+ * seriesを省略した場合(または画面から手入力で種別を追加した場合)はシリーズ定義なし
+ * (lib/seriesStyle.ts)、categoriesを省略した場合は観光地の現行カテゴリ
  * (DEFAULT_CATEGORIES、lib/category.ts参照)が既定になる。
  */
 export interface SpotTypeDefinitionFile {
@@ -197,8 +203,6 @@ export interface SpotTypeDefinitionFile {
   settings?: Partial<Record<string, boolean | string>>;
   series?: SeriesStyleDefinition[];
   categories?: Category[];
-  /** カテゴリごとの地図ピンの形(省略時はすべて既定の丸)。lib/categoryStyle.ts */
-  category_styles?: CategoryStyleDefinition[];
 }
 
 /** JSONをparseした後の値がSpotTypeDefinitionFileとして使える形か検証する */
@@ -231,7 +235,7 @@ export function parseSpotTypeDefinition(
     if (!Array.isArray(obj.series) || !obj.series.every(isValidSeriesStyle)) {
       return {
         error:
-          "seriesは { series, color, borderColor, size, label, textColor? } の配列である必要があります。",
+          "seriesは { series, label?, icon?, iconViewSize?, shape?, path?, color?, borderColor?, textColor? } の配列である必要があります。",
       };
     }
   }
@@ -239,18 +243,6 @@ export function parseSpotTypeDefinition(
     return {
       error: "categoriesは空でない文字列の配列である必要があります。",
     };
-  }
-  if (obj.category_styles !== undefined) {
-    if (
-      !Array.isArray(obj.category_styles) ||
-      !obj.category_styles.every(isValidCategoryStyle)
-    ) {
-      return {
-        error:
-          `category_stylesは { category, shape } の配列である必要があります` +
-          `(shapeは ${PIN_SHAPES.join(" / ")} のいずれか)。`,
-      };
-    }
   }
   return {
     data: {
@@ -261,9 +253,6 @@ export function parseSpotTypeDefinition(
         | undefined,
       series: obj.series as SeriesStyleDefinition[] | undefined,
       categories: obj.categories as Category[] | undefined,
-      category_styles: obj.category_styles as
-        | CategoryStyleDefinition[]
-        | undefined,
     },
   };
 }
@@ -435,6 +424,8 @@ export interface MyReview {
   spot_name: string;
   spot_region: string;
   spot_series: Series | null;
+  /** バッジの色はランクが決めるので、シリーズと一緒に持つ */
+  spot_rank: Rank | null;
 }
 
 export const REVIEWS_PAGE_SIZE = 10;

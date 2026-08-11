@@ -63,6 +63,7 @@ export default function SpotRepositionModal({
       lat: pos.lat,
       lng: pos.lng,
       region: spot.region,
+      rank: spot.rank,
       series: spot.series,
       description: spot.description,
     });
