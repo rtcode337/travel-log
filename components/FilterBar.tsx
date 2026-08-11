@@ -62,6 +62,12 @@ export interface SpotFilters {
    */
   showRoutes: boolean;
   /**
+   * クラスタ(近くのピンを「N件」の丸にまとめる表示)を止めるか。既定はまとめる。
+   * 絞り込みではなく表示の切り替えなので、リセットや「絞り込み中」の判定には
+   * 入れない(`showRoutes`と同じ扱い)。地図専用
+   */
+  disableCluster: boolean;
+  /**
    * 「これだけを表示」で1つの経路だけに絞っている状態。'visit'=訪問順の経路(訪問日)の
    * スポットだけ、'plan'=訪問予定リストのスポットだけを地図に表示し、他のスポット・
    * ルート・もう一方の経路は隠す。null=通常(絞り込みに従って表示)。地図専用の設定で、
@@ -79,6 +85,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   visitedDateTo: null,
   planListId: null,
   showRoutes: true,
+  disableCluster: false,
   isolate: null,
 };
 

@@ -134,6 +134,8 @@ export interface SpotType {
   /** spot_type_settings(key/value)をオブジェクトにまとめたもの。値は文字列("true"/"false")で、
    * キーが存在しない設定はSPOT_TYPE_SETTING_DEFAULTSの既定値として扱う(getSpotTypeSetting参照) */
   settings: Record<string, string>;
+  /** 画面に並べる順(小さいほど先)。同じ値なら作成順。管理画面から並び替える */
+  sort_order: number;
   created_at: string;
 }
 
