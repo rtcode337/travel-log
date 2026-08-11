@@ -28,7 +28,8 @@ import {
   resolveWikipediaLang,
   resolveWikipediaTitleSource,
 } from "@/lib/region";
-import { formatCategoriesForDisplay, resolveCategories } from "@/lib/category";
+import { resolveCategories } from "@/lib/category";
+import { formatSpotMeta } from "@/lib/spotMeta";
 import VisitFormModal from "@/components/VisitFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
@@ -485,13 +486,9 @@ export default function SpotDetailModal({
                   {actionError && (
                     <p className="mt-1 text-xs text-red-600">{actionError}</p>
                   )}
+                  {/* 地域・ランク・シリーズ・カテゴリの1行(一覧と共通。lib/spotMeta.ts) */}
                   <p className="text-xs text-gray-500">
-                    {spot.region} ・{" "}
-                    {/* ランクはバッジの色にしか出ないので、使う種別では文字でも出す
-                        (色の段階を覚えていないと、どのランクか読み取れないため) */}
-                    {rankEnabled && `ランク${spot.rank ?? "なし"} ・ `}
-                    {spot.series && `${spot.series} ・ `}
-                    {formatCategoriesForDisplay(spot.categories, categories)}
+                    {formatSpotMeta(spot, { rankEnabled, categories })}
                     {reviewsEnabled && reviewsTotal > 0 && (
                       <span className="ml-2 text-gray-400">
                         口コミ{reviewsTotal}件
