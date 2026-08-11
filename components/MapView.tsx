@@ -918,8 +918,8 @@ function addPinLayers(
 function ensureClusterLayers(
   map: maplibregl.Map,
   overlayKeysRef: OverlayKeysRef,
-  /** 押されたピンのIDと座標(同じ地点に何件あるかは呼び出し側が解決する) */
-  onSelectSpot: (id: string, at: { lat: number; lng: number }) => void
+  /** 押されたピンのID(同じ地点に何件あるかは呼び出し側が解決する) */
+  onSelectSpot: (id: string) => void
 ) {
   if (map.getSource(CLUSTER_SOURCE_ID)) return;
 
@@ -1024,11 +1024,13 @@ function ensureClusterLayers(
       // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
       if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
         return;
-      const feature = e.features?.[0];
-      const id = feature?.properties?.id;
-      if (typeof id !== "string" || feature?.geometry?.type !== "Point") return;
-      const [lng, lat] = feature.geometry.coordinates;
-      onSelectSpot(id, { lat, lng });
+      // **座標はフィーチャから読まない。** GeoJSONソースは内部でタイルに
+      // 変換されるので、返ってくる座標は拡大率に応じて丸められている
+      // (低い拡大率では数十m単位)。同じ地点の判定に使うと一致しなくなるため、
+      // IDだけ渡して呼び出し側が元のスポットの座標で引き直す
+      const id = e.features?.[0]?.properties?.id;
+      if (typeof id !== "string") return;
+      onSelectSpot(id);
     });
   }
 
@@ -1615,11 +1617,14 @@ export default function MapView({
    * 2件以上あれば、どれを開くかを選ばせる(上のピンだけ開くと下は永久に開けない)
    */
   const handleMapSpotSelect = useCallback(
-    (id: string, at: { lat: number; lng: number }) => {
-      const key = stackKey(at);
-      const ids = displayedSpotsRef.current
-        .filter((spot) => stackKey(spot) === key)
-        .map((spot) => spot.id);
+    (id: string) => {
+      // 押されたスポット**自身の座標**で引き直す(地図から渡ってくる座標は
+      // タイル化で丸められていて、同じ地点の判定には使えない)
+      const shown = displayedSpotsRef.current;
+      const clicked = shown.find((spot) => spot.id === id);
+      const ids = clicked
+        ? shown.filter((spot) => stackKey(spot) === stackKey(clicked)).map((s) => s.id)
+        : [id];
       if (ids.length > 1) setStackSpotIds(ids);
       else handleSpotSelect(id);
     },
