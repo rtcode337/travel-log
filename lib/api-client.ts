@@ -241,6 +241,12 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ settings, label }),
       }),
+    /** 並び順を、渡したIDの順で置き換える(admin専用。更新後の一覧が返る) */
+    reorder: (ids: string[]) =>
+      request<SpotType[]>("/api/spot-types/order", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/spot-types/${id}`, { method: "DELETE" }),
   },

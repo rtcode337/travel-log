@@ -84,6 +84,7 @@ erDiagram
         uuid id PK
         text key UK "機械可読キー(例 tourist)"
         text label "表示名(例 観光地)"
+        integer sort_order "画面に並べる順(小さいほど先)。同値なら作成順"
     }
     spot_type_settings {
         uuid spot_type_id PK, FK
@@ -104,6 +105,9 @@ erDiagram
   `region_scope` など JSON・文字列値のキーもある)
 - 画面・API の対象種別は常に URL の `/[type]/...` で決まる。`app_settings` は
   「ログイン後に自動で開く種別」を決めるためだけの 1 行
+- **種別の並びは `sort_order` → `created_at`**(`SPOT_TYPE_ORDER`)。管理画面の
+  「別のスポット種別の管理」からドラッグで並び替えると、`POST /api/spot-types/order`
+  が渡された順で 0 からの連番に振り直す(一覧に出ていない種別は末尾へ寄せる)
 
 ### アカウント
 

@@ -46,6 +46,7 @@ import {
 } from "@/lib/seriesStyle";
 import { resolveCategories } from "@/lib/category";
 import { resolveSpotFace, resolveSpotMark, resolveSpotShape } from "@/lib/spotStyle";
+import { formatSpotMeta } from "@/lib/spotMeta";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import {
   downloadSpotCacheFor,
@@ -917,9 +918,8 @@ function addPinLayers(
 function ensureClusterLayers(
   map: maplibregl.Map,
   overlayKeysRef: OverlayKeysRef,
-  onSelectSpot: (id: string) => void,
-  /** 同じ地点に複数のスポットが重なっていたときに、選択用の一覧を開く */
-  onSelectStack: (ids: string[]) => void
+  /** 押されたピンのIDと座標(同じ地点に何件あるかは呼び出し側が解決する) */
+  onSelectSpot: (id: string, at: { lat: number; lng: number }) => void
 ) {
   if (map.getSource(CLUSTER_SOURCE_ID)) return;
 
@@ -1007,28 +1007,28 @@ function ensureClusterLayers(
   });
 
   // ピンのタップ。**クラスタ用と経路用の両方のレイヤーに同じ処理を付ける**
-  for (const layerId of [UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_ID]) {
+  // ピンと「+N」バッジのタップ。**押されたピンの座標をそのまま渡す** ——
+  // 同じ地点に何件あるかの解決は呼び出し側(表示中のスポットを持っている側)に任せる。
+  // ここで`queryRenderedFeatures`から拾うと**描かれているピンしか数えられず**、
+  // 拡大率が低いときに相方がクラスタへ吸われていると「+N」と食い違う
+  // (Nは表示中の全スポットで数えているため)。
+  // バッジにも同じ処理を付ける —— 「+N」の文字はピンの右肩にずらして描くので、
+  // そこを押すとピンの当たり判定から外れることがある
+  for (const layerId of [
+    UNCLUSTERED_LAYER_ID,
+    PATH_PIN_LAYER_ID,
+    STACK_BADGE_LAYER_ID,
+    PATH_STACK_BADGE_LAYER_ID,
+  ]) {
     map.on("click", layerId, (e) => {
       // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
       if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
         return;
-      // タップ位置に複数のピンが重なっているときは、どれを開くか選ばせる
-      // (上のピンだけ開くと下は永久に開けない)。**2つのピンレイヤーをまとめて
-      // 見る** —— 経路上のスポットは別ソースなので、e.features には片方しか入らない
-      const ids = Array.from(
-        new Set(
-          map
-            .queryRenderedFeatures(e.point, {
-              layers: [UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_ID].filter((id) =>
-                map.getLayer(id)
-              ),
-            })
-            .map((f) => f.properties?.id)
-            .filter((id): id is string => typeof id === "string")
-        )
-      );
-      if (ids.length > 1) onSelectStack(ids);
-      else if (ids.length === 1) onSelectSpot(ids[0]);
+      const feature = e.features?.[0];
+      const id = feature?.properties?.id;
+      if (typeof id !== "string" || feature?.geometry?.type !== "Point") return;
+      const [lng, lat] = feature.geometry.coordinates;
+      onSelectSpot(id, { lat, lng });
     });
   }
 
@@ -1148,6 +1148,8 @@ function loadSavedFilters(typeKey: string): SpotFilters {
       planListId: typeof obj.planListId === "string" ? obj.planListId : null,
       // キー自体が無い保存データ(この設定の追加前に保存されたもの)は既定のオン扱い
       showRoutes: typeof obj.showRoutes === "boolean" ? obj.showRoutes : true,
+      disableCluster:
+        typeof obj.disableCluster === "boolean" ? obj.disableCluster : false,
       // 「これだけを表示」は一時的な注視モードのため復元しない(開き直しで地図が
       // 1経路だけに絞られたまま=ほぼ空、という分かりにくい状態を避ける)
       isolate: null,
@@ -1488,6 +1490,9 @@ export default function MapView({
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   /** 同じ地点に重なっているスポットの選択一覧(nullなら非表示) */
   const [stackSpotIds, setStackSpotIds] = useState<string[] | null>(null);
+  /** いま地図に出しているスポット(絞り込み後)。ピンのタップ処理は地図の
+   *  レイヤー生成時に一度だけ束縛されるので、最新の一覧はrefで参照する */
+  const displayedSpotsRef = useRef<Spot[]>([]);
   // タップされたルート(ルート詳細モーダルの表示対象)
   const [detailRouteId, setDetailRouteId] = useState<string | null>(null);
   // 訪問順の経路(緑)・訪問予定リストの経路(紫)の線をタップしたときに開く詳細の対象
@@ -1603,10 +1608,23 @@ export default function MapView({
     else setDetailSpotId(id);
   }, []);
 
-  // 同じ地点に複数のピンが重なっていたときは、どれを開くかを選ばせる
-  const handleStackSelect = useCallback((ids: string[]) => {
-    setStackSpotIds(ids);
-  }, []);
+  /**
+   * 地図でピン(または「+N」バッジ)を押したとき。**同じ座標のスポットは
+   * 表示中の全件から引き直す** —— 描かれているピンだけを見ると、拡大率が低くて
+   * 相方がクラスタに吸われているときに1件しか見つからず、「+N」と食い違う。
+   * 2件以上あれば、どれを開くかを選ばせる(上のピンだけ開くと下は永久に開けない)
+   */
+  const handleMapSpotSelect = useCallback(
+    (id: string, at: { lat: number; lng: number }) => {
+      const key = stackKey(at);
+      const ids = displayedSpotsRef.current
+        .filter((spot) => stackKey(spot) === key)
+        .map((spot) => spot.id);
+      if (ids.length > 1) setStackSpotIds(ids);
+      else handleSpotSelect(id);
+    },
+    [handleSpotSelect]
+  );
 
   const updateBuildDraft = useCallback(
     (next: PlanListDraft) => {
@@ -2617,7 +2635,7 @@ export default function MapView({
     );
 
     const renderSpots = async () => {
-      ensureClusterLayers(map, overlayKeysRef, handleSpotSelect, handleStackSelect);
+      ensureClusterLayers(map, overlayKeysRef, handleMapSpotSelect);
       showClusterLayers(map);
       // 使われるピン画像(シリーズ×訪問済み×非公開×形)を先に登録してからデータを流し込む
       // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
@@ -2636,8 +2654,15 @@ export default function MapView({
       if (cancelled) return;
       // **線が通るスポットはクラスタ化しないソースへ回す**(経路を辿るときに
       // 経由地が「N件」の丸へ吸い込まれると、どこへ行くのかが読めなくなるため)。
-      const onPath = filteredSpots.filter((spot) => pathMemberIds.has(spot.id));
-      const offPath = filteredSpots.filter((spot) => !pathMemberIds.has(spot.id));
+      displayedSpotsRef.current = filteredSpots;
+      // クラスタを止めているときは全部を非クラスタのソースへ回す
+      // (ソースを分ける仕組みをそのまま使う)
+      const onPath = filters.disableCluster
+        ? filteredSpots
+        : filteredSpots.filter((spot) => pathMemberIds.has(spot.id));
+      const offPath = filters.disableCluster
+        ? []
+        : filteredSpots.filter((spot) => !pathMemberIds.has(spot.id));
       const stacks = countStacks(filteredSpots);
       const clusterSource = map.getSource(CLUSTER_SOURCE_ID) as
         | maplibregl.GeoJSONSource
@@ -3134,15 +3159,13 @@ export default function MapView({
                 className="fixed inset-0 z-0 cursor-default"
               />
             )}
-            {showTypeMenu && otherTypes.length > 0 && (
+            {/* **今表示中の種別も一覧に出す**(押せない)。他の種別だけを並べると、
+                どこから切り替わったのか・全体で何種類あるのかが読めないため。
+                並びは管理画面で決めた順(APIの返り順)をそのまま使う */}
+            {showTypeMenu && spotTypes.length > 0 && (
               <div className="absolute bottom-full left-0 z-10 mb-1.5 max-h-[50dvh] w-56 overflow-y-auto rounded-xl bg-white py-1 shadow-lg ring-1 ring-black/10">
-                {otherTypes.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/${t.key}/map`}
-                    onClick={() => setShowTypeMenu(false)}
-                    className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
+                {spotTypes.map((t) => {
+                  const label = (
                     <span>
                       {t.label}
                       {!getSpotTypeSetting(t, "public_visible") && (
@@ -3151,9 +3174,28 @@ export default function MapView({
                         </span>
                       )}
                     </span>
-                    <span className="text-gray-400">›</span>
-                  </Link>
-                ))}
+                  );
+                  return t.key === spotTypeKey ? (
+                    <div
+                      key={t.id}
+                      aria-current="true"
+                      className="flex items-center justify-between gap-2 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-500"
+                    >
+                      {label}
+                      <span className="shrink-0 text-xs text-gray-400">表示中</span>
+                    </div>
+                  ) : (
+                    <Link
+                      key={t.id}
+                      href={`/${t.key}/map`}
+                      onClick={() => setShowTypeMenu(false)}
+                      className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      {label}
+                      <span className="text-gray-400">›</span>
+                    </Link>
+                  );
+                })}
               </div>
             )}
             <button
@@ -3319,6 +3361,7 @@ export default function MapView({
                 </button>
               </div>
             </div>
+            {/* 経路の表示トグルはここでは出さない(「表示」の節=ダウンロードの上へ移した) */}
             <FilterBar
               spots={spots}
               filters={filters}
@@ -3327,7 +3370,6 @@ export default function MapView({
               seriesStyles={seriesStyles}
               rankEnabled={rankEnabled}
               categories={categories}
-              showRouteToggle={routes.length > 0}
             />
 
             {/* 訪問順の経路の対象日(絞り込みではなく、その日に訪問したスポットを
@@ -3549,6 +3591,51 @@ export default function MapView({
                 )}
               </div>
             )}
+
+            {/* 地図の見せ方の切り替え(絞り込みではない)。ダウンロードのすぐ上に置く */}
+            <div className="border-t border-gray-100 pt-3">
+              <p className="mb-2 text-sm font-medium">表示</p>
+              <div className="flex flex-wrap gap-1.5">
+                {routes.length > 0 && (
+                  <button
+                    type="button"
+                    aria-pressed={filters.showRoutes}
+                    onClick={() =>
+                      setFilters({ ...filters, showRoutes: !filters.showRoutes })
+                    }
+                    className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                      filters.showRoutes
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-gray-300 bg-white text-gray-400"
+                    }`}
+                  >
+                    経路を表示
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-pressed={filters.disableCluster}
+                  onClick={() =>
+                    setFilters({
+                      ...filters,
+                      disableCluster: !filters.disableCluster,
+                    })
+                  }
+                  className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                    filters.disableCluster
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 bg-white text-gray-400"
+                  }`}
+                >
+                  クラスタ表示を無効化
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                {routes.length > 0 && "経路は巡った順の矢印です。"}
+                クラスタ表示を無効にすると、近くのピンを「N件」の丸にまとめず1件ずつ出します
+                (件数が多い種別では地図が重くなります)。
+              </p>
+            </div>
 
             <div className="border-t border-gray-100 pt-3">
               <p className="mb-1 text-sm font-medium">公開スポットのダウンロード</p>
@@ -4077,11 +4164,14 @@ export default function MapView({
                     >
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm">{spot.name}</span>
-                        {spot.series && (
-                          <span className="block truncate text-xs text-slate-500">
-                            {spot.series}
-                          </span>
-                        )}
+                        {/* 一覧・詳細と同じ1行(同じ地点なので地域は出さない) */}
+                        <span className="block truncate text-xs text-slate-500">
+                          {formatSpotMeta(spot, {
+                            rankEnabled,
+                            categories,
+                            includeRegion: false,
+                          })}
+                        </span>
                       </span>
                       {visitedIds.has(id) && (
                         <span className="shrink-0 text-xs text-green-600">✓訪問済み</span>

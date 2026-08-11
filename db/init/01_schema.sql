@@ -43,6 +43,8 @@ create table spot_types (
   id              uuid primary key default gen_random_uuid(),
   key             text not null unique,   -- 機械可読キー(例: 'tourist')
   label           text not null,          -- 表示名(例: '観光地')
+  -- 画面に並べる順(小さいほど先)。同じ値なら作成順。管理画面から並び替える
+  sort_order      integer not null default 0,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );

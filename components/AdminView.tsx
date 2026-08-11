@@ -9,6 +9,7 @@ import { api } from "@/lib/api-client";
 import { buildCsv, parseCsv } from "@/lib/csv";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import { parseRank, type Rank } from "@/lib/rank";
+import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import {
   CATEGORIES_SETTING_KEY,
   formatCategoryList,
@@ -200,6 +201,30 @@ export default function AdminView({
     [spotTypes, typeKey]
   );
   const currentTypeLabel = currentType?.label ?? typeKey;
+
+  // スポット種別の並び替え(admin専用の一覧)。ドラッグ中は手元の並びだけを
+  // 入れ替え、指を離した時点で1回だけ保存する(訪問予定リストと同じ流儀)
+  const [savingTypeOrder, setSavingTypeOrder] = useState(false);
+  const {
+    setRowRef: setTypeRowRef,
+    dragIndex: typeDragIndex,
+    handleProps: typeHandleProps,
+  } = useDragReorder({
+    items: spotTypes,
+    onReorder: setSpotTypes,
+    onCommit: async (ordered) => {
+      setSavingTypeOrder(true);
+      setTypeMessage(null);
+      const { data, error } = await api.spotTypes.reorder(ordered.map((t) => t.id));
+      setSavingTypeOrder(false);
+      if (error) {
+        setTypeMessage("並び順の保存に失敗しました: " + error.message);
+        load(); // 保存できていない並びを画面に残さない
+        return;
+      }
+      if (data) setSpotTypes(data);
+    },
+  });
   const currentRegionScope = resolveRegionScope(currentType);
 
 
@@ -2405,6 +2430,9 @@ export default function AdminView({
                   (公開/非公開の切り替えは、移動先の「スポット種別の設定」から行う)。
                   削除は非公開の種別のみ行える
                   (スポットが残っていれば全件削除してから種別自体を削除する)。
+                  <b>左端の≡をつかんで動かすと並び順を変えられる</b>
+                  (地図の種別切り替えメニュー・アカウント画面など、
+                  一覧に出るところ全部の並びが変わる)。
                 </HelpTip>
               </h2>
               <section className="rounded-xl border border-gray-200 bg-white p-3">
@@ -2413,13 +2441,29 @@ export default function AdminView({
                     {typeMessage}
                   </p>
                 )}
+                {savingTypeOrder && (
+                  <p className="mb-1 text-xs text-gray-500">並び順を保存中…</p>
+                )}
                 <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
                   {spotTypes
-                    .map((t) => {
+                    .map((t, i) => {
                       const isPublic = getSpotTypeSetting(t, "public_visible");
                       const isCurrent = t.key === typeKey;
                       return (
-                        <li key={t.id} className="flex items-center gap-3 px-3 py-2">
+                        <li
+                          key={t.id}
+                          ref={setTypeRowRef(i)}
+                          className={`flex items-center gap-2 py-2 pr-3 ${
+                            typeDragIndex === i ? "bg-blue-100" : ""
+                          }`}
+                        >
+                          {/* 並び替えハンドル。touch-action: noneはここにだけ当てる */}
+                          <span
+                            {...typeHandleProps(i)}
+                            className={`${REORDER_HANDLE_CLASS} self-stretch py-1 pl-3 pr-1 text-base leading-none`}
+                          >
+                            <span className="flex h-full items-center">≡</span>
+                          </span>
                           <span className="flex-1 text-sm">
                             {isCurrent ? (
                               <span>{t.label}</span>
