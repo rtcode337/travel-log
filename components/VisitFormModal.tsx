@@ -5,6 +5,7 @@ import { api } from "@/lib/api-client";
 import { type Visit } from "@/lib/types";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitFields from "@/components/VisitFields";
+import HelpTip from "@/components/HelpTip";
 
 export default function VisitFormModal({
   spotId,
@@ -43,6 +44,8 @@ export default function VisitFormModal({
   const [photos, setPhotos] = useState<string[]>(visit?.photos ?? []);
   const [processingPhotos, setProcessingPhotos] = useState(false);
   const [reviewBody, setReviewBody] = useState("");
+  // 口コミの入力欄を開いているか(既定は畳む)
+  const [showReview, setShowReview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -121,44 +124,68 @@ export default function VisitFormModal({
           />
 
           {/* 未訪問記録の切り替え。訪問記録と同じフォーム・同じ訪問履歴に記録し、
-              訪問済みに数えるかどうかだけをこのフラグで分ける */}
+              訪問済みに数えるかどうかだけをこのフラグで分ける。
+              説明はHelpTipに畳む(常に出していると保存ボタンが画面外へ押し出される)。
+              HelpTipのボタンはlabelの外に置く —— 中に入れると押したときに
+              チェックボックスまで切り替わってしまう */}
           <div className="border-t border-gray-100 pt-3">
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={unvisited}
-                onChange={(e) => setUnvisited(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="font-medium">未訪問記録にする(訪問済みにしない)</span>
-                <span className="mt-0.5 block text-xs text-gray-400">
-                  休みや時間の都合でちゃんと見られなかったときや、事前の下調べのメモに。
-                  訪問日時を入れると「訪れたが改めて来たい」記録としてその日の経路に含まれ、
-                  訪問予定からも外れます。訪問日時が空欄なら下調べのメモになり、
-                  どの経路にも含まれず、訪問予定も残ります。
-                </span>
-              </span>
-            </label>
+            <div className="flex items-center gap-2 text-sm">
+              <label className="flex items-center gap-2 font-medium">
+                <input
+                  type="checkbox"
+                  checked={unvisited}
+                  onChange={(e) => setUnvisited(e.target.checked)}
+                />
+                未訪問記録にする(訪問済みにしない)
+              </label>
+              {/* モーダル自身がoverflow-y-autoで吹き出しを切り取るため、
+                  箱の外へ描くanchored(「?」の位置に合わせたfixed)で出す */}
+              <HelpTip anchored>
+                休みや時間の都合でちゃんと見られなかったときや、事前の下調べのメモに。
+                訪問日時を入れると「訪れたが改めて来たい」記録としてその日の経路に含まれ、
+                訪問予定からも外れます。訪問日時が空欄なら下調べのメモになり、
+                どの経路にも含まれず、訪問予定も残ります。
+              </HelpTip>
+            </div>
           </div>
 
-          {/* 口コミは訪問記録とは独立のデータのため、編集モードと未訪問記録では出さない */}
+          {/* 口コミは訪問記録とは独立のデータのため、編集モードと未訪問記録では出さない。
+              書かないことのほうが多いため既定では畳んでおく(入力欄を開いたままだと
+              保存ボタンが画面外へ押し出される)。**畳んでも入力済みの本文は投稿する**
+              ため、畳んだ状態でも入力があることが分かるようにしてある */}
           {reviewsEnabled && !visit && !unvisited && (
             <div className="border-t border-gray-100 pt-3">
-              <label className="mb-1 block text-sm font-medium">
-                口コミ投稿(公開・任意)
-              </label>
-              <p className="mb-2 text-xs text-gray-400">
-                他のユーザーにも公開されます。投稿するたびに新しい口コミとして
-                追加されます(上書きはされません)。
-              </p>
-              <textarea
-                value={reviewBody}
-                onChange={(e) => setReviewBody(e.target.value)}
-                rows={2}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                placeholder="行ってみた感想など"
-              />
+              <button
+                type="button"
+                onClick={() => setShowReview((v) => !v)}
+                aria-expanded={showReview}
+                className="flex w-full items-center gap-1 text-sm font-medium text-blue-600"
+              >
+                <span aria-hidden="true" className="text-xs">
+                  {showReview ? "▾" : "▸"}
+                </span>
+                口コミを投稿する(公開・任意)
+                {!showReview && reviewBody.trim() && (
+                  <span className="text-xs font-normal text-gray-400">
+                    入力済み
+                  </span>
+                )}
+              </button>
+              {showReview && (
+                <>
+                  <p className="mb-2 mt-2 text-xs text-gray-400">
+                    他のユーザーにも公開されます。投稿するたびに新しい口コミとして
+                    追加されます(上書きはされません)。
+                  </p>
+                  <textarea
+                    value={reviewBody}
+                    onChange={(e) => setReviewBody(e.target.value)}
+                    rows={2}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    placeholder="行ってみた感想など"
+                  />
+                </>
+              )}
             </div>
           )}
 

@@ -605,11 +605,11 @@ export default function SpotDetailModal({
                   <WikipediaIcon className="size-5" />
                 </button>
               )}
-              {/* スポットについてAIに聞く。質問文(所在地・座標つき)を入れた状態で
-                  新しい会話を開く。Wikipedia記事が無いスポットでも何か分かるように、
-                  Wikipediaの有無に関わらず出す */}
+              {/* スポットについてAIに聞く。質問文(所在地・座標・スポット種別つき)を
+                  入れた状態で新しい会話を開く。Wikipedia記事が無いスポットでも何か
+                  分かるように、Wikipediaの有無に関わらず出す */}
               <a
-                href={buildClaudeAskUrl(spot)}
+                href={buildClaudeAskUrl(spot, currentSpotType)}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Claudeにこのスポットについて聞く"
@@ -651,7 +651,7 @@ export default function SpotDetailModal({
                 {/* Geminiに聞く。gemini.google.com はURLでプロンプトを渡せないため、
                     同じモデルが答える検索のAIモード(udm=50)を開く(lib/askAi.ts) */}
                 <a
-                  href={buildGeminiAskUrl(spot)}
+                  href={buildGeminiAskUrl(spot, currentSpotType)}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Geminiにこのスポットについて聞く"
