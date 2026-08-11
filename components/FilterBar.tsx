@@ -68,6 +68,14 @@ export interface SpotFilters {
    */
   disableCluster: boolean;
   /**
+   * 訪問済みのスポットも、緑+✓ではなく**元のピン**(ランク・シリーズの見た目)で
+   * 描くか。既定は緑+✓。絞り込みではなく表示の切り替えなので、リセットや
+   * 「絞り込み中」の判定には入れない(`showRoutes`・`disableCluster`と同じ扱い)。
+   * 地図専用で、重ね表示のピンにも同じ設定を効かせる(訪問済みかどうかは種別を
+   * またいで共通なので、片方だけ緑になると同じ地図の中で見え方が割れるため)
+   */
+  showVisitedOriginalPin: boolean;
+  /**
    * 「これだけを表示」で1つの経路だけに絞っている状態。'visit'=訪問順の経路(訪問日)の
    * スポットだけ、'plan'=訪問予定リストのスポットだけを地図に表示し、他のスポット・
    * ルート・もう一方の経路は隠す。null=通常(絞り込みに従って表示)。地図専用の設定で、
@@ -86,6 +94,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   planListId: null,
   showRoutes: true,
   disableCluster: false,
+  showVisitedOriginalPin: false,
   isolate: null,
 };
 

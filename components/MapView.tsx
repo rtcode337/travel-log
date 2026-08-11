@@ -815,6 +815,22 @@ function stackKey(spot: Pick<Spot, "lat" | "lng">): string {
   return `${spot.lat.toFixed(6)},${spot.lng.toFixed(6)}`;
 }
 
+/**
+ * ピンを訪問済みの見た目(緑+✓)で描くか。「訪問済みも元のピンで表示」
+ * (`SpotFilters.showVisitedOriginalPin`)がオンなら、訪問していても未訪問と同じ
+ * 見た目=ランク・シリーズのピンで描く(色・形・中身でスポットを見分けたいとき、
+ * 訪問済みが増えるほど地図が緑一色になってしまうため)。
+ * **ピン画像の登録(`ensurePinImage`)と画像ID(`buildClusterGeoJSON`)で
+ * 同じ判定を使うこと** —— 食い違うと未登録のIDを指してピンが消える。
+ */
+function visitedPinOf(
+  spotId: string,
+  visitedIds: Set<string>,
+  showVisitedOriginalPin: boolean
+): boolean {
+  return !showVisitedOriginalPin && visitedIds.has(spotId);
+}
+
 /** 座標が同じスポットの件数(「+N」バッジ用)。**表示するスポット全体で数える** */
 function countStacks(spots: Spot[]): Map<string, number> {
   const stacks = new Map<string, number>();
@@ -836,7 +852,13 @@ function buildClusterGeoJSON(
    * 「+N」に出てこなくなる(クラスタが解けた拡大率では完全に重なるので、
    * 数が出ないと下のピンの存在に気づけない)
    */
-  stacks: Map<string, number>
+  stacks: Map<string, number>,
+  /**
+   * 訪問済みも元のピン(ランク・シリーズの見た目)で描く
+   * (`SpotFilters.showVisitedOriginalPin`)。**プロパティの`visited`は訪問の事実
+   * そのものなので落とさず**、見た目(ピン画像)だけを切り替える
+   */
+  showVisitedOriginalPin: boolean
 ): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
   return {
     type: "FeatureCollection",
@@ -851,7 +873,7 @@ function buildClusterGeoJSON(
           resolveSpotFace(spot.rank, spot.series, seriesStyles, rankEnabled),
           resolveSpotMark(spot.series, seriesStyles),
           resolveSpotShape(spot.series, seriesStyles),
-          visitedIds.has(spot.id),
+          visitedPinOf(spot.id, visitedIds, showVisitedOriginalPin),
           spot.status === "private"
         ),
         stack: stacks.get(stackKey(spot)) ?? 1,
@@ -1152,6 +1174,10 @@ function loadSavedFilters(typeKey: string): SpotFilters {
       showRoutes: typeof obj.showRoutes === "boolean" ? obj.showRoutes : true,
       disableCluster:
         typeof obj.disableCluster === "boolean" ? obj.disableCluster : false,
+      showVisitedOriginalPin:
+        typeof obj.showVisitedOriginalPin === "boolean"
+          ? obj.showVisitedOriginalPin
+          : false,
       // 「これだけを表示」は一時的な注視モードのため復元しない(開き直しで地図が
       // 1経路だけに絞られたまま=ほぼ空、という分かりにくい状態を避ける)
       isolate: null,
@@ -2651,7 +2677,7 @@ export default function MapView({
             resolveSpotFace(spot.rank, spot.series, seriesStyles, rankEnabled),
             resolveSpotMark(spot.series, seriesStyles),
             resolveSpotShape(spot.series, seriesStyles),
-            visitedIds.has(spot.id),
+            visitedPinOf(spot.id, visitedIds, filters.showVisitedOriginalPin),
             spot.status === "private"
           )
         )
@@ -2673,13 +2699,27 @@ export default function MapView({
         | maplibregl.GeoJSONSource
         | undefined;
       clusterSource?.setData(
-        buildClusterGeoJSON(offPath, visitedIds, seriesStyles, rankEnabled, stacks)
+        buildClusterGeoJSON(
+          offPath,
+          visitedIds,
+          seriesStyles,
+          rankEnabled,
+          stacks,
+          filters.showVisitedOriginalPin
+        )
       );
       const pathSource = map.getSource(PATH_PIN_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
       pathSource?.setData(
-        buildClusterGeoJSON(onPath, visitedIds, seriesStyles, rankEnabled, stacks)
+        buildClusterGeoJSON(
+          onPath,
+          visitedIds,
+          seriesStyles,
+          rankEnabled,
+          stacks,
+          filters.showVisitedOriginalPin
+        )
       );
       // 本体のレイヤーを重ね表示より後に作った場合でも、重ね表示を上に保つ
       moveOverlayLayersToTop(map, overlayKeysRef.current);
@@ -2846,7 +2886,12 @@ export default function MapView({
             "text-color",
             autoTextColor(clusterColor)
           );
-          // キャッシュには公開スポットしか入らないため、非公開(破線)のピンは不要
+          // キャッシュには公開スポットしか入らないため、非公開(破線)のピンは不要。
+          // 「訪問済みも元のピンで表示」は重ね表示側の絞り込みには出さない設定なので、
+          // 今開いている地図(本体)の値をそのまま効かせる(同じ地図の中で片方だけ
+          // 緑+✓になると見え方が割れるため)
+          const visitedPin = (spotId: string) =>
+            visitedPinOf(spotId, visitedIds, filters.showVisitedOriginalPin);
           await Promise.all(
             filtered.map((spot) =>
               ensurePinImage(
@@ -2854,7 +2899,7 @@ export default function MapView({
                 resolveSpotFace(spot.rank, spot.series, styles, overlayRank),
                 resolveSpotMark(spot.series, styles),
                 resolveSpotShape(spot.series, styles),
-                visitedIds.has(spot.id),
+                visitedPin(spot.id),
                 false
               )
             )
@@ -2868,7 +2913,8 @@ export default function MapView({
               visitedIds,
               styles,
               overlayRank,
-              countStacks(filtered)
+              countStacks(filtered),
+              filters.showVisitedOriginalPin
             )
           );
           (
@@ -3634,11 +3680,31 @@ export default function MapView({
                 >
                   クラスタ表示を無効化
                 </button>
+                <button
+                  type="button"
+                  aria-pressed={filters.showVisitedOriginalPin}
+                  onClick={() =>
+                    setFilters({
+                      ...filters,
+                      showVisitedOriginalPin: !filters.showVisitedOriginalPin,
+                    })
+                  }
+                  className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                    filters.showVisitedOriginalPin
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 bg-white text-gray-400"
+                  }`}
+                >
+                  訪問済みも元のピンで表示
+                </button>
               </div>
               <p className="mt-1 text-xs text-gray-500">
                 {routes.length > 0 && "経路は巡った順の矢印です。"}
                 クラスタ表示を無効にすると、近くのピンを「N件」の丸にまとめず1件ずつ出します
                 (件数が多い種別では地図が重くなります)。
+                「訪問済みも元のピンで表示」をオンにすると、訪問済みのスポットも緑+✓では
+                なくランク・シリーズの見た目のまま表示します(重ねている種別のピンにも
+                効きます)。
               </p>
             </div>
 
