@@ -1302,7 +1302,15 @@ export default function AdminView({
 
   /**
    * GitHubリポジトリの生ファイルを取得する。無いファイル(404)はnull、
-   * それ以外の失敗はErrorをthrowする。ブランチはリポジトリの既定を仮定してmain固定
+   * それ以外の失敗はErrorをthrowする。ブランチはリポジトリの既定を仮定してmain固定。
+   *
+   * **キャッシュを必ず外して取る。** raw.githubusercontent.com は
+   * `Cache-Control: max-age=300`(5分)を返し、その前段にCDNのキャッシュもあるため、
+   * 素の`fetch`だと**push直後の取り込みが古いファイルを読む** ——
+   * しかも差分インポートは「変更なし」で正常終了するので、
+   * 反映されていないことに気づけない(実際に踏んだ)。
+   * `cache: "no-store"`はブラウザのキャッシュだけを外すので、
+   * 共有キャッシュ(CDN)にはURLを毎回変えて当てる。
    */
   const fetchGithubFile = async (
     repo: string,
@@ -1311,7 +1319,8 @@ export default function AdminView({
     let res: Response;
     try {
       res = await fetch(
-        `https://raw.githubusercontent.com/${repo}/main/${path}`
+        `https://raw.githubusercontent.com/${repo}/main/${path}?t=${Date.now()}`,
+        { cache: "no-store" }
       );
     } catch {
       throw new Error(`${path} の取得に失敗しました(ネットワークエラー)。`);
