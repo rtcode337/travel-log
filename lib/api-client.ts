@@ -110,12 +110,15 @@ export const api = {
       page: number;
       search?: string;
       series?: string[];
+      /** A〜E、またはランクなしを表す 'none' */
+      ranks?: string[];
     }) => {
       const qs = new URLSearchParams();
       qs.set("type", opts.type);
       qs.set("page", String(opts.page));
       if (opts.search) qs.set("search", opts.search);
       for (const series of opts.series ?? []) qs.append("series", series);
+      for (const rank of opts.ranks ?? []) qs.append("rank", rank);
       return request<{ items: Spot[]; total: number; availableSeries: string[] }>(
         `/api/spots?${qs.toString()}`
       );

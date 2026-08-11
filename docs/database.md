@@ -57,7 +57,8 @@ erDiagram
 - **全テーブルに `created_at` / `updated_at`** を持ち、`updated_at` は共有の
   `set_updated_at()` トリガーが自動更新する。日時はすべて `timestamptz`
 - **列挙は数値ではなく文字列 + `check` 制約**(`users.role`・`spots.status`・
-  `spots.origin`・`reviews.visibility`)。`psql` で覗いたときに読めるほうを優先
+  `spots.origin`・`spots.rank`・`reviews.visibility`)。`psql` で覗いたときに
+  読めるほうを優先
 - **外部キーは実際に張ってある**。削除時の挙動で役割を分けている:
   **記録・従属データは `on delete cascade`**(スポットを消せば訪問記録も消える)、
   **作成者への参照は `on delete set null`**(ユーザーを消しても作ったスポット・
@@ -134,8 +135,9 @@ erDiagram
         double lat
         double lng
         text region "region_scope 設定で意味が変わる(都道府県・州・国名)"
-        text series "1スポット1つ。色分け・ルートとの突き合わせの単位"
-        text_array categories "0個以上(GIN索引)"
+        text rank "A〜E か null(なし)。ピンの色と大きさ(check制約)"
+        text series "1スポット1つ。ピンの中身と形。ルートとの突き合わせの単位"
+        text_array categories "0個以上(GIN索引)。絞り込み専用"
         text description
         text status "published / pending / rejected / private"
         text origin "csv / manual。travel-log-data への還元抽出に使う"
@@ -175,6 +177,11 @@ erDiagram
 
 - **`spots.key` は自然キー(名前)ではなく明示キー**。改名・座標修正で
   ルート CSV からの参照が壊れないようにするため。不要なスポットは null でよい
+- **見た目の軸は `rank` と `series` の2つ**。`rank`(A〜E か null)はアプリに
+  決め打ちで色と大きさを決め、`series` はピンの中身(アイコン・文字)と形を決める
+  (種別ごとの `series_styles` 設定)。`rank` を使うかは種別ごとの `rank_enabled`
+  設定で、使わない種別では色も `series` が決める。`categories` は絞り込み専用で
+  見た目には効かない(かつての `category_styles` 設定は廃止した)
 - **`spot_deletions` は削除の墓標**。CSV 由来の公開スポットを画面から個別削除した
   ときだけ記録し、travel-log-data 側の `exclude.txt` へ追記する候補として
   還元用エクスポートに出す(行が消えるので値をコピーして残す)
@@ -258,7 +265,7 @@ erDiagram
 
 | テーブル | 索引 | 何のため |
 |---|---|---|
-| spots | `region` / `series` / `spot_type_id` | 地図・一覧の絞り込み |
+| spots | `region` / `rank` / `series` / `spot_type_id` | 地図・一覧の絞り込み |
 | spots | `categories`(GIN) | 複数カテゴリの包含検索(`&&`) |
 | spots | `(spot_type_id, key)` ユニーク(key が null 以外) | CSV・ルートからの参照キー |
 | spot_deletions | `spot_type_id` | 還元用エクスポートの抽出 |

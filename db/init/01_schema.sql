@@ -105,10 +105,10 @@ create table users (
 
 -- =============================================================
 -- spots: スポットマスタ(種別はspot_type_idで区別)
--- series/categoriesは種別ごとに意味が異なりうるため自由入力(観光地では
--- A〜Eの5段階・カテゴリ7種を使うが、他の種別では未使用でもよい)。
--- seriesは1スポットにつき必ず1つ(色分け・ルート名との突き合わせの単位)、
--- categoriesは0個以上を持てる(text[])
+-- 見た目と分類の軸は3つ。rank(A〜E。アプリに決め打ちで、ピンの色と大きさを決める。
+-- 種別ごとにrank_enabledで使うかを選ぶ)、series(1スポットに0か1つ。ピンの中身と形、
+-- ランクを使わない種別では色も決める)、categories(0個以上。絞り込み専用)。
+-- series/categoriesの値は種別ごとに意味が異なりうるため自由入力
 -- =============================================================
 create table spots (
   id            uuid primary key default gen_random_uuid(),
@@ -126,6 +126,9 @@ create table spots (
   -- 国コード指定=その国の州・県、'world'=国名)。座標から決まる従属値のため
   -- lat/lngの後ろに置いている
   region        text not null,
+  -- 重要度・知名度の段階。値はA〜E固定(lib/rank.ts)で、nullは「なし」。
+  -- 種別がrank_enabledのときだけ意味を持つ(使わない種別では常にnull扱い)
+  rank          text check (rank in ('A', 'B', 'C', 'D', 'E')),
   series        text,
   categories    text[] not null default '{}',
   description   text,
@@ -145,6 +148,7 @@ create table spots (
 
 create index spots_region_idx on spots (region);
 create index spots_series_idx on spots (series);
+create index spots_rank_idx on spots (rank);
 create index spots_spot_type_id_idx on spots (spot_type_id);
 -- 複数カテゴリの絞り込み(categories && $1)を配列の包含演算子で引くためのGIN索引
 create index spots_categories_idx on spots using gin (categories);

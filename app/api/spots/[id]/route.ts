@@ -3,6 +3,7 @@ import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { deleteVisitPhotos } from "@/lib/photos";
 import { MODERATION_ROLES, SPOT_ADMIN_ROLES, type Role, type Spot } from "@/lib/types";
+import { parseRank } from "@/lib/rank";
 
 /**
  * 閲覧できるのは「公開スポット」「本人が追加したスポット(status問わず)」、
@@ -95,7 +96,7 @@ export async function PATCH(
   const { rows } = await query<Spot>(
     `update spots set
       name = $1, name_kana = $2, lat = $3, lng = $4, region = $5,
-      series = $6, description = $7,
+      series = $6, description = $7, rank = $15,
       categories = case when $8 then $9::text[] else categories end,
       key = case when $10 then $11 else key end,
       origin = case when $12 then $13 else origin end
@@ -116,6 +117,7 @@ export async function PATCH(
       hasOrigin,
       hasOrigin ? spot.origin : null,
       id,
+      parseRank(spot.rank),
     ]
   );
 

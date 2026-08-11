@@ -8,7 +8,7 @@ import ExportJobsPanel from "@/components/ExportJobsPanel";
 import { api } from "@/lib/api-client";
 import { buildCsv, parseCsv } from "@/lib/csv";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
-import { CATEGORY_STYLES_SETTING_KEY } from "@/lib/categoryStyle";
+import { parseRank, type Rank } from "@/lib/rank";
 import {
   CATEGORIES_SETTING_KEY,
   formatCategoryList,
@@ -57,6 +57,7 @@ const CSV_COLUMNS = [
   "lat",
   "lng",
   "region",
+  "rank",
   "series",
   "categories",
   "description",
@@ -78,7 +79,7 @@ const ROUTE_CSV_COLUMNS = [
 /**
  * ヘッダーに定義外の列があれば、その一覧を返す(無ければ空配列)。
  * 知らない列は黙って無視されるため、列名の綴り違いや旧フォーマットのCSV
- * (rank/category など、シリーズ改名前の列名)を取り込むと、エラーも警告も
+ * (category など、カテゴリ改名前の列名)を取り込むと、エラーも警告も
  * 出ないまま該当の値だけが欠けた状態で登録されてしまう。それを防ぐための検査
  */
 function unknownCsvColumns(
@@ -200,6 +201,7 @@ export default function AdminView({
   );
   const currentTypeLabel = currentType?.label ?? typeKey;
   const currentRegionScope = resolveRegionScope(currentType);
+
 
   // 種別の読み込み・再読み込みのたびに、保存済みの値で下書きを初期化する
   useEffect(() => {
@@ -614,7 +616,7 @@ export default function AdminView({
         setTypeMessage("JSONの内容が不正です: " + parsed.error);
         return;
       }
-      const { key, label, settings, series, categories, category_styles } =
+      const { key, label, settings, series, categories } =
         parsed.data;
 
       const { data: created, error } = await api.spotTypes.create(key, label);
@@ -635,10 +637,6 @@ export default function AdminView({
       }
       if (categories) {
         settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
-      }
-      if (category_styles) {
-        settingsToApply[CATEGORY_STYLES_SETTING_KEY] =
-          JSON.stringify(category_styles);
       }
 
       if (Object.keys(settingsToApply).length > 0) {
@@ -680,7 +678,7 @@ export default function AdminView({
         setTypeSettingsMessage("JSONの内容が不正です: " + parsed.error);
         return;
       }
-      const { key, label, settings, series, categories, category_styles } =
+      const { key, label, settings, series, categories } =
         parsed.data;
       // キーが変わると種別を差し替えたのと同じ扱いになり影響が大きいため、
       // 一致しない場合は何も反映せずエラーにする(labelは反映してよい)
@@ -700,10 +698,6 @@ export default function AdminView({
       }
       if (categories) {
         settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
-      }
-      if (category_styles) {
-        settingsToApply[CATEGORY_STYLES_SETTING_KEY] =
-          JSON.stringify(category_styles);
       }
 
       const { error: settingsError } = await api.spotTypes.applySettings(
@@ -736,6 +730,8 @@ export default function AdminView({
     lat: number;
     lng: number;
     region: string;
+    /** A〜E。null = ランクなし(CSVにrank列が無い場合も含む) */
+    rank: Rank | null;
     series: string | null;
     /** null = CSVにcategories列が無い(既存のカテゴリを触らない) */
     categories: string[] | null;
@@ -795,7 +791,7 @@ export default function AdminView({
         throw new Error(
           `CSVヘッダーに未対応の列があります: ${unknownColumns.join(", ")}\n` +
             `使える列は ${CSV_COLUMNS.join(", ")} です。` +
-            `(rank・category は series・categories に改名されています)`
+            `(category は categories に改名されています)`
         );
       }
 
@@ -805,6 +801,14 @@ export default function AdminView({
         const get = (c: (typeof CSV_COLUMNS)[number]) =>
           idx[c] === -1 ? "" : (rows[i][idx[c]] ?? "").trim();
         const series = get("series") || null;
+        // ランクはA〜Eのみ。それ以外の値は打ち間違いとして弾く
+        // (黙って「なし」にすると、CSVを直すまで色と大きさが変わらない)
+        const rawRank = get("rank");
+        const rank = parseRank(rawRank);
+        if (rawRank && !rank) {
+          errors.push(`${i + 1}行目: rank「${rawRank}」はA〜Eではない`);
+          continue;
+        }
         // カテゴリはパイプ区切りの1列で複数持てる(例: 自然|夜景|展望)
         const categories = hasCategoriesColumn
           ? parseCategoryList(get("categories"))
@@ -822,6 +826,7 @@ export default function AdminView({
             lat,
             lng,
             region: get("region"),
+            rank,
             series,
             categories,
             description: get("description") || null,
@@ -879,6 +884,7 @@ export default function AdminView({
         spot.lat !== record.lat ||
         spot.lng !== record.lng ||
         spot.region !== record.region ||
+        spot.rank !== record.rank ||
         spot.series !== record.series ||
         (record.categories !== null &&
           !sameCategories(spot.categories, record.categories)) ||
@@ -951,6 +957,7 @@ export default function AdminView({
               lat: record.lat,
               lng: record.lng,
               region: record.region,
+              rank: record.rank,
               series: record.series,
               ...(record.categories !== null
                 ? { categories: record.categories }
@@ -1035,13 +1042,14 @@ export default function AdminView({
       const now = new Date();
       const dateKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
       const spotsCsv = buildCsv([
-        ["name", "name_kana", "lat", "lng", "region", "series", "categories", "description"],
+        ["name", "name_kana", "lat", "lng", "region", "rank", "series", "categories", "description"],
         ...manualSpots.map((s) => [
           s.name,
           s.name_kana,
           s.lat,
           s.lng,
           s.region,
+          s.rank,
           s.series,
           formatCategoryList(s.categories),
           s.description,
@@ -1328,7 +1336,7 @@ export default function AdminView({
     if ("error" in parsed) {
       throw new Error("settings.json の内容が不正です: " + parsed.error);
     }
-    const { key, label, settings, series, categories, category_styles } =
+    const { key, label, settings, series, categories } =
       parsed.data;
     // フォルダ名と食い違うJSONを黙って適用すると別の種別を上書きしてしまうため中止する
     if (key !== folderKey) {
@@ -1346,10 +1354,6 @@ export default function AdminView({
     }
     if (categories) {
       settingsToApply[CATEGORIES_SETTING_KEY] = JSON.stringify(categories);
-    }
-    if (category_styles) {
-      settingsToApply[CATEGORY_STYLES_SETTING_KEY] =
-        JSON.stringify(category_styles);
     }
 
     // この画面を開いた後に作られた種別も拾えるよう、最新の一覧から探す
@@ -1998,6 +2002,8 @@ export default function AdminView({
                   CSV列: {CSV_COLUMNS.join(", ")}(name, lat, lng, region は必須。
                   region列にはこの種別の地域(
                   {regionFieldLabel(currentRegionScope)})を入れる。
+                  rankはA〜Eか空(空=ランクなし。ピンの色と大きさを決める。
+                  ランクを使わない種別では入っていても効かない)。
                   series/categoriesは自由入力で空でも可。categoriesは1スポットに複数
                   付けられ、パイプ区切りで書く(例: 自然|夜景|展望)。keyは省略可の
                   種別内一意な参照キーで、経路のCSVからスポットを指すのに使う)。

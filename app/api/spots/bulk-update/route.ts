@@ -3,6 +3,7 @@ import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { SPOT_ADMIN_ROLES, type Spot, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
+import { parseRank } from "@/lib/rank";
 
 interface BulkUpdateRecord {
   id: string;
@@ -11,6 +12,7 @@ interface BulkUpdateRecord {
   lat: number;
   lng: number;
   region: string;
+  rank?: string | null;
   series: string | null;
   /** 含まれるときだけ更新(PATCH /api/spots/[id]と同じ扱い) */
   categories?: string[] | null;
@@ -90,7 +92,7 @@ export async function POST(request: Request) {
     const { rows } = await query<Spot>(
       `update spots s set
         name = u.name, name_kana = u.name_kana, lat = u.lat, lng = u.lng,
-        region = u.region, series = u.series, description = u.description,
+        region = u.region, rank = u.rank, series = u.series, description = u.description,
         categories = case when u.has_categories
           then array(select jsonb_array_elements_text(u.categories)) else s.categories end,
         key = case when u.has_key then u.key else s.key end,
@@ -98,9 +100,9 @@ export async function POST(request: Request) {
        from unnest(
          $2::uuid[], $3::text[], $4::text[], $5::float8[], $6::float8[], $7::text[],
          $8::text[], $9::text[], $10::bool[], $11::jsonb[], $12::bool[], $13::text[],
-         $14::bool[], $15::text[]
+         $14::bool[], $15::text[], $16::text[]
        ) as u(id, name, name_kana, lat, lng, region, series, description,
-              has_categories, categories, has_key, key, has_origin, origin)
+              has_categories, categories, has_key, key, has_origin, origin, rank)
        where s.id = u.id and s.spot_type_id = $1 and s.status = 'published'
        returning s.*`,
       [
@@ -119,6 +121,7 @@ export async function POST(request: Request) {
         records.map((r) => r.key ?? null),
         hasOrigin,
         records.map((r) => r.origin ?? null),
+        records.map((r) => parseRank(r.rank)),
       ]
     );
     return NextResponse.json({ data: rows });

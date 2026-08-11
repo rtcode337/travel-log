@@ -12,7 +12,7 @@ import {
  * URLの[type]に対応するスポット種別のシリーズ設定(見た目+並び順)を取得するhook。
  * `/api/spot-types`はapi-client側でGETキャッシュされるため、同じページ内で
  * 複数コンポーネントがこのhookを使っても重複リクエストにはならない。
- * 取得前・見つからない・設定が無い場合は観光地のA〜E(DEFAULT_SERIES_STYLES)を返す
+ * 取得前・見つからない・設定が無い場合は空(=シリーズ定義なし)を返す
  */
 export function useSeriesStyles(typeKey: string): SeriesStyleDefinition[] {
   const [styles, setStyles] = useState<SeriesStyleDefinition[]>(DEFAULT_SERIES_STYLES);

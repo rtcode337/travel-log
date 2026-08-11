@@ -1,19 +1,29 @@
 import type { Series, SpotType } from "./types";
+import {
+  isPinShape,
+  isValidPinPath,
+  PIN_ICON_VIEW_SIZE,
+  type PinIconSpec,
+} from "./pinShape";
 
 /**
- * 「シリーズ」= 1スポットが必ず1つだけ持つ、種別ごとに定義するまとまり。
- * 観光地のA〜E(知名度の段階)のような序列にも、序列を持たない並列の区分にも
- * 使えるよう、値は自由入力にしてある
- * (かつては「ランク」という名前だったが、序列でない使い方が増えて実態に
- * 合わなくなったため改名した)。地図ピン・バッジの色分けの単位であり、
- * ルート(spot_routes.series)の色分けにも同じ値を使う。
+ * 「シリーズ」= 1スポットが**最大1つ**持つ、種別ごとに定義するまとまり
+ * (観光地の`神社仏閣`、アニメ聖地の作品名、水曜どうでしょうの企画名など)。
+ * ルート(`spot_routes.series`)の色分けにも同じ値を使う。
  *
- * 見た目・並び順は元々SeriesBadge/MapView/MiniMap/FilterBarの4箇所に個別に
- * コピペされていた(観光地A〜E専用の配色)。スポット種別が増えてseriesが自由入力に
- * なったことに合わせて1箇所にまとめ、さらにスポット種別ごとにJSON設定
- * (spot_type_settingsの'series_styles'キー、JSON文字列)でシリーズの一覧と見た目を
- * カスタマイズできるようにしている。設定が無い種別(観光地作成当初・画面から手入力で
- * 追加した種別など)はDEFAULT_SERIES_STYLES(観光地のA〜E)にフォールバックする。
+ * **シリーズが決めるのは「中身」(ラベル・アイコン)と「形」**で、
+ * **色と大きさはランク**(`lib/rank.ts`)が決める。
+ * ただし**ランクを使わない種別では色もシリーズが決める**(`color`/`borderColor`/
+ * `textColor`。大きさはランクなし相当で固定)—— 作品ごとに色を分けたい種別では
+ * 色がシリーズの主要な手がかりになるため。
+ *
+ * かつてはシリーズが色・大きさ・ラベルの全部を握り、A〜Eの段階付けもシリーズとして
+ * 表していた。段階付けを**ランク**として切り出したので、シリーズは
+ * 「何のスポットか」だけを表す軸になっている(`lib/rank.ts`の冒頭も参照)。
+ *
+ * 見た目・並び順は`spot_type_settings`の`series_styles`キー(JSON文字列)に持つ。
+ * **未設定の種別は空**(=シリーズ定義なし)で、スポットに入っている値はそのまま
+ * 動く(ラベルはシリーズ名、色は既定のグレー)。
  */
 
 /** ラベルは文字列、または画像(data URL形式のbase64)のどちらかを指定できる */
@@ -21,15 +31,28 @@ export type SeriesLabel = string | { image: string };
 
 export interface SeriesStyleDefinition {
   series: string;
-  /** 背景色(バッジ・ピン共通) */
-  color: string;
-  /** 縁取り線の色(バッジ・ピン共通。非公開スポットはこの色のまま破線になる) */
-  borderColor: string;
-  /** 地図ピンの大きさ(px)。バッジの大小はこの値と無関係(sizeプロパティで別管理) */
-  size: number;
-  /** バッジ・ピンに表示するラベル(文字列 or 画像) */
-  label: SeriesLabel;
-  /** ラベル文字の色。省略時はcolorの明度から自動で白/濃色を選ぶ(画像ラベルの場合は無視) */
+  /** バッジ・ピンの中に出すラベル(文字列 or 画像)。`icon`があるときは使わない */
+  label?: SeriesLabel;
+  /**
+   * バッジ・ピンの中に描くアイコン(SVGのパス。既定では24×24の箱)。
+   * `label`より優先する —— 2つ描くと小さいピンでは潰れるため
+   */
+  icon?: string;
+  /**
+   * `icon`のパスが描かれている正方形の一辺(SVGの`viewBox`の大きさ)。既定は24。
+   * **配布されているアイコンのSVGは`viewBox`がまちまち**(24・48・1000など)なので、
+   * パスを書き換えずにそのまま貼れるようにここで指定する。
+   */
+  iconViewSize?: number;
+  /** 組み込みのピンの形(`PIN_SHAPES`)。`path`を書いたときは省略できる */
+  shape?: string;
+  /** 自前のピンの形(SVGのパス。100×145の箱に描く)。`shape`より優先する */
+  path?: string;
+  /** 面の色。**ランクを使わない種別でのみ効く**(使う種別ではランクの色が勝つ) */
+  color?: string;
+  /** 縁取り線の色。同じくランクを使わない種別でのみ効く */
+  borderColor?: string;
+  /** 中身の色。省略時はcolorの明度から自動で白/濃色を選ぶ(画像ラベルの場合は無視) */
   textColor?: string;
 }
 
@@ -37,58 +60,21 @@ export interface SeriesStyleDefinition {
 export const SERIES_STYLES_SETTING_KEY = "series_styles";
 
 /**
- * 観光地の現行A〜E配色をそのままデフォルト値として使う
- * (このファイルの旧BADGE_STYLES/PIN_STYLES/PIN_TEXT_COLORSより)。
- *
- * 観光地(tourist)のA〜EはWikipedia(ja)月次ページビュー数を知名度の指標とし、
- * 全スポット中の相対順位(パーセンタイル)で機械的に区分したもの
- * (世界遺産・国宝等の指定がある場所は目視で格上げする例外あり)。
- * 最上位をSにすると運用上何かと面倒なため、A〜Eの5段階にしている。
- * A: 上位5%(全国的に絶対外せない) / B: 次15%(全国区で有名) /
- * C: 次30%(地方の定番) / D: 次30%(地元で知られている) / E: 残り20%(穴場)
+ * **既定はシリーズ定義なし**。かつては観光地のA〜Eを既定にしていたが、
+ * A〜Eはランクへ移したので「どの種別にも当てはまる既定のシリーズ」は無くなった。
  */
-export const DEFAULT_SERIES_STYLES: SeriesStyleDefinition[] = [
-  { series: "A", color: "#f59e0b", borderColor: "#b45309", size: 26, label: "A", textColor: "#451a03" },
-  { series: "B", color: "#a7f3d0", borderColor: "#34d399", size: 22, label: "B", textColor: "#065f46" },
-  { series: "C", color: "#93c5fd", borderColor: "#60a5fa", size: 18, label: "C", textColor: "#1e3a8a" },
-  { series: "D", color: "#fef3c7", borderColor: "#fbbf24", size: 15, label: "D", textColor: "#78350f" },
-  { series: "E", color: "#e5e7eb", borderColor: "#9ca3af", size: 12, label: "E", textColor: "#374151" },
-];
+export const DEFAULT_SERIES_STYLES: SeriesStyleDefinition[] = [];
 
-/** 種別のシリーズ一覧に無い(未知の)シリーズ文字列用のフォールバック見た目 */
-const UNKNOWN_SERIES_STYLE: SeriesStyleDefinition = {
-  series: "",
-  color: "#f3f4f6",
-  borderColor: "#d1d5db",
-  size: 16,
-  label: "",
-  textColor: "#6b7280",
-};
+/** 種別のシリーズ一覧に無い(未知の)シリーズ用のフォールバック(ラベルはシリーズ名) */
+const UNKNOWN_SERIES_COLOR = "#f3f4f6";
+const UNKNOWN_SERIES_BORDER = "#d1d5db";
 
 /**
- * シリーズ未設定(null/空)のスポットに与える仮想シリーズ。非公開スポット以外は
- * シリーズ必須なので、実際に付くのは主に自分の非公開スポット。
- * 見た目は**白いピンに青い丸**。DBには保存せず、描画時にのみ適用する。
- *
- * かつては「マイスポット」という名前で赤ピン+白丸にしていたが、
- * **未設定はあくまで未設定**であって別の分類ではないので、名前を「未設定」に戻し、
- * 見た目も**シリーズの文字を持たないこと自体が分かる**白+丸にした
- * (赤は地名検索のマーカーとも色が被っていた)。丸をラベル画像で置くのは、
- * 文字のラベル(A〜E)と同じ枠に収まり、バッジ表示にもそのまま使えるため。
+ * シリーズ未設定(null/空)のスポットを画面で指すときの名前。
+ * 絞り込みチップ・バッジのツールチップに出す(DBには保存しない)。
+ * **見た目は「中身なし」**で、色はランク(ランクを使わない種別では白)。
  */
 export const UNSET_SERIES = "未設定";
-
-/** 青丸のラベル画像(白ピンの中に置く) */
-const UNSET_DOT_IMAGE =
-  "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Ccircle%20cx='12'%20cy='12'%20r='8'%20fill='%232563eb'/%3E%3C/svg%3E";
-
-const UNSET_SERIES_STYLE: SeriesStyleDefinition = {
-  series: UNSET_SERIES,
-  color: "#ffffff",
-  borderColor: "#9ca3af",
-  size: 26,
-  label: { image: UNSET_DOT_IMAGE },
-};
 
 /** #rrggbb形式の色の明度から、読みやすい文字色(白 or 濃灰)を選ぶ */
 export function autoTextColor(hexColor: string): string {
@@ -107,10 +93,7 @@ export function isValidSeriesStyle(v: unknown): v is SeriesStyleDefinition {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.series !== "string" || !o.series) return false;
-  if (typeof o.color !== "string") return false;
-  if (typeof o.borderColor !== "string") return false;
-  if (typeof o.size !== "number") return false;
-  if (typeof o.label !== "string") {
+  if (o.label !== undefined && typeof o.label !== "string") {
     if (
       typeof o.label !== "object" ||
       o.label === null ||
@@ -119,7 +102,22 @@ export function isValidSeriesStyle(v: unknown): v is SeriesStyleDefinition {
       return false;
     }
   }
-  if (o.textColor !== undefined && typeof o.textColor !== "string") return false;
+  if (o.icon !== undefined && !isValidPinPath(o.icon)) return false;
+  if (
+    o.iconViewSize !== undefined &&
+    (typeof o.iconViewSize !== "number" ||
+      !Number.isFinite(o.iconViewSize) ||
+      o.iconViewSize <= 0)
+  ) {
+    return false;
+  }
+  if (o.path !== undefined && !isValidPinPath(o.path)) return false;
+  if (o.shape !== undefined && !isPinShape(o.shape)) return false;
+  for (const key of ["color", "borderColor", "textColor"]) {
+    if (o[key] !== undefined && typeof o[key] !== "string") return false;
+  }
+  // sizeはランクへ移したので受け取っても無視する(古い設定ファイルをそのまま
+  // 読めるよう、値があること自体はエラーにしない)
   return true;
 }
 
@@ -136,7 +134,7 @@ export function parseSeriesStyles(json: string): SeriesStyleDefinition[] | null 
 
 /**
  * スポット種別のsettingsから、そのシリーズ設定(見た目+並び順)を解決する。
- * 未設定・不正な値の場合は観光地のA〜E(DEFAULT_SERIES_STYLES)を返す
+ * 未設定・不正な値の場合は空配列(=シリーズ定義なし)。
  */
 export function resolveSeriesStyles(
   type: Pick<SpotType, "settings"> | null | undefined
@@ -147,22 +145,38 @@ export function resolveSeriesStyles(
 }
 
 /**
- * series文字列に対応するスタイルを探す。シリーズ未設定(null/空文字)は
- * 白ピン+青丸。種別の一覧に無い非空のシリーズは
- * UNKNOWN_SERIES_STYLE(labelはseriesそのもの)。
+ * series文字列に対応する定義を探す。一覧に無い非空のシリーズは
+ * 「ラベル=シリーズ名」のフォールバック、未設定(null/空)はnullを返す
+ * (呼び出し側が「中身なし」として扱う)。
  */
 export function findSeriesStyle(
   series: Series | null,
   styles: SeriesStyleDefinition[]
-): SeriesStyleDefinition {
-  if (series === null || series === "" || series === UNSET_SERIES) {
-    return UNSET_SERIES_STYLE;
-  }
-  return styles.find((s) => s.series === series) ?? { ...UNKNOWN_SERIES_STYLE, series, label: series };
+): SeriesStyleDefinition | null {
+  if (series === null || series === "" || series === UNSET_SERIES) return null;
+  return (
+    styles.find((s) => s.series === series) ?? {
+      series,
+      label: series,
+      color: UNKNOWN_SERIES_COLOR,
+      borderColor: UNKNOWN_SERIES_BORDER,
+    }
+  );
+}
+
+/** アイコン(解決済み)。無ければnull */
+export function seriesIconOf(
+  style: SeriesStyleDefinition | null
+): PinIconSpec | null {
+  if (!style?.icon) return null;
+  return { path: style.icon, viewSize: style.iconViewSize ?? PIN_ICON_VIEW_SIZE };
 }
 
 /** シリーズの並び順(styles配列の順→未知の値→null の順)。Array.sort用 */
-export function getSeriesOrder(series: Series | null, styles: SeriesStyleDefinition[]): number {
+export function getSeriesOrder(
+  series: Series | null,
+  styles: SeriesStyleDefinition[]
+): number {
   if (series === null) return styles.length + 1;
   const idx = styles.findIndex((s) => s.series === series);
   return idx === -1 ? styles.length : idx;

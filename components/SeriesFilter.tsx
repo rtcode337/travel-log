@@ -3,12 +3,9 @@
 import { useMemo, useState } from "react";
 
 import type { Series } from "@/lib/types";
-import {
-  autoTextColor,
-  findSeriesStyle,
-  isImageLabel,
-  type SeriesStyleDefinition,
-} from "@/lib/seriesStyle";
+import { type SeriesStyleDefinition } from "@/lib/seriesStyle";
+import { resolveSeriesChip } from "@/lib/spotStyle";
+import SpotMarkGlyph from "@/components/SpotMarkGlyph";
 
 /** シリーズの選択肢がこれを超える種別(放送回番号など)はボタン列を並べきれないためselectにする */
 export const SERIES_FILTER_BUTTONS_MAX = 12;
@@ -74,7 +71,7 @@ export default function SeriesFilter({
         すべて
       </button>
       {series.map((r) => {
-        const style = findSeriesStyle(r, seriesStyles);
+        const { face, mark } = resolveSeriesChip(r, seriesStyles);
         const active = selected.includes(r);
         return (
           <button
@@ -91,9 +88,9 @@ export default function SeriesFilter({
             style={
               active
                 ? {
-                    backgroundColor: style.color,
-                    color: style.textColor ?? autoTextColor(style.color),
-                    boxShadow: `inset 0 -3px 0 ${style.borderColor}`,
+                    backgroundColor: face.color,
+                    color: face.textColor,
+                    boxShadow: `inset 0 -3px 0 ${face.borderColor}`,
                   }
                 : undefined
             }
@@ -101,16 +98,10 @@ export default function SeriesFilter({
               active ? "" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
             }`}
           >
-            {isImageLabel(style.label) ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={style.label.image}
-                alt={r}
-                className="mx-auto h-4 w-4 object-contain"
-              />
-            ) : (
-              style.label
-            )}
+            {/* 中身が無いシリーズ(アイコンも文字も未設定)はシリーズ名をそのまま出す
+                —— チップは押す対象なので、空の四角では選べない */}
+            <SpotMarkGlyph mark={mark} alt={r} className="mx-auto h-4 w-4" />
+            {mark.kind === "none" && r}
           </button>
         );
       })}
@@ -149,16 +140,13 @@ function SearchableSeriesFilter({
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 border-b border-gray-100 p-2">
           {selected.map((r) => {
-            const style = findSeriesStyle(r, seriesStyles);
+            const { face } = resolveSeriesChip(r, seriesStyles);
             return (
               <button
                 key={r}
                 type="button"
                 onClick={() => onChange(selected.filter((v) => v !== r))}
-                style={{
-                  backgroundColor: style.color,
-                  color: style.textColor ?? autoTextColor(style.color),
-                }}
+                style={{ backgroundColor: face.color, color: face.textColor }}
                 className="max-w-full truncate rounded-full px-2 py-0.5 text-xs font-medium"
                 title={`${r} を外す`}
               >
@@ -187,7 +175,7 @@ function SearchableSeriesFilter({
       </div>
       <ul className="max-h-56 overflow-y-auto border-t border-gray-100">
         {shown.map((r) => {
-          const style = findSeriesStyle(r, seriesStyles);
+          const { face } = resolveSeriesChip(r, seriesStyles);
           const active = selected.includes(r);
           return (
             <li key={r}>
@@ -202,8 +190,8 @@ function SearchableSeriesFilter({
                   aria-hidden
                   className="size-3 shrink-0 rounded-full border"
                   style={{
-                    backgroundColor: style.color,
-                    borderColor: style.borderColor,
+                    backgroundColor: face.color,
+                    borderColor: face.borderColor,
                   }}
                 />
                 <span className="min-w-0 flex-1 truncate">{r}</span>

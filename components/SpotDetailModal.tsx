@@ -21,7 +21,7 @@ import {
 } from "@/lib/types";
 import { formatPlanDateRange } from "@/lib/planListDraft";
 import { buildClaudeAskUrl, buildGeminiAskUrl } from "@/lib/askAi";
-import SeriesBadge from "@/components/SeriesBadge";
+import SpotBadge from "@/components/SpotBadge";
 import MiniMap from "@/components/MiniMap";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import {
@@ -309,12 +309,18 @@ export default function SpotDetailModal({
     () => resolveSeriesStyles(currentSpotType),
     [currentSpotType]
   );
+  // ランクを使う種別か(バッジ・ミニ地図の色の出どころが変わる)
+  const rankEnabled = getSpotTypeSetting(currentSpotType, "rank_enabled");
   // 訪問予定リストは今開いている種別のもので、経由スポットもその種別が主体のため、
   // リスト詳細のバッジはそちらのシリーズ設定で描く(重ね表示から開いたときだけ
   // スポット自身の種別と食い違う)
   const planListSeriesStyles = useMemo(
     () => resolveSeriesStyles(viewingSpotType ?? currentSpotType),
     [viewingSpotType, currentSpotType]
+  );
+  const planListRankEnabled = getSpotTypeSetting(
+    viewingSpotType ?? currentSpotType,
+    "rank_enabled"
   );
   // 複数カテゴリを種別の設定順に並べて表示するために使う
   const categories = useMemo(
@@ -430,9 +436,11 @@ export default function SpotDetailModal({
           <>
             <div className="mb-3 flex items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
-                <SeriesBadge
+                <SpotBadge
+                  rank={spot.rank}
                   series={spot.series}
                   seriesStyles={seriesStyles}
+                  rankEnabled={rankEnabled}
                   isPrivate={spot.status === "private"}
                 />
                 <div className="min-w-0">
@@ -479,6 +487,10 @@ export default function SpotDetailModal({
                   )}
                   <p className="text-xs text-gray-500">
                     {spot.region} ・{" "}
+                    {/* ランクはバッジの色にしか出ないので、使う種別では文字でも出す
+                        (色の段階を覚えていないと、どのランクか読み取れないため) */}
+                    {rankEnabled && `ランク${spot.rank ?? "なし"} ・ `}
+                    {spot.series && `${spot.series} ・ `}
                     {formatCategoriesForDisplay(spot.categories, categories)}
                     {reviewsEnabled && reviewsTotal > 0 && (
                       <span className="ml-2 text-gray-400">
@@ -526,8 +538,10 @@ export default function SpotDetailModal({
               <MiniMap
                 lat={spot.lat}
                 lng={spot.lng}
+                rank={spot.rank}
                 series={spot.series}
                 seriesStyles={seriesStyles}
+                rankEnabled={rankEnabled}
               />
               {canManage && (
                 <div className="absolute right-2 top-2 z-10 flex gap-2 rounded-lg bg-white/90 px-2 py-1 shadow">
@@ -1016,6 +1030,7 @@ export default function SpotDetailModal({
           listId={detailListId}
           spotsById={spotsById}
           seriesStyles={planListSeriesStyles}
+          rankEnabled={planListRankEnabled}
           onClose={() => setDetailListId(null)}
           onEdit={(list) => {
             setDetailListId(null);

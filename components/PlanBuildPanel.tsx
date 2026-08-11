@@ -2,11 +2,8 @@
 
 import { useRef } from "react";
 import type { Spot } from "@/lib/types";
-import {
-  findSeriesStyle,
-  UNSET_SERIES,
-  type SeriesStyleDefinition,
-} from "@/lib/seriesStyle";
+import { UNSET_SERIES, type SeriesStyleDefinition } from "@/lib/seriesStyle";
+import { resolveSpotFace } from "@/lib/spotStyle";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import HelpTip from "@/components/HelpTip";
 
@@ -73,8 +70,11 @@ export default function PlanBuildPanel({
         )}
         {spotIds.map((spotId, i) => {
           const spot = spotsById.get(spotId);
-          // シリーズ未設定(null/空)は「未設定」の見た目・名前で示す
-          const style = spot ? findSeriesStyle(spot.series, seriesStyles) : null;
+          // 色玉はピン・バッジと同じ解決を通す(ランクを使う種別ではランクの色)。
+          // ここでは種別の設定を持っていないので、色の出どころがシリーズになる
+          // ランク未使用の扱いで解決する —— 作成中の一覧は色の細かい段階より
+          // 「どのスポットか」が読めればよい
+          const face = spot ? resolveSpotFace(null, spot.series, seriesStyles, false) : null;
           const seriesName =
             spot && spot.series && spot.series.length > 0
               ? spot.series
@@ -95,7 +95,7 @@ export default function PlanBuildPanel({
               >
                 <span className="flex h-full items-center">≡</span>
               </span>
-              {spot && style ? (
+              {spot && face ? (
                 <>
                   {/* シリーズは色玉で示す(名前のバッジだと長いシリーズ名が
                       スポット名の幅を食うため出さない。名前はtitleで確認できる) */}
@@ -103,10 +103,10 @@ export default function PlanBuildPanel({
                     className="h-3.5 w-3.5 shrink-0 rounded-full"
                     title={seriesName}
                     style={{
-                      backgroundColor: style.color,
+                      backgroundColor: face.color,
                       border: `1.5px ${
                         spot.status === "private" ? "dashed" : "solid"
-                      } ${style.borderColor}`,
+                      } ${face.borderColor}`,
                     }}
                   />
                   <span className="min-w-0 flex-1 break-words text-sm leading-snug">
