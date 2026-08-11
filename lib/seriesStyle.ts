@@ -12,10 +12,10 @@ import {
  * ルート(`spot_routes.series`)の色分けにも同じ値を使う。
  *
  * **シリーズが決めるのは「中身」(ラベル・アイコン)と「形」**で、
- * **色と大きさはランク**(`lib/rank.ts`)が決める。
- * ただし**ランクを使わない種別では色もシリーズが決める**(`color`/`borderColor`/
- * `textColor`。大きさはランクなし相当で固定)—— 作品ごとに色を分けたい種別では
- * 色がシリーズの主要な手がかりになるため。
+ * **大きさはランク**(`lib/rank.ts`)が決める。
+ * **色はシリーズに指定があればそちらが勝つ**(`color`/`borderColor`/`textColor`)——
+ * 作品ごとに色を分けたうえで知名度を大きさで示す、のように**ランクと色を別の軸に
+ * 使いたい種別がある**ため。指定が無ければランクの色になる。
  *
  * かつてはシリーズが色・大きさ・ラベルの全部を握り、A〜Eの段階付けもシリーズとして
  * 表していた。段階付けを**ランク**として切り出したので、シリーズは
@@ -48,9 +48,9 @@ export interface SeriesStyleDefinition {
   shape?: string;
   /** 自前のピンの形(SVGのパス。100×145の箱に描く)。`shape`より優先する */
   path?: string;
-  /** 面の色。**ランクを使わない種別でのみ効く**(使う種別ではランクの色が勝つ) */
+  /** 面の色。**指定があればランクの色より優先される**(`lib/spotStyle.ts`) */
   color?: string;
-  /** 縁取り線の色。同じくランクを使わない種別でのみ効く */
+  /** 縁取り線の色。`color`を指定したときに一緒に使う */
   borderColor?: string;
   /** 中身の色。省略時はcolorの明度から自動で白/濃色を選ぶ(画像ラベルの場合は無視) */
   textColor?: string;
@@ -64,10 +64,6 @@ export const SERIES_STYLES_SETTING_KEY = "series_styles";
  * A〜Eはランクへ移したので「どの種別にも当てはまる既定のシリーズ」は無くなった。
  */
 export const DEFAULT_SERIES_STYLES: SeriesStyleDefinition[] = [];
-
-/** 種別のシリーズ一覧に無い(未知の)シリーズ用のフォールバック(ラベルはシリーズ名) */
-const UNKNOWN_SERIES_COLOR = "#f3f4f6";
-const UNKNOWN_SERIES_BORDER = "#d1d5db";
 
 /**
  * シリーズ未設定(null/空)のスポットを画面で指すときの名前。
@@ -148,20 +144,17 @@ export function resolveSeriesStyles(
  * series文字列に対応する定義を探す。一覧に無い非空のシリーズは
  * 「ラベル=シリーズ名」のフォールバック、未設定(null/空)はnullを返す
  * (呼び出し側が「中身なし」として扱う)。
+ *
+ * **フォールバックに色は持たせない。** 色を入れるとランクの色を上書きしてしまい
+ * (色はシリーズが優先されるため)、定義を書き忘れたシリーズだけランクの色から
+ * 外れる —— 定義が無いことは中身(シリーズ名がそのまま出る)で分かる。
  */
 export function findSeriesStyle(
   series: Series | null,
   styles: SeriesStyleDefinition[]
 ): SeriesStyleDefinition | null {
   if (series === null || series === "" || series === UNSET_SERIES) return null;
-  return (
-    styles.find((s) => s.series === series) ?? {
-      series,
-      label: series,
-      color: UNKNOWN_SERIES_COLOR,
-      borderColor: UNKNOWN_SERIES_BORDER,
-    }
-  );
+  return styles.find((s) => s.series === series) ?? { series, label: series };
 }
 
 /** アイコン(解決済み)。無ければnull */
