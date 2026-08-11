@@ -7,7 +7,7 @@ import { resizeImageToDataUrl, toDateTimeLocalValue } from "@/lib/visitPhoto";
 
 /**
  * 訪問記録の入力欄(訪問日時・写真・メモ)。訪問記録モーダル(VisitFormModal)と、
- * 探訪スポット追加(AddSpotModalのwithVisit)で共用する。写真は「既存の相対パス」
+ * スポット追加時の「訪問を記録する」(AddSpotModal)で共用する。写真は「既存の相対パス」
  * または「追加写真のdata URL」の混在で親が保持し、この形のまま保存に渡す。
  */
 export default function VisitFields({

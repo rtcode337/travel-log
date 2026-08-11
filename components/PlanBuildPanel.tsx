@@ -1,29 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import type { Spot } from "@/lib/types";
 import {
   findSeriesStyle,
   UNSET_SERIES,
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
+import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import HelpTip from "@/components/HelpTip";
-
-/** 配列の要素を from→to へ移動した新しい配列を返す */
-function move<T>(arr: T[], from: number, to: number): T[] {
-  const next = arr.slice();
-  const [item] = next.splice(from, 1);
-  next.splice(to, 0, item);
-  return next;
-}
 
 /**
  * 訪問予定リスト作成モードで地図の右側に出すパネル。リストのタイトルと、
  * 選択済みスポットの一覧(左端の三本線ハンドルをつかんでドラッグで並び替え)、
- * 「入力完了」ボタンを表示する。並び替えはタッチでも動くようポインタイベントで実装する。
- * `touch-action: none`はハンドルにだけ当て、行本体は通常のタッチスクロールを
- * 妨げない(かつては行全体を長押し→ドラッグにしていたが、全行が
- * `touch-action: none`になり一覧自体をスクロールできなかった)。
+ * 「入力完了」ボタンを表示する。並び替えは`useDragReorder`(リスト詳細・経路詳細と共通)。
  * シリーズは名前のバッジではなく色玉(シリーズの色+縁取り)で示す
  * (シリーズ名が長いとスポット名の幅を食って何行にも折り返してしまうため)。
  */
@@ -52,56 +42,13 @@ export default function PlanBuildPanel({
   onCancel: () => void;
 }) {
   const listRef = useRef<HTMLUListElement | null>(null);
-  const rowRefs = useRef<(HTMLLIElement | null)[]>([]);
-  const dragFrom = useRef<number | null>(null);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-
-  const handleDragStart = (e: React.PointerEvent, i: number) => {
-    dragFrom.current = i;
-    setDragIndex(i);
-    try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {
-      // 未対応環境では無視(マウスならcaptureなしでも動く)
-    }
-    if (typeof navigator !== "undefined" && navigator.vibrate) {
-      navigator.vibrate(10);
-    }
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (dragFrom.current == null) return;
-    e.preventDefault();
-    const y = e.clientY;
-    // リストの端に近づいたら自動スクロール(長い一覧でも端まで運べるように)
-    const list = listRef.current;
-    if (list) {
-      const r = list.getBoundingClientRect();
-      if (y < r.top + 28) list.scrollTop -= 10;
-      else if (y > r.bottom - 28) list.scrollTop += 10;
-    }
-    let to = dragFrom.current;
-    for (let j = 0; j < rowRefs.current.length; j += 1) {
-      const el = rowRefs.current[j];
-      if (!el) continue;
-      const rr = el.getBoundingClientRect();
-      if (y <= rr.bottom) {
-        to = j;
-        break;
-      }
-      to = j;
-    }
-    if (to !== dragFrom.current) {
-      onReorder(move(spotIds, dragFrom.current, to));
-      dragFrom.current = to;
-      setDragIndex(to);
-    }
-  };
-
-  const handlePointerUp = () => {
-    dragFrom.current = null;
-    setDragIndex(null);
-  };
+  // 下書きはlocalStorageに持つだけなので、並びが決まった時点(onCommit)ではなく
+  // 動かすたびに親へ渡す(地図の下書き経路をその場で追従させるため)
+  const { setRowRef, dragIndex, handleProps } = useDragReorder({
+    items: spotIds,
+    onReorder,
+    scrollRef: listRef,
+  });
 
   return (
     <div className="absolute bottom-0 right-0 top-40 z-20 flex w-2/5 max-w-sm flex-col overflow-hidden rounded-tl-xl bg-white/95 shadow-xl backdrop-blur">
@@ -135,9 +82,7 @@ export default function PlanBuildPanel({
           return (
             <li
               key={spotId}
-              ref={(el) => {
-                rowRefs.current[i] = el;
-              }}
+              ref={setRowRef(i)}
               className={`flex select-none items-center gap-2 py-1.5 pr-2.5 ${
                 dragIndex === i ? "bg-blue-100" : ""
               }`}
@@ -145,13 +90,8 @@ export default function PlanBuildPanel({
               {/* 並び替えハンドル。touch-action: noneはここにだけ当てる
                   (行本体まで当てると一覧がタッチスクロールできなくなる) */}
               <span
-                role="button"
-                aria-label="並び替え"
-                onPointerDown={(e) => handleDragStart(e, i)}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                className="shrink-0 touch-none cursor-grab self-stretch py-1 pl-2.5 pr-1 text-base leading-none text-gray-400"
+                {...handleProps(i)}
+                className={`${REORDER_HANDLE_CLASS} self-stretch py-1 pl-2.5 pr-1 text-base leading-none`}
               >
                 <span className="flex h-full items-center">≡</span>
               </span>

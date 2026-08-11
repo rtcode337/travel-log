@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api-client";
 import { formatPlanDateRange } from "@/lib/planListDraft";
+import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import type { Spot, VisitPlanList } from "@/lib/types";
 import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
 import SeriesBadge from "@/components/SeriesBadge";
@@ -12,6 +13,7 @@ import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
 /**
  * 訪問予定リスト(旅程)の詳細モーダル。タイトル・説明・訪問予定期間と、
  * 経由スポットをseq順に表示する。スポットのタップで各スポット詳細へ、
+ * 左端の三本線ハンドルで**並び替え**(離した時点でPATCH)、
  * リスト自体の削除もできる。スポットの詳細は呼び出し側が保持済みの一覧から解決する。
  */
 export default function VisitPlanListDetailModal({
@@ -32,7 +34,7 @@ export default function VisitPlanListDetailModal({
   onEdit: (list: VisitPlanList) => void;
   onDeleted: () => void;
   onOpenSpot: (spotId: string) => void;
-  /** 経由スポットの訪問済みを付け外ししたときに呼ばれる(呼び出し側の一覧の取り直し用) */
+  /** 経由スポットの訪問済み・並び順を変えたときに呼ばれる(呼び出し側の一覧の取り直し用) */
   onChanged?: () => void;
 }) {
   const [list, setList] = useState<VisitPlanList | null>(null);
@@ -75,6 +77,43 @@ export default function VisitPlanListDetailModal({
 
   const visitedIds = new Set(list?.visited_spot_ids ?? []);
 
+  // 経由スポットの並び替え。ドラッグ中は手元の並びだけを入れ替え(画面がその場で
+  // 追従する)、指を離した時点で1回だけPATCHする —— 動かすたびに保存すると
+  // 1回の並び替えで何度も書き込むことになる
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const { setRowRef, dragIndex, handleProps } = useDragReorder({
+    items: list?.spot_ids ?? [],
+    onReorder: (spotIds) =>
+      setList((prev) => (prev ? { ...prev, spot_ids: spotIds } : prev)),
+    onCommit: async (spotIds) => {
+      if (!list) return;
+      setSavingOrder(true);
+      setError(null);
+      // PATCHは経由スポットを丸ごと置き換えるので、基本情報もそのまま送り直す
+      // (送らないと題名・期間が消える。訪問済みはAPI側が控えて戻す)
+      const { data, error } = await api.visitPlanLists.update(list.id, {
+        title: list.title,
+        description: list.description,
+        start_date: list.start_date,
+        end_date: list.end_date,
+        spot_ids: spotIds,
+      });
+      setSavingOrder(false);
+      if (error) {
+        setError("並び順の保存に失敗しました: " + error.message);
+        // 保存できていない並びを画面に残さない(サーバーの状態へ戻す)
+        api.visitPlanLists.get(list.id).then(({ data }) => {
+          if (data) setList(data);
+        });
+        return;
+      }
+      if (data) setList(data);
+      onChanged?.();
+    },
+    scrollRef: panelRef,
+  });
+
   // 経由スポットの「訪問済み」を手で付け外しする。訪問記録を付ければ自動で付くが、
   // 記録するほどでもない立ち寄りや、誤って付けた分をここで直せる
   const [togglingSpotId, setTogglingSpotId] = useState<string | null>(null);
@@ -116,6 +155,7 @@ export default function VisitPlanListDetailModal({
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4"
         onClick={(e) => e.stopPropagation()}
       >
@@ -159,8 +199,23 @@ export default function VisitPlanListDetailModal({
                 return (
                   <li
                     key={spotId}
-                    className={`flex items-center ${visited ? "bg-gray-50" : ""}`}
+                    ref={setRowRef(i)}
+                    className={`flex items-center ${
+                      dragIndex === i
+                        ? "bg-blue-100"
+                        : visited
+                          ? "bg-gray-50"
+                          : ""
+                    }`}
                   >
+                    {/* 並び替えハンドル。touch-action: noneはここにだけ当てる
+                        (行本体まで当てると一覧がタッチスクロールできなくなる) */}
+                    <span
+                      {...handleProps(i)}
+                      className={`${REORDER_HANDLE_CLASS} self-stretch py-2 pl-2.5 pr-1 text-base leading-none`}
+                    >
+                      <span className="flex h-full items-center">≡</span>
+                    </span>
                     {/* 解決できたスポットだけタップで詳細へ。解決できていない行は
                         ボタンにしない —— 説明の「?」を入れ子のボタンにできないため
                         (押せなくなるうえHTMLとしても不正) */}
@@ -168,7 +223,7 @@ export default function VisitPlanListDetailModal({
                       <button
                         type="button"
                         onClick={() => onOpenSpot(spot.id)}
-                        className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50"
+                        className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-1 pr-3 text-left hover:bg-gray-50"
                       >
                         <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums text-gray-400">
                           {i + 1}
@@ -192,7 +247,7 @@ export default function VisitPlanListDetailModal({
                         <span className="shrink-0 text-gray-400">›</span>
                       </button>
                     ) : (
-                      <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-sm text-gray-400">
+                      <div className="flex min-w-0 flex-1 items-center gap-2 py-2.5 pl-1 pr-3 text-sm text-gray-400">
                         <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums">
                           {i + 1}
                         </span>
@@ -239,6 +294,14 @@ export default function VisitPlanListDetailModal({
                 </li>
               )}
             </ol>
+
+            {list.spot_ids.length > 1 && (
+              <p className="mt-1.5 text-xs text-gray-500">
+                {savingOrder
+                  ? "並び順を保存中…"
+                  : "左端の≡をつかんで動かすと、回る順番を入れ替えられます。"}
+              </p>
+            )}
 
             {/* 残りのスポットをGoogle マップの経路検索で開く(途中のスポットは経由地、
                 最後のスポットは目的地になる)。読み込めていないスポットは飛ばし、
