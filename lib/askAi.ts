@@ -2,7 +2,7 @@ import type { Spot, SpotType } from "@/lib/types";
 
 /**
  * スポットについて生成AIに聞くための質問文と、その質問を入れた状態でAIのページを
- * 開くURLを組み立てる。スポット詳細のClaude・Geminiのボタンで使う。
+ * 開くURLを組み立てる。スポット詳細の「AIに聞く」ボタンとGeminiのボタンで使う。
  *
  * **同名の別スポットに答えられてしまうのを防ぐため、質問文に所在地と座標を添える**
  * (「光明寺」のように同じ名前の場所が各地にあるため)。
@@ -36,17 +36,65 @@ export function buildSpotQuestion(
 }
 
 /**
- * Claudeを新しい会話で開くURL。`q`はプロンプト欄に入った状態で開く公式の
- * パラメータ(送信はされないので、送る前に読み返せる)。
+ * 「AIに聞く」で選べる相手。**ここに1行足せばボタンが増える**。
+ *
+ * URLで質問文を渡せるサービスだけを載せている。**渡し方も挙動もサービスごとに違い、
+ * しかも予告なく変わる**ので、確認した時点の挙動をそれぞれに書いてある。
+ * 動かなくなったらこの配列から外せばよい(画面側は配列をそのまま並べるだけ)。
+ *
+ * Geminiはここに入れない —— gemini.google.com はURLで質問文を渡せず、代わりに使っている
+ * 検索のAIモードは「履歴の残らないWeb検索」に近い性格なので、Google マップと同じ並びに
+ * 置いてある(buildGeminiAskUrl)。
  */
-export function buildClaudeAskUrl(
-  spot: Spot,
-  spotType?: SpotType | null
-): string {
-  return `https://claude.ai/new?q=${encodeURIComponent(
-    buildSpotQuestion(spot, spotType)
-  )}`;
+export interface AskAiTarget {
+  id: string;
+  /** メニューに出す名前 */
+  label: string;
+  /** 押したときに開くURL */
+  buildUrl: (spot: Spot, spotType?: SpotType | null) => string;
+  /**
+   * メニューに小さく添える、送信されるかどうかの違い。
+   * **押して確かめた結果を書くこと**（各サービスの告知と実際の挙動は食い違うことがある。
+   * ChatGPTは「外部リンクからは自動送信しない」と告知されているが実際は送信される）。
+   */
+  note: string;
 }
+
+export const ASK_AI_TARGETS: AskAiTarget[] = [
+  {
+    id: "claude",
+    label: "Claude",
+    // `q`はプロンプト欄を埋めるだけで送信はしない公式のパラメータ
+    buildUrl: (spot, spotType) =>
+      `https://claude.ai/new?q=${encodeURIComponent(buildSpotQuestion(spot, spotType))}`,
+    note: "送信前に読み返せる",
+  },
+  {
+    id: "chatgpt",
+    label: "ChatGPT",
+    // `q`はネイティブ対応。**そのまま送信される**(2026-08にこのアプリから実際に押して確認)。
+    // OpenAIはsec-fetch-siteを見た自動送信の抑止を入れたと告知しているが、
+    // 少なくとも外部サイトからのこの遷移では送信まで進む。挙動は変わりうるので、
+    // 送信の有無が変わったらこのnoteを直すこと
+    buildUrl: (spot, spotType) =>
+      `https://chatgpt.com/?q=${encodeURIComponent(buildSpotQuestion(spot, spotType))}`,
+    note: "そのまま回答が出る",
+  },
+  {
+    id: "perplexity",
+    label: "Perplexity",
+    buildUrl: (spot, spotType) =>
+      `https://www.perplexity.ai/search?q=${encodeURIComponent(buildSpotQuestion(spot, spotType))}`,
+    note: "そのまま回答が出る",
+  },
+  {
+    id: "grok",
+    label: "Grok",
+    buildUrl: (spot, spotType) =>
+      `https://grok.com/?q=${encodeURIComponent(buildSpotQuestion(spot, spotType))}`,
+    note: "そのまま回答が出る",
+  },
+];
 
 /**
  * Gemini(Google検索のAIモード)で開くURL。

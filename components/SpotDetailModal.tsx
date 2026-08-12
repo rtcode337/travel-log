@@ -20,7 +20,7 @@ import {
   type VisitPlanList,
 } from "@/lib/types";
 import { formatPlanDateRange } from "@/lib/planListDraft";
-import { buildClaudeAskUrl, buildGeminiAskUrl } from "@/lib/askAi";
+import { buildGeminiAskUrl } from "@/lib/askAi";
 import SpotBadge from "@/components/SpotBadge";
 import MiniMap from "@/components/MiniMap";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
@@ -35,6 +35,7 @@ import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
 import AddToPlanListModal from "@/components/AddToPlanListModal";
+import AskAiButton from "@/components/AskAiButton";
 import { DirectionsIcon } from "@/components/GoogleMapsRouteLink";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
@@ -47,15 +48,6 @@ export function WikipediaIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
       <path d="M12.09 13.119c-.936 1.932-2.217 4.548-2.853 5.728-.616 1.074-1.127.931-1.532.029-1.406-3.321-4.293-9.144-5.651-12.409-.251-.601-.441-.987-.619-1.139-.181-.15-.554-.24-1.122-.271C.103 5.033 0 4.982 0 4.898v-.455l.052-.045c.924-.005 5.401 0 5.401 0l.051.045v.434c0 .119-.075.176-.225.176l-.564.031c-.485.029-.727.164-.727.436 0 .135.053.33.166.601 1.082 2.646 4.818 10.521 4.818 10.521l.136.046 2.411-4.81-.482-1.067-1.658-3.264s-.318-.654-.428-.872c-.728-1.443-.712-1.518-1.447-1.617-.207-.023-.313-.05-.313-.149v-.468l.06-.045h4.292l.113.037v.451c0 .105-.076.15-.227.15l-.308.047c-.792.061-.661.381-.136 1.422l1.582 3.252 1.758-3.504c.293-.64.233-.801.111-.947-.07-.084-.305-.22-.812-.24l-.201-.021c-.052 0-.098-.015-.145-.051-.045-.031-.067-.076-.067-.129v-.427l.061-.045c1.247-.008 4.043 0 4.043 0l.059.045v.436c0 .121-.059.178-.193.178-.646.03-.782.095-1.023.439-.12.186-.375.589-.646 1.039l-2.301 4.273-.065.135 2.792 5.712.17.048 4.396-10.438c.154-.422.129-.722-.064-.895-.197-.172-.346-.273-.857-.295l-.42-.016c-.061 0-.105-.014-.152-.045-.043-.029-.072-.075-.072-.119v-.436l.059-.045h4.961l.041.045v.437c0 .119-.074.18-.209.18-.648.03-1.127.18-1.443.421-.314.255-.557.616-.736 1.067 0 0-4.043 9.258-5.426 12.339-.525 1.007-1.053.917-1.503-.031-.571-1.171-1.773-3.786-2.646-5.71l.053-.036z" />
-    </svg>
-  );
-}
-
-/** Claudeの公式ロゴマーク(Simple Icons、CC0) */
-function ClaudeIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" />
     </svg>
   );
 }
@@ -606,18 +598,10 @@ export default function SpotDetailModal({
                 </button>
               )}
               {/* スポットについてAIに聞く。質問文(所在地・座標・スポット種別つき)を
-                  入れた状態で新しい会話を開く。Wikipedia記事が無いスポットでも何か
-                  分かるように、Wikipediaの有無に関わらず出す */}
-              <a
-                href={buildClaudeAskUrl(spot, currentSpotType)}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Claudeにこのスポットについて聞く"
-                title="Claudeにこのスポットについて聞く"
-                className="rounded p-1 text-blue-600 hover:bg-blue-50"
-              >
-                <ClaudeIcon className="size-5" />
-              </a>
+                  入れた状態で開く。相手は押してから選ぶ(components/AskAiButton.tsx)。
+                  Wikipedia記事が無いスポットでも何か分かるように、Wikipediaの有無に
+                  関わらず出す */}
+              <AskAiButton spot={spot} spotType={currentSpotType} />
               <div className="ml-auto flex items-center gap-1 text-sm text-gray-500">
                 Google:
                 <a
@@ -648,8 +632,11 @@ export default function SpotDetailModal({
                 >
                   <DirectionsIcon className="size-5" />
                 </a>
-                {/* Geminiに聞く。gemini.google.com はURLでプロンプトを渡せないため、
-                    同じモデルが答える検索のAIモード(udm=50)を開く(lib/askAi.ts) */}
+                {/* 検索のAIモード(udm=50)。gemini.google.com はURLで質問文を渡せない
+                    という事情もあるが、**「AIに聞く」ボタンとは別に Google の並びへ
+                    置いている**のは性格が違うため —— こちらは会話履歴を残さずに引ける
+                    Web検索に近く、地図・経路と同じ「Googleで調べる」の一員。
+                    相手を選んで会話するほうは AskAiButton の側(lib/askAi.ts) */}
                 <a
                   href={buildGeminiAskUrl(spot, currentSpotType)}
                   target="_blank"
