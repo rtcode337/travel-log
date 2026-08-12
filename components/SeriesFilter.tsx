@@ -8,7 +8,7 @@ import { resolveSeriesChip } from "@/lib/spotStyle";
 import SpotMarkGlyph from "@/components/SpotMarkGlyph";
 import ChoiceRow, { toggleChoice } from "@/components/ChoiceRow";
 
-/** シリーズの選択肢がこれを超える種別(放送回番号など)はボタン列を並べきれないためselectにする */
+/** シリーズの選択肢がこれを超える種別(放送回番号など)はボタン列を並べきれないため検索できる一覧にする */
 export const SERIES_FILTER_BUTTONS_MAX = 12;
 
 /**
@@ -76,12 +76,26 @@ export default function SeriesFilter({
   );
 }
 
-/** 一覧に一度に描く最大件数(数百件の種別で描画が重くならないようにする) */
+/**
+ * 検索していないときに描く候補の件数。**一覧に内側のスクロールを作らない**ため、
+ * 器の高さがそのまま伸びる —— 絞り込みモーダルの中で他の項目(訪問日など)が
+ * 遠くなりすぎない件数に抑え、続きは「さらに表示」で出す
+ */
+const INITIAL_RESULT_LIMIT = 12;
+/** 「さらに表示」後に一度に描く最大件数(数百件の種別で描画が重くならないようにする) */
 const SEARCH_RESULT_LIMIT = 60;
 
 /**
  * 選択肢が多い種別向けの、検索できるシリーズ絞り込み。
  * 選択中のシリーズをチップで出し、検索欄で絞った候補をタップでトグルする。
+ *
+ * **候補一覧に内側のスクロール領域(`max-h-* overflow-y-auto`)を持たせない。**
+ * かつては高さを固定して中でスクロールさせていたが、実機のスマホ(Safari・Chromeとも)で
+ * 選択中の行の青い背景が本来の位置からずれて描かれ、右端の✓が見えたり見えなかったり
+ * した。入れ子のスクロール領域を指で慣性スクロールさせたときの描画で崩れるもので、
+ * PCの開発者ツールのスマホ表示(ホイールでのスクロール)では再現しない。
+ * ページ・モーダル側のスクロールに任せれば、この崩れも「一覧の上で指を動かすと
+ * ページが動かない」スクロールの取り合いも起きない。
  */
 function SearchableSeriesFilter({
   series,
@@ -95,15 +109,24 @@ function SearchableSeriesFilter({
   seriesStyles: SeriesStyleDefinition[];
 }) {
   const [query, setQuery] = useState("");
+  // 「さらに表示」を押したか。検索語を変えても畳み直さない
+  // (絞ってから広げ直す手間のほうが大きいため)
+  const [expanded, setExpanded] = useState(false);
   const matched = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return series;
     return series.filter((r) => r.toLowerCase().includes(q));
   }, [series, query]);
-  const shown = matched.slice(0, SEARCH_RESULT_LIMIT);
+  const shown = matched.slice(
+    0,
+    expanded ? SEARCH_RESULT_LIMIT : INITIAL_RESULT_LIMIT
+  );
+  const rest = matched.length - shown.length;
 
   return (
-    <div className="rounded-lg border border-gray-300 bg-white">
+    // **器はoverflow-hidden**。選択中の行の青い背景は端まで塗るので、
+    // 角丸で切らないと一覧の上下端で背景が枠の角からはみ出す
+    <div className="overflow-hidden rounded-lg border border-gray-300 bg-white">
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 border-b border-gray-100 p-2">
           {/* 選択中のシリーズ。ボタン列と同じく**青で塗る**(シリーズの色は使わない) */}
@@ -112,7 +135,7 @@ function SearchableSeriesFilter({
               key={r}
               type="button"
               onClick={() => onChange(selected.filter((v) => v !== r))}
-              className="max-w-full truncate rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white"
+              className="max-w-full truncate rounded-full bg-blue-600 px-2 py-1 text-xs font-medium text-white"
               title={`${r} を外す`}
             >
               {r} ✕
@@ -121,7 +144,7 @@ function SearchableSeriesFilter({
           <button
             type="button"
             onClick={() => onChange([])}
-            className="rounded-full px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-100"
+            className="rounded-full px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
           >
             すべて解除
           </button>
@@ -137,7 +160,7 @@ function SearchableSeriesFilter({
           className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
         />
       </div>
-      <ul className="max-h-56 overflow-y-auto border-t border-gray-100">
+      <ul className="border-t border-gray-100">
         {shown.map((r) => {
           const { face } = resolveSeriesChip(r, seriesStyles);
           const active = selected.includes(r);
@@ -145,8 +168,9 @@ function SearchableSeriesFilter({
             <li key={r}>
               <button
                 type="button"
+                aria-pressed={active}
                 onClick={() => onChange(toggleChoice(selected, r))}
-                className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm ${
+                className={`flex w-full items-center gap-2 px-2 py-2.5 text-left text-sm ${
                   active ? "bg-blue-50 font-medium" : "hover:bg-gray-50"
                 }`}
               >
@@ -159,7 +183,14 @@ function SearchableSeriesFilter({
                   }}
                 />
                 <span className="min-w-0 flex-1 truncate">{r}</span>
-                {active && <span className="shrink-0 text-blue-600">✓</span>}
+                {/* ✓の場所は選んでいないときも空けておく —— 出し入れで文字の幅が
+                    変わると、続けてタップしたときに行の中身が動いて読みにくい */}
+                <span
+                  aria-hidden
+                  className={`shrink-0 text-blue-600 ${active ? "" : "invisible"}`}
+                >
+                  ✓
+                </span>
               </button>
             </li>
           );
@@ -170,11 +201,20 @@ function SearchableSeriesFilter({
           </li>
         )}
       </ul>
-      {matched.length > shown.length && (
-        <p className="border-t border-gray-100 px-2 py-1.5 text-xs text-gray-500">
-          ほか{matched.length - shown.length}件。検索で絞り込んでください
-        </p>
-      )}
+      {rest > 0 &&
+        (expanded ? (
+          <p className="border-t border-gray-100 px-2 py-1.5 text-xs text-gray-500">
+            ほか{rest}件。検索で絞り込んでください
+          </p>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="w-full border-t border-gray-100 px-2 py-2.5 text-xs font-medium text-blue-600"
+          >
+            さらに{Math.min(rest, SEARCH_RESULT_LIMIT - INITIAL_RESULT_LIMIT)}件を表示
+          </button>
+        ))}
     </div>
   );
 }
