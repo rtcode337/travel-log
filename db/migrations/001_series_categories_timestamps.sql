@@ -15,18 +15,40 @@
 -- -------------------------------------------------------------
 -- 1. spots.rank -> spots.series
 -- -------------------------------------------------------------
+-- **「series がまだ無い」ことまで条件にする。** 010 でランク機能を入れ直して
+-- spots.rank が復活したため、「rank がある」だけを条件にすると、現行スキーマから
+-- 作った新規DBでも改名しようとして「series already exists」で落ちる
+-- (= docker compose up も migrate-remote.sh も新規DBに対して一切通らなくなる)。
+-- ここが直したいのは「rank しか無い旧スキーマ」だけ。
 do $$
 begin
   if exists (
     select 1 from information_schema.columns
      where table_name = 'spots' and column_name = 'rank'
+  ) and not exists (
+    select 1 from information_schema.columns
+     where table_name = 'spots' and column_name = 'series'
   ) then
     alter table spots rename column rank to series;
   end if;
 end
 $$;
 
-alter index if exists spots_rank_idx rename to spots_series_idx;
+-- 索引の改名も同じ事情でガードする(現行スキーマは spots_rank_idx と
+-- spots_series_idx の両方を持つので、素の rename は名前の衝突で落ちる)
+do $$
+begin
+  if exists (
+    select 1 from pg_indexes
+     where schemaname = 'public' and indexname = 'spots_rank_idx'
+  ) and not exists (
+    select 1 from pg_indexes
+     where schemaname = 'public' and indexname = 'spots_series_idx'
+  ) then
+    alter index spots_rank_idx rename to spots_series_idx;
+  end if;
+end
+$$;
 
 -- -------------------------------------------------------------
 -- 2. spots.category(単数 text) -> spots.categories(複数 text[])
