@@ -58,8 +58,13 @@ export default function ExportJobsPanel() {
   };
 
   return (
-    <section>
-      <h2 className="mb-2 text-base font-bold">訪問記録のエクスポート</h2>
+    // 既定は畳んでおく(生成を始めるときだけ開く場所なので)。
+    // 管理画面の他の節と同じdetails/summaryの体裁にそろえる
+    <details>
+      <summary className="cursor-pointer select-none text-base font-bold">
+        訪問記録のエクスポート
+      </summary>
+    <section className="mt-2">
       <p className="mb-2 text-xs text-gray-500">
         指定したユーザーの訪問記録(メモ・写真)を全スポット種別ぶんまとめてZIPにする。
         生成はバックグラウンドで進み、出来上がるとここと本人のアカウント画面から
@@ -136,5 +141,6 @@ export default function ExportJobsPanel() {
         )}
       </ul>
     </section>
+    </details>
   );
 }

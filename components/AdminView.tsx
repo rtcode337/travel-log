@@ -1677,6 +1677,27 @@ export default function AdminView({
     loadRoutes();
   };
 
+  /**
+   * ユーザー管理の折り畳みを、**2カラム(PC)のときだけ最初から開いた状態にする**。
+   * 1カラム(スマホ)では畳んだまま —— 開いていると縦に長く居座って、
+   * 下にあるスポットの管理が遠くなるため。
+   *
+   * `open`はCSSで切り替えられないので、描画のあとにDOMへ直接立てる。
+   * **描画中に`window`を見て決めるとサーバーが返したHTMLと食い違う**
+   * (ハイドレーション不整合)ので、要素が付いたときに走るコールバックrefでやる。
+   * ここで`useEffect`にしないのは、この画面がロール判定の間`null`を返していて、
+   * マウント時点ではまだ要素が無いため。
+   *
+   * 幅はTailwindの`lg`(=1024px)と同じ値。**グリッドが2カラムに変わる境目**
+   * (`lg:grid-cols-[360px_1fr]`)なので、片方を変えるならもう片方も変えること。
+   * 開くのは要素が付いたときの1回だけで、あとから畳めばそのまま(幅の変化は追わない)。
+   */
+  const openWhenTwoColumns = useCallback((node: HTMLDetailsElement | null) => {
+    if (node && window.matchMedia("(min-width: 1024px)").matches) {
+      node.open = true;
+    }
+  }, []);
+
   if (checkingRole || !hasPageAccess) return null;
 
   return (
@@ -1694,8 +1715,14 @@ export default function AdminView({
         {/* 左カラム: ユーザー管理と訪問記録のエクスポート(どちらもadmin専用) */}
         {isAdmin && (
           <div className="flex flex-col gap-6">
-          <section>
-            <h2 className="mb-2 text-base font-bold">ユーザー管理</h2>
+          {/* 「スポットの管理」と同じdetails/summaryの体裁。
+              既定は畳んだ状態で、2カラム(PC)のときだけ開いて出す
+              (openWhenTwoColumns) */}
+          <details ref={openWhenTwoColumns}>
+            <summary className="cursor-pointer select-none text-base font-bold">
+              ユーザー管理
+            </summary>
+          <section className="mt-2">
             {userMessage && (
               <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
                 {userMessage}
@@ -1857,6 +1884,7 @@ export default function AdminView({
               </p>
             </form>
           </section>
+          </details>
           {/* 永続ディスクと常駐プロセスが要る機能なので、サーバーレスに載せた
               ときは節ごと出さない(lib/features.ts) */}
           {exportsEnabled && <ExportJobsPanel />}
@@ -2443,9 +2471,17 @@ export default function AdminView({
           )}
 
           {isAdmin && (
-            <div>
-              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+            <details>
+              {/* summaryにdisplay:flexを掛けると開閉の三角が消えるので、既定の表示のまま
+                  「?」を後ろに並べる。「?」を押しただけで開閉しないよう、
+                  クリックはこのspanで止める(HelpTipの吹き出しと背面の当たり判定も
+                  この中に描かれるので、吹き出しを触っても畳まれない) */}
+              <summary className="cursor-pointer select-none text-base font-bold">
                 別のスポット種別の管理
+                <span
+                  className="ml-1.5 inline-flex align-middle"
+                  onClick={(e) => e.stopPropagation()}
+                >
                 <HelpTip>
                   スポット種別の一覧。種別名をクリックするとそのページに移動する
                   (公開/非公開の切り替えは、移動先の「スポット種別の設定」から行う)。
@@ -2455,8 +2491,9 @@ export default function AdminView({
                   (地図の種別切り替えメニュー・アカウント画面など、
                   一覧に出るところ全部の並びが変わる)。
                 </HelpTip>
-              </h2>
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                </span>
+              </summary>
+              <section className="mt-2 rounded-xl border border-gray-200 bg-white p-3">
                 {typeMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
                     {typeMessage}
@@ -2585,7 +2622,7 @@ export default function AdminView({
                   </label>
                 </div>
               </section>
-            </div>
+            </details>
           )}
 
           {isAdmin && (
