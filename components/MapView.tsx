@@ -2280,23 +2280,33 @@ export default function MapView({
 
     // iOS 13+ はユーザー操作を起点にした明示許可が要る。現在地ボタンのタップを起点にする。
     // ボタンは onAdd 内で非同期生成されるため、コンテナへのイベント委譲(キャプチャ)で拾う。
-    const orientationApi = DeviceOrientationEvent as unknown as {
-      requestPermission?: () => Promise<"granted" | "denied">;
-    };
+    // **windowから引いて存在を確かめる。** WebKitは方位センサーのAPIを安全な
+    // コンテキスト(HTTPSかlocalhost)でしか定義しないため、LAN内のhttp://で開いた
+    // 実機では素の`DeviceOrientationEvent`参照がReferenceErrorになり、
+    // ("Can't find variable: DeviceOrientationEvent")地図の初期化ごと落ちる
+    const orientationApi = (
+      window as unknown as {
+        DeviceOrientationEvent?: {
+          requestPermission?: () => Promise<"granted" | "denied">;
+        };
+      }
+    ).DeviceOrientationEvent;
     const handleContainerClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target?.closest(".maplibregl-ctrl-geolocate")) return;
       orientationApi
-        .requestPermission?.()
+        ?.requestPermission?.()
         .then((res) => {
           if (res === "granted") startOrientation();
         })
         .catch(() => {});
     };
-    if (typeof orientationApi.requestPermission === "function") {
+    if (typeof orientationApi?.requestPermission === "function") {
       map.getContainer().addEventListener("click", handleContainerClick, true);
     } else {
-      // 許可が不要な環境(Android / PC)は初めから購読しておく
+      // 許可が不要な環境(Android / PC)は初めから購読しておく。
+      // APIが無い環境(http://で開いたiOSなど)でも購読自体は無害
+      // (イベントが来ないだけ)なので、分岐を増やさずそのまま通す
       startOrientation();
     }
 
