@@ -7,6 +7,15 @@ const nextConfig: NextConfig = {
   },
   // 本番用Dockerイメージ(Dockerfileのprodステージ)を最小構成にするため
   output: "standalone",
+  // 開発サーバをLAN内の別端末(スマホ実機での確認など)からホスト名・IPで開くと、
+  // Next.jsは/_next配下の開発用リソース(JS・CSS)をクロスオリジンとして403で拒み、
+  // 画面が真っ白になる。許可するホストは環境ごとに違うため、リポジトリに焼き込まず
+  // 環境変数ALLOWED_DEV_ORIGINS(カンマ区切り。ポートは書かない)から読む。
+  // 本番(next start)には影響しない設定
+  allowedDevOrigins: (process.env.ALLOWED_DEV_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   // Postgresの実データ(data)と訪問写真(photos)はプロジェクト直下にbind
   // マウントされるため、既定のままだとDB書き込みのたびにnext devのファイル監視が
   // 再コンパイルを走らせてしまう(再コンパイル中は処理中のAPIリクエストが壊れる
