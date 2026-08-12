@@ -21,15 +21,24 @@ Docker で動かす場合はこの文書は不要 —— [README](../README.md) 
    このとき決める **Database Password** は後で使うので控える
 2. **Storage** で写真用のバケットを作る。名前は任意(既定は `visit-photos`)。
    **Public は off(非公開)にする** —— アプリは公開URLを使わず、必ず認証付きの
-   配信ルート(`/api/photos/...`)から service_role キーで読み出す
-3. **Project Settings → API Keys** から次の2つを控える
-   - `Project URL`(`https://xxxx.supabase.co`)
-   - **Secret key**(`sb_secret_...`。**サーバー専用**。`NEXT_PUBLIC_` を付けて渡さない)
+   配信ルート(`/api/photos/...`)からサーバー側のキーで読み出す
+3. **Project Settings → API Keys** から **Secret key**(`sb_secret_...`)を控える。
+   **サーバー専用**なので `NEXT_PUBLIC_` を付けて渡さないこと。
 
    旧世代の `anon` / `service_role`(JWT)は **Legacy API Keys** タブにあり、
    2026年末に廃止予定。**新規プロジェクトでは発行されない**ので、
    `service_role` が見当たらなくても正しい —— Secret key を使う
-4. **Connect** から接続文字列を2種類控える
+4. **Project URL**(`https://<project-ref>.supabase.co`)を控える。
+
+   **ダッシュボードの置き場は動くので、`project-ref` から組み立てるのが確実。**
+   `project-ref` はダッシュボードのURL `.../dashboard/project/●●●●` の `●●●●` で、
+   下の接続文字列のユーザー名 `postgres.●●●●` の後ろと同じ文字列。
+   画面で探すなら **Integrations → Data API**(Settings → API ではない)。
+
+   なお**このアプリが叩くのは Storage の `/storage/v1/object/...` だけ**で、
+   Data API(`/rest/v1/`)は使わない。プロジェクト作成時に Data API を無効にしていても
+   URLは同じで問題なく動く(有効化は不要)
+5. **Connect** から接続文字列を2種類控える
    - **Transaction pooler**(ポート `6543`)… アプリが使う。サーバーレス向け
    - **Session pooler**(ポート `5432`)… マイグレーションで使う
 
@@ -68,7 +77,7 @@ sh scripts/migrate-remote.sh
 | `SESSION_SECRET` | `openssl rand -base64 32` の出力 | セッションCookieの署名鍵 |
 | `PUBLIC_BASE_URL` | `https://<プロジェクト名>.vercel.app` | 外向きURL。初回デプロイでURLが決まってから設定する |
 | `PHOTO_STORAGE` | `supabase` | 写真の保存先。永続ディスクが無いのでローカルFSは使えない |
-| `SUPABASE_URL` | `https://xxxx.supabase.co` | |
+| `SUPABASE_URL` | `https://<project-ref>.supabase.co`(`project-ref` は `DATABASE_URL` のユーザー名 `postgres.` の後ろと同じ) | |
 | `SUPABASE_SECRET_KEY` | `sb_secret_...` | **サーバー専用**。`NEXT_PUBLIC_` を付けない(レガシーの `service_role` しか無い既存プロジェクトは `SUPABASE_SERVICE_ROLE_KEY` でも可) |
 | `SUPABASE_STORAGE_BUCKET` | `visit-photos` | 1で作ったバケット名 |
 | `NEXT_PUBLIC_EXPORTS_ENABLED` | `false` | 訪問記録エクスポートを畳む(サーバーレスでは成立しないため) |
