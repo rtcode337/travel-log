@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import { deleteVisitPhotos, saveVisitPhoto } from "@/lib/photos";
+import { MAX_PHOTOS_PER_VISIT } from "@/lib/visitPhoto";
+import { PHOTOS_DISABLED_MESSAGE, photosEnabled } from "@/lib/features";
 import type { Visit } from "@/lib/types";
+
+// 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
+// (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
+export const maxDuration = 60;
 
 export async function PATCH(
   request: Request,
@@ -36,11 +42,22 @@ export async function PATCH(
   ) {
     return NextResponse.json({ error: "invalid photos" }, { status: 400 });
   }
-  const MAX_PHOTOS_PER_VISIT = 10;
   if (inputPhotos.length > MAX_PHOTOS_PER_VISIT) {
     return NextResponse.json(
       { error: `写真は1件の訪問記録につき${MAX_PHOTOS_PER_VISIT}枚までです。` },
       { status: 400 }
+    );
+  }
+
+  // 写真を畳んだ環境では**追加**だけを拒む(data URL=新規)。既存の相対パスは
+  // そのまま通す —— 記録済みの写真を残す・外す操作は引き続きできてよい
+  if (
+    !photosEnabled &&
+    (inputPhotos as string[]).some((p) => p.startsWith("data:"))
+  ) {
+    return NextResponse.json(
+      { error: PHOTOS_DISABLED_MESSAGE },
+      { status: 503 }
     );
   }
 

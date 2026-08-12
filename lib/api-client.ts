@@ -98,6 +98,10 @@ export const api = {
     logout: () => request("/api/auth/logout", { method: "POST" }),
     me: () => request<{ id: string; role: Role; email: string }>("/api/auth/me"),
   },
+  account: {
+    /** 退会(自分のアカウントと個人データの削除)。成功するとセッションも切れる */
+    remove: () => request<{ ok: boolean }>("/api/account", { method: "DELETE" }),
+  },
   spots: {
     list: (status: string | undefined, opts: { type: string }) => {
       const qs = new URLSearchParams();

@@ -74,11 +74,25 @@ export async function fetchGoogleProfile(
 }
 
 /**
- * 自由サインアップは提供しない方針(新規アカウントは管理者が /admin から作成する)のため、
- * Googleログインで新規ユーザーは作らない。行うのは
- * 「メールアドレスが一致する既存アカウントへの google_id の紐付け」か、
- * 「ユーザーが1人もいない初回セットアップ時に限り最初のadminアカウントを作成」のみ
- * (setup APIのパスワード登録と同じ制約)。
+ * Googleログインで新規アカウントを自動作成するか(既定は作らない)。
+ *
+ * **既定は従来どおり「自由サインアップなし」**(新規アカウントは管理者が /admin から
+ * 作成する)。`GOOGLE_AUTO_SIGNUP=true` を設定した環境でだけ、Googleでログインした人を
+ * 一般ユーザー(role='user')として自動登録する。
+ *
+ * **有効にすると、URLを知っていてGoogleアカウントを持つ人は誰でも入れる。**
+ * 自分だけ・身内だけで使うつもりのインスタンスで有効にしないこと。
+ */
+export function isGoogleAutoSignupEnabled(): boolean {
+  return process.env.GOOGLE_AUTO_SIGNUP === "true";
+}
+
+/**
+ * Googleプロフィールからユーザーを解決する。行うのは
+ * 「google_id での照合」「メールアドレスが一致する既存アカウントへの google_id の紐付け」
+ * 「ユーザーが1人もいない初回セットアップ時に限り最初のadminアカウントを作成」
+ * (setup APIのパスワード登録と同じ制約)の3つ。
+ * これらに当たらない場合、`GOOGLE_AUTO_SIGNUP=true` のときだけ一般ユーザーを新規作成する。
  */
 export async function findOrCreateGoogleUser(
   profile: GoogleProfile
@@ -101,12 +115,34 @@ export async function findOrCreateGoogleUser(
     return byEmail.rows[0];
   }
 
-  const inserted = await query<{ id: string }>(
+  // 初回セットアップ(ユーザーが1人もいない)なら最初のadminを作る。
+  // 条件をSQL側に置いてあるのは、同時に2人がログインしても片方しかadminに
+  // ならないようにするため(not existsが1文の中で評価される)
+  const firstAdmin = await query<{ id: string }>(
     `insert into users (email, google_id, role)
      select $1, $2, 'admin'
      where not exists (select 1 from users)
      returning id`,
     [profile.email, profile.sub]
   );
-  return inserted.rows[0] ?? null;
+  if (firstAdmin.rows[0]) return firstAdmin.rows[0];
+
+  if (!isGoogleAutoSignupEnabled()) return null;
+
+  // 自動登録は常に一般ユーザー。emailの一意制約に当たった場合(上のbyEmailの
+  // 直後に同じアドレスで作られた等)は何も作らず、次の照合に任せる
+  const inserted = await query<{ id: string }>(
+    `insert into users (email, google_id, role)
+     values ($1, $2, 'user')
+     on conflict (email) do nothing
+     returning id`,
+    [profile.email, profile.sub]
+  );
+  if (inserted.rows[0]) return inserted.rows[0];
+
+  const retry = await query<{ id: string }>(
+    "select id from users where email = $1",
+    [profile.email]
+  );
+  return retry.rows[0] ?? null;
 }

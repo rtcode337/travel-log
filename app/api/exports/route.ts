@@ -3,6 +3,10 @@ import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { buildVisitExportZip } from "@/lib/visitExport";
 import { deleteExportZip, saveExportZip } from "@/lib/exportStorage";
+import {
+  EXPORTS_DISABLED_MESSAGE,
+  exportsEnabled,
+} from "@/lib/features";
 import type { ExportJob } from "@/lib/types";
 
 /** 一覧・作成の返却に使う共通のSELECT(対象ユーザーのメールアドレスも返す) */
@@ -22,6 +26,12 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (!exportsEnabled) {
+    return NextResponse.json(
+      { error: EXPORTS_DISABLED_MESSAGE },
+      { status: 503 }
+    );
   }
 
   const { rows } =
@@ -51,6 +61,12 @@ export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (!exportsEnabled) {
+    return NextResponse.json(
+      { error: EXPORTS_DISABLED_MESSAGE },
+      { status: 503 }
+    );
   }
   // 他人の訪問記録と写真がまるごと入るため、管理者だけに限る
   // (spot_admin・moderatorはスポットの管理権限であって、記録を見る権限ではない)

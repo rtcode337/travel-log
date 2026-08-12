@@ -7,6 +7,7 @@ import HelpTip from "@/components/HelpTip";
 import ExportJobsPanel from "@/components/ExportJobsPanel";
 import { api } from "@/lib/api-client";
 import { buildCsv, parseCsv } from "@/lib/csv";
+import { exportsEnabled } from "@/lib/features";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import { parseRank, type Rank } from "@/lib/rank";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
@@ -1838,7 +1839,9 @@ export default function AdminView({
               </p>
             </form>
           </section>
-          <ExportJobsPanel />
+          {/* 永続ディスクと常駐プロセスが要る機能なので、サーバーレスに載せた
+              ときは節ごと出さない(lib/features.ts) */}
+          {exportsEnabled && <ExportJobsPanel />}
           </div>
         )}
 

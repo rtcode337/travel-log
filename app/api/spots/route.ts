@@ -14,6 +14,10 @@ import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import { parseRank, RANKS } from "@/lib/rank";
 
+// 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
+// (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
+export const maxDuration = 60;
+
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
@@ -64,9 +68,27 @@ export async function GET(request: Request) {
   // ページングする
   const pageParam = searchParams.get("page");
   if (!pageParam) {
+    // 公開スポットのダウンロードは数万件・数MBになるため、`limit`/`offset`で
+    // 分けて取れるようにしてある(**レスポンスボディに上限のあるホスト向け** ——
+    // Vercelのサーバーレス関数は4.5MBを超えると関数側でエラーになる)。
+    // 指定が無ければ全件を1回で返す(自分の非公開スポット取得・管理画面の
+    // CSV差分など、件数が知れている呼び出し元はこちらを使う)
+    const limit = Math.max(0, Number(searchParams.get("limit")) || 0);
+    const offset = Math.max(0, Number(searchParams.get("offset")) || 0);
+    // 並びに`id`を足して全順序にする —— region・nameだけでは同値の行の順が
+    // 実行ごとに変わりうるため、`offset`で分けて取ると重複・取りこぼしが出る
+    const order = "order by region, name, id";
+    if (!limit) {
+      const { rows } = await query<Spot>(
+        `select * from spots where ${baseConditions.join(" and ")} ${order}`,
+        params
+      );
+      return NextResponse.json({ data: rows });
+    }
     const { rows } = await query<Spot>(
-      `select * from spots where ${baseConditions.join(" and ")} order by region, name`,
-      params
+      `select * from spots where ${baseConditions.join(" and ")} ${order}
+       limit $${params.length + 1} offset $${params.length + 2}`,
+      [...params, limit, offset]
     );
     return NextResponse.json({ data: rows });
   }

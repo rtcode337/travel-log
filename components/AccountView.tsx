@@ -33,6 +33,26 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
     router.refresh();
   };
 
+  // 退会は取り消せないので、メールアドレスを打ち直させてから実行する
+  // (confirm()1つだと誤タップで消える)
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawInput, setWithdrawInput] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+
+  const handleWithdraw = async () => {
+    setWithdrawing(true);
+    setWithdrawError(null);
+    const { error } = await api.account.remove();
+    setWithdrawing(false);
+    if (error) {
+      setWithdrawError(error.message);
+      return;
+    }
+    router.push("/login");
+    router.refresh();
+  };
+
   return (
     <main className="mx-auto max-w-lg p-4">
       <h1 className="mb-4 text-lg font-bold">アカウント</h1>
@@ -81,6 +101,62 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
           )}
         </section>
       )}
+      <section className="mb-4 rounded-xl border border-red-200 bg-white p-4">
+        <h2 className="text-sm font-bold text-red-700">退会</h2>
+        <p className="mt-0.5 text-xs text-gray-500">
+          アカウントと、訪問記録・写真・訪問予定・口コミ・非公開スポットを削除します。
+          <strong>取り消せません。</strong>
+          <br />
+          あなたが登録した公開スポットは、登録者の情報だけを外して残ります
+          (他のユーザーの地図から消さないため)。
+        </p>
+        {!withdrawOpen ? (
+          <button
+            type="button"
+            onClick={() => setWithdrawOpen(true)}
+            className="mt-3 rounded-lg border border-red-300 px-3 py-1.5 text-sm text-red-700"
+          >
+            退会する
+          </button>
+        ) : (
+          <div className="mt-3">
+            <label className="block text-xs text-gray-600">
+              確認のため、ご自身のメールアドレス({email})を入力してください。
+            </label>
+            <input
+              type="email"
+              value={withdrawInput}
+              onChange={(e) => setWithdrawInput(e.target.value)}
+              autoComplete="off"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+            {withdrawError && (
+              <p className="mt-1 text-xs text-red-600">{withdrawError}</p>
+            )}
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setWithdrawOpen(false);
+                  setWithdrawInput("");
+                  setWithdrawError(null);
+                }}
+                className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+              >
+                やめる
+              </button>
+              <button
+                type="button"
+                onClick={handleWithdraw}
+                disabled={withdrawing || !email || withdrawInput.trim() !== email}
+                className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {withdrawing ? "削除中…" : "完全に削除する"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
     </main>
   );
 }

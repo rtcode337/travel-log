@@ -50,7 +50,6 @@ import { formatSpotMeta } from "@/lib/spotMeta";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import {
   downloadSpotCacheFor,
-  formatBytes,
   formatDownloadedAt,
   useSpotCache,
   type DownloadProgress,

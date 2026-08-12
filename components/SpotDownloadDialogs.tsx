@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  formatBytes,
-  type DownloadProgress,
-  type SpotCache,
-} from "@/lib/useSpotCache";
+import { type DownloadProgress, type SpotCache } from "@/lib/useSpotCache";
 
 /**
  * ダウンロード中の進捗ダイアログ。NavBar(z-40)や確認ダイアログ(z-[70])より上に
@@ -20,8 +16,8 @@ export function DownloadProgressDialog({
   onCancel: () => void;
 }) {
   const percent =
-    progress?.totalBytes != null
-      ? Math.min(100, Math.round((progress.loadedBytes / progress.totalBytes) * 100))
+    progress?.totalCount
+      ? Math.min(100, Math.round((progress.loadedCount / progress.totalCount) * 100))
       : null;
 
   return (
@@ -42,9 +38,9 @@ export function DownloadProgressDialog({
         </div>
         <p className="mt-2 text-xs text-gray-500">
           {progress
-            ? percent != null && progress.totalBytes != null
-              ? `${formatBytes(progress.loadedBytes)} / ${formatBytes(progress.totalBytes)}(${percent}%)`
-              : `${formatBytes(progress.loadedBytes)} 受信済み`
+            ? percent != null && progress.totalCount != null
+              ? `${progress.loadedCount.toLocaleString()} / ${progress.totalCount.toLocaleString()}件(${percent}%)`
+              : `${progress.loadedCount.toLocaleString()}件 受信済み`
             : "接続中…"}
         </p>
         <p className="mt-1 text-xs text-gray-400">
@@ -109,11 +105,11 @@ export default function SpotDownloadDialogs({ cache }: { cache: SpotCache }) {
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-4">
             <p className="text-sm text-gray-700">
-              {formatBytes(cache.manualConfirm.sizeBytes)}
-              の更新公開スポットデータをダウンロードします。よろしいですか?
+              公開スポット{cache.manualConfirm.spotCount.toLocaleString()}
+              件をダウンロードします。よろしいですか?
             </p>
             <p className="mt-1 text-xs text-gray-400">
-              (実際に端末に保存されるサイズはこれより小さくなります)
+              (件数が多いと通信量と時間がかかります)
             </p>
             <div className="mt-4 flex gap-2">
               <button
