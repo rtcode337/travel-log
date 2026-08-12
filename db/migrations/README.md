@@ -39,10 +39,39 @@ docker compose logs init
   適用済みのDBに再度流しても害がないようにする。新規DB(最初から最新スキーマ)に対しても
   一度は実行されるため、そこで壊れないことが必要
 
+## 新規DBでも必ず一度は流れる
+
+**マイグレーションは「旧スキーマのDB」だけでなく「`01_schema.sql` で作った新規DB」にも
+一度は当たる。** だから冪等なだけでは足りず、**現在のスキーマに対して無害である**ことまで
+要る。実際に踏んだ例:
+
+- `001` の `alter table spots rename column rank to series` は「rank 列がある」ことだけを
+  条件にしていた。`010` でランク機能を入れ直して `spots.rank` が復活したため、新規DBでも
+  改名しようとして `series already exists` で落ち、**新規セットアップが一切通らなくなっていた**
+  (`docker compose up` も `scripts/migrate-remote.sh` も)。「series がまだ無い」ことまで
+  条件に足して直した。索引の `spots_rank_idx → spots_series_idx` も同じ理由で落ちていた
+
+**古い移行スクリプトが前提にしていた形は、あとから来たスクリプトが壊すことがある。**
+列や索引を「戻す」変更を入れるときは、その名前を触っている過去のスクリプトを grep すること。
+
 ## 検証
 
-新しいスクリプトを書いたら、**旧スキーマのダンプに当てた結果が新規作成したDBと一致すること**を
-確認する。使い捨てDBを2つ作って突き合わせるのが手軽。
+新しいスクリプトを書いたら、次の2つを確認する。
+
+**1. 新規DBに当たっても壊れないこと**(上記「新規DBでも必ず一度は流れる」)。
+使い捨てDBを作って `init` を流すだけで分かる。
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres \
+  -c "drop database if exists init_check" -c "create database init_check"
+docker compose -f docker-compose.dev.yml build init   # 移行スクリプトはイメージに焼き込まれる
+docker compose -f docker-compose.dev.yml run --rm -e PGDATABASE=init_check init
+```
+
+あわせて `sh scripts/bootstrap-sql_test.sh` を流す(Supabase の SQL Editor へ貼る用の
+一括SQLが、`init` と同じ状態を作るかの突き合わせ)。
+
+**2. 旧スキーマのダンプに当てた結果が新規作成したDBと一致すること。**使い捨てDBを2つ作って突き合わせるのが手軽。
 
 ```bash
 # 1. 旧スキーマのダンプを復元したDBにマイグレーションを当てる

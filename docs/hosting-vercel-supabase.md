@@ -44,17 +44,45 @@ Docker で動かす場合はこの文書は不要 —— [README](../README.md) 
 
 ## 2. スキーマを流す
 
-compose の `init` サービスと同じイメージを、接続先だけ差し替えて1回走らせる。
-適用の中身は `db/entrypoint.sh` そのままなので、Docker 運用と当たる SQL がずれない。
+**方法は2つある。手元に接続情報を置きたくないなら A、Docker があるなら B。**
+
+### A. Supabase の SQL Editor に貼る(接続情報を手元に置かない)
+
+ブラウザで完結する。ログイン済みのダッシュボードから実行するので、
+**DBのパスワードもキーもこの機械に置かずに済む**。
+
+```bash
+sh scripts/bootstrap-sql.sh > /tmp/bootstrap.sql
+```
+
+出てきたSQLを **Supabase → SQL Editor** に貼って実行する。生成されるSQLに接続情報は
+含まれない(スキーマ本体と全マイグレーション、そして `schema_migrations` への記録だけ)。
+
+**`schema_migrations` への記録まで入っている**ので、あとから B を使っても
+「適用済み」と正しく判定される。この一致は `scripts/bootstrap-sql_test.sh` が
+検証している(列・索引・トリガー・適用記録を init サービスの結果と突き合わせる)。
+
+**空のDBに1回だけ**使うこと。途中から差分だけを当てる用途は想定していない。
+
+### B. compose の init と同じイメージを走らせる
 
 ```bash
 cp .env.remote.example .env.remote   # 値を入れる(Session pooler の情報)
 sh scripts/migrate-remote.sh
 ```
 
-`db-init: migrations done (applied=12, skipped=0)` のように出れば完了。
-**スキーマを変えたら、Vercel へデプロイする前に同じコマンドをもう一度流すこと**
-(Docker 運用と違い、`init` が自動では走らない)。
+`db-init: migrations done (applied=13, skipped=0)` のように出れば完了。
+**接続情報を書いた `.env.remote` がこの機械に残る**点に注意(gitignore 済みだが、
+共用の機械や、他人が触る環境では A のほうがよい)。
+
+**マイグレーションだけは 5432(Session pooler)を使う** —— advisory lock を張ったまま
+複数文のDDLを流すので、Transaction pooler では通らない。
+
+### スキーマを変えたとき
+
+**Vercel へデプロイする前にもう一度流すこと**(Docker運用と違い `init` が自動では走らない)。
+B ならそのまま再実行すればよい。A は初回投入用なので、差分を当てるなら B を使うか、
+追加したマイグレーションのSQLと `schema_migrations` への insert を手で貼る。
 
 ## 3. Vercel にデプロイする
 
