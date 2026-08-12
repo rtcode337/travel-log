@@ -872,8 +872,15 @@ export default function AdminView({
 
       // key列はDB側で種別内一意のため、CSV内の重複だけは事前に検出して中止する
       // (どちらの行を正とすべきか決められないため)
+      // name+lat+lngのフォールバックは**keyを持たない既存行だけ**を対象にする。
+      // keyを持つ行まで拾うと、同じ地点に置いた複数のスポット(同名・同座標でkeyだけ
+      // 違う行。1つの場所が複数のシリーズに登場する種別で使う)が既存行に吸われ、
+      // 上書きになって新しい行が入らない。keyを持つ行はkey一致だけで突き合わせる
+      // (keyは一度割り当てたら変えない運用のため、これで取りこぼさない)
       const existingByDiffKey = new Map(
-        existingSpots.map((s) => [spotDiffKey(s.name, s.lat, s.lng), s])
+        existingSpots
+          .filter((s) => !s.key)
+          .map((s) => [spotDiffKey(s.name, s.lat, s.lng), s])
       );
       const existingByKey = new Map(
         existingSpots.filter((s) => s.key).map((s) => [s.key as string, s])
@@ -894,7 +901,8 @@ export default function AdminView({
       }
 
       // 差分更新: 既存行との同一判定はkey一致を最優先し(改名・座標修正もCSVから
-      // 反映できるように)、keyで見つからなければname+lat+lngの完全一致で突き合わせる。
+      // 反映できるように)、keyで見つからなければ**keyを持たない既存行に限り**
+      // name+lat+lngの完全一致で突き合わせる(keyを振る前に取り込んだ行を拾うための道)。
       // 一致した既存行は、内容がCSVと異なればCSVの内容で上書きし、同一ならスキップする
       // (同じCSVを何度アップロードしても2回目以降は何も起きない)。ただし公開以外の
       // 既存行(他ユーザーの承認待ち等。編集権限が投稿者本人に限られる)は上書きしない。
@@ -919,19 +927,29 @@ export default function AdminView({
         // 手動追加(manual)の行がCSVと一致した=travel-log-dataへ還元済みなので、
         // 内容が同一でもPATCHしてorigin='csv'に倒す(次回の還元用エクスポートから外す)
         spot.origin !== "csv";
+      // フォールバックで既に使った既存行(keyなし)は、CSVの別の行がもう一度
+      // 拾わないようにする。同じ地点の複数行のうち2行目以降が同じ既存行を上書きし、
+      // 最後の1行だけが残るのを防ぐ
+      const usedExistingIds = new Set<string>();
       for (const record of records) {
         const diffKey = spotDiffKey(record.name, record.lat, record.lng);
+        const byDiffKey = existingByDiffKey.get(diffKey);
         const existing =
           (record.key ? existingByKey.get(record.key) : undefined) ??
-          existingByDiffKey.get(diffKey);
+          (byDiffKey && !usedExistingIds.has(byDiffKey.id) ? byDiffKey : undefined);
         if (existing) {
+          usedExistingIds.add(existing.id);
           if (existing.status !== "published") untouchableCount++;
           else if (isChanged(existing, record)) updates.push({ spot: existing, record });
           else unchangedCount++;
           continue;
         }
-        if (seenKeys.has(diffKey)) continue; // CSV内でname+lat+lngが重複している行
-        seenKeys.add(diffKey);
+        // CSV内でname+lat+lngが重複している行。**keyを持つ行は別スポットとして通す**
+        // (同じ地点に複数のスポットを置くための行。keyの重複は上で弾いてある)
+        if (!record.key) {
+          if (seenKeys.has(diffKey)) continue;
+          seenKeys.add(diffKey);
+        }
         newRecords.push(record);
       }
 
