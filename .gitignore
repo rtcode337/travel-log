@@ -21,6 +21,10 @@ yarn-error.log*
 .env
 .env*.local
 
+# 外部DBへのマイグレーション用の接続情報(雛形は .env.remote.example)。
+# 本物のホスト名・パスワードが入るのでコミットしない
+/.env.remote
+
 # standalone用composeの実値入りコピー(雛形は docker-compose.standalone.example.yml)。
 # この形式は SESSION_SECRET 等を直書きするので、コピーした側はコミットしない
 # (.env.example と .env の関係と同じ)

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { readPhotoTakenAt } from "@/lib/exif";
 import { visitPhotoSrc } from "@/lib/types";
 import { resizeImageToDataUrl, toDateTimeLocalValue } from "@/lib/visitPhoto";
+import { photosEnabled } from "@/lib/features";
 
 /**
  * 訪問記録の入力欄(訪問日時・写真・メモ)。訪問記録モーダル(VisitFormModal)と、
@@ -121,14 +122,20 @@ export default function VisitFields({
         </p>
       </div>
 
+      {/* 写真を畳んだ環境(lib/features.ts)でも、既に付いている写真は出す
+          —— 畳んだ理由は「これ以上増やさない」であって、記録済みのものを
+          見せない・消せなくする理由は無い。増やす側(選択ボタン)だけを消す */}
+      {(photosEnabled || photos.length > 0) && (
       <div className="border-t border-gray-100 pt-3">
         <label className="mb-1 block text-sm font-medium">写真(非公開)</label>
-        <p className="mb-2 text-xs text-gray-400">
-          自分だけに表示されます。他のユーザーには公開されません。
-          <br />
-          ※ 保存時に縮小・圧縮されます(長辺1280px・JPEG)。キレイに残したい写真は、
-          元のデータを手元に保管しておいてください。
-        </p>
+        {photosEnabled && (
+          <p className="mb-2 text-xs text-gray-400">
+            自分だけに表示されます。他のユーザーには公開されません。
+            <br />
+            ※ 保存時に縮小・圧縮されます(長辺1280px・JPEG)。キレイに残したい写真は、
+            元のデータを手元に保管しておいてください。
+          </p>
+        )}
         {photos.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {photos.map((photo, i) => (
@@ -151,19 +158,26 @@ export default function VisitFields({
             ))}
           </div>
         )}
-        <label className="inline-block cursor-pointer rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600">
-          {processing ? "読み込み中…" : "+ 写真を選択"}
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            disabled={processing}
-            onChange={handlePhotoChange}
-          />
-        </label>
+        {photosEnabled ? (
+          <label className="inline-block cursor-pointer rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600">
+            {processing ? "読み込み中…" : "+ 写真を選択"}
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              disabled={processing}
+              onChange={handlePhotoChange}
+            />
+          </label>
+        ) : (
+          <p className="text-xs text-gray-400">
+            この環境では写真の追加を利用できません。
+          </p>
+        )}
         {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
       </div>
+      )}
 
       <div className="border-t border-gray-100 pt-3">
         <label className="mb-1 block text-sm font-medium">メモ(非公開)</label>

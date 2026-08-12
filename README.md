@@ -87,7 +87,9 @@ http://localhost:7040 を開くと `/login` にリダイレクトされる。初
    - Docker を使わない場合: `.env.local` に同じ2つの値を追加する
 
 既存のメールアカウントと同じメールアドレスでGoogleログインした場合は自動的に紐付く。
-自由なサインアップはできず、管理者が作成したアカウントのみログインできる。
+既定では自由なサインアップはできず、管理者が作成したアカウントのみログインできる
+(`GOOGLE_AUTO_SIGNUP=true`を設定した環境では、Googleでログインした人が一般ユーザーとして
+自動登録される。**設定すると、URLを知っていてGoogleアカウントを持つ人は誰でも入れる**)。
 
 **リバースプロキシ(HTTPS終端)の背後で動かす場合**、アプリが受け取るリクエストは
 プロキシからのプレーンHTTPになる。リダイレクトURIのスキームは`X-Forwarded-Proto` /
@@ -112,6 +114,10 @@ PUBLIC_BASE_URL=https://travel.example.com
 </details>
 
 ### 本番運用
+
+サーバーを持たずに公開する場合は
+[Vercel + Supabase の手順](docs/hosting-vercel-supabase.md)を参照
+(無料プランで動くが、訪問記録のZIPエクスポートだけは使えない)。以下はDocker運用の手順。
 
 `main`へのpushでGitHub Actions(`.github/workflows/docker-publish.yml`)が本番用イメージを
 ビルドして`ghcr.io/rtcode337/travel-log:latest`(+コミットSHAタグ)へ公開する。
@@ -199,7 +205,12 @@ docker compose pull && docker compose up -d
 | モデレーター(moderator) | 地図上でのスポット追加(非公開または承認待ち)。承認待ちキューの閲覧のみ |
 | 一般ユーザー(user) | 閲覧、自分の訪問記録・訪問予定の管理、非公開スポットの追加のみ |
 
-新しいアカウントは`/[type]/admin`の「ユーザー管理」(admin専用)から作成する(自由サインアップ不可)。
+新しいアカウントは`/[type]/admin`の「ユーザー管理」(admin専用)から作成する
+(既定では自由サインアップ不可。`GOOGLE_AUTO_SIGNUP`については「セットアップ」のGoogleログインの節を参照)。
+
+利用者は自分でアカウント画面から**退会**できる。訪問記録・写真・訪問予定・口コミ・非公開スポットは
+消え、登録した公開スポットは登録者の情報だけを外して残る(他のユーザーの地図から消さないため)。
+最後の管理者は退会できない。
 
 `/[type]/map`上で右クリック(モバイルは長押し)するとスポットを追加できる。送信時のstatusは
 ロールにより既定が異なり(`user`は非公開、それ以外は承認待ち)、admin/spot_adminは

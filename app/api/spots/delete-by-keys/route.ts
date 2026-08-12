@@ -3,6 +3,10 @@ import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { deleteVisitPhotos } from "@/lib/photos";
 
+// 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
+// (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
+export const maxDuration = 60;
+
 /** 1リクエストで受け付けるキーの上限(貼り付けミスで巨大な本文が来るのを防ぐ) */
 const MAX_KEYS = 20000;
 

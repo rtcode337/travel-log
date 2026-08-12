@@ -3,6 +3,10 @@ import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { deleteVisitPhotos } from "@/lib/photos";
 
+// 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
+// (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
+export const maxDuration = 60;
+
 async function resolveSpotType(typeKey: string) {
   const { rows } = await query<{ id: string }>(
     "select id from spot_types where key = $1",

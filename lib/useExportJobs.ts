@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
+import { exportsEnabled } from "@/lib/features";
 import type { ExportJob } from "@/lib/types";
 
 /** 生成が長引いている実行中ジョブを失敗扱いにする閾値(コンテナが落ちるとrunningのまま残る) */
@@ -34,6 +35,8 @@ export function useExportJobs() {
   const [jobs, setJobs] = useState<ExportJob[]>([]);
 
   const load = useCallback(async () => {
+    // 機能ごと畳んである環境では取りに行かない(APIは503を返す)
+    if (!exportsEnabled) return;
     const { data } = await api.exports.list();
     setJobs(data ?? []);
   }, []);

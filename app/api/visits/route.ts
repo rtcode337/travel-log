@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import { deleteVisitPhotos, saveVisitPhoto } from "@/lib/photos";
+import { MAX_PHOTOS_PER_VISIT } from "@/lib/visitPhoto";
+import { PHOTOS_DISABLED_MESSAGE, photosEnabled } from "@/lib/features";
 import type { Visit } from "@/lib/types";
+
+// 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
+// (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const userId = await getCurrentUserId();
@@ -43,11 +49,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid photos" }, { status: 400 });
   }
   // ブラウザを経由しない直接APIコールで大量の写真を送りつけるディスク圧迫を防ぐ
-  const MAX_PHOTOS_PER_VISIT = 10;
   if (inputPhotos.length > MAX_PHOTOS_PER_VISIT) {
     return NextResponse.json(
       { error: `写真は1件の訪問記録につき${MAX_PHOTOS_PER_VISIT}枚までです。` },
       { status: 400 }
+    );
+  }
+  // 写真を畳んだ環境では新しい写真を受け取らない(画面側でも入力欄を出さないが、
+  // APIを直接叩けば通ってしまうため両方で塞ぐ。lib/features.ts)
+  if (!photosEnabled && inputPhotos.length > 0) {
+    return NextResponse.json(
+      { error: PHOTOS_DISABLED_MESSAGE },
+      { status: 503 }
     );
   }
   const photoPaths: string[] = [];

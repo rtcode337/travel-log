@@ -25,20 +25,28 @@ export interface SpotCacheEntry {
 /** ダウンロード確認ダイアログを出す理由(未ダウンロード / キャッシュより新しい更新がある) */
 export type SpotDownloadPromptReason = "missing" | "stale";
 
+/**
+ * 公開スポットのダウンロードを何件ずつに分けて取るか。
+ *
+ * **1レスポンスに上限のあるホストでも動くよう、常に分けて取る**(Vercelのサーバーレス
+ * 関数は4.5MBを超えるとエラーになる)。この取得は種別によっては数万件・十数MBになる
+ * (御朱印は約5万件)ので、1回で取る作りだと載せるホストによって動いたり動かなかったり
+ * する。**ホストごとの設定にせず常にこの値で分ける** —— 設定にすると、入れ忘れた環境で
+ * だけ大きい種別が落ちるという踏みにくいバグになる。
+ *
+ * 1行は説明文込みで最大1.5KB程度なので2000件で約3MB。**上限ぎりぎりを狙わない**
+ * (説明文の長い種別を足したときに、その種別だけ落ちるため)。
+ */
+const SPOT_DOWNLOAD_CHUNK = 2000;
+
 const SAVE_ERROR =
   "スポットデータの保存に失敗しました。次に開いたときは再ダウンロードが必要です。";
 const DELETE_ERROR = "スポットデータの削除に失敗しました。";
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
-}
-
 export interface DownloadProgress {
-  loadedBytes: number;
-  /** Content-Lengthから割合を出せる場合のみ(圧縮転送時は受信バイト数と比較できないためnull) */
-  totalBytes: number | null;
+  loadedCount: number;
+  /** 全体の件数(取得に失敗した場合のみnull=割合を出さない) */
+  totalCount: number | null;
 }
 
 export function formatDownloadedAt(iso: string): string {
@@ -91,49 +99,59 @@ function toEntry(stored: StoredSpotCache): SpotCacheEntry {
   };
 }
 
-// gzip等の圧縮転送ではContent-Lengthは圧縮後サイズで、展開後バイト数とは
-// 比較できないため、その場合はサイズ不明(=事前確認できない)扱いにする
-function knownContentLength(response: Response): number | null {
-  const contentLength = Number(response.headers.get("content-length"));
-  return contentLength > 0 && !response.headers.get("content-encoding")
-    ? contentLength
-    : null;
+/**
+ * 公開スポットの件数だけを軽く取る(鮮度チェックと同じエンドポイント)。
+ * ダウンロード前の確認ダイアログと、進捗の分母に使う。取れなければnull
+ * (確認は省いてそのまま取りに行き、進捗は割合を出さずに件数だけ出す)。
+ */
+async function fetchPublishedSpotCount(typeKey: string): Promise<number | null> {
+  try {
+    const qs = new URLSearchParams({ type: typeKey });
+    const res = await fetch(`/api/spots/last-updated?${qs.toString()}`);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { data?: { spotCount?: number } };
+    return typeof body.data?.spotCount === "number" ? body.data.spotCount : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
- * レスポンスボディを、受信バイト数をonProgressへ通知しながら読み切ってSpot[]に
- * パースする(フックのreadBodyと、別種別用downloadSpotCacheForの共通部品)。
- * api-clientではなくfetchのReadableStreamを直接読む(レスポンスが大きく数MBに
- * なりうるため)。失敗時はthrowする(中断によるthrowをエラー扱いにするかどうかは
- * 呼び出し側がsignal.abortedで判断する)
+ * 公開スポットを`limit`/`offset`でSPOT_DOWNLOAD_CHUNK件ずつ取り、1つの配列にまとめる。
+ * 進捗は受信済みの件数で出す(バイト数ではない —— 分けて取る以上、全体のバイト数は
+ * 最後まで読まないと分からないため。件数なら分母を先に1回で聞ける)。
+ * 失敗時はthrowする(中断によるthrowをエラー扱いにするかは呼び出し側がsignal.abortedで判断する)
  */
-async function readSpotsBody(
-  response: Response,
+async function fetchPublishedSpots(
+  typeKey: string,
+  controller: AbortController,
+  totalCount: number | null,
   onProgress: (p: DownloadProgress) => void
 ): Promise<Spot[]> {
-  const totalBytes = knownContentLength(response);
-  onProgress({ loadedBytes: 0, totalBytes });
-  let text: string;
-  if (response.body) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const chunks: string[] = [];
-    let loadedBytes = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      loadedBytes += value.byteLength;
-      chunks.push(decoder.decode(value, { stream: true }));
-      onProgress({ loadedBytes, totalBytes });
+  const all: Spot[] = [];
+  onProgress({ loadedCount: 0, totalCount });
+  for (let offset = 0; ; offset += SPOT_DOWNLOAD_CHUNK) {
+    const qs = new URLSearchParams({
+      status: "published",
+      type: typeKey,
+      limit: String(SPOT_DOWNLOAD_CHUNK),
+      offset: String(offset),
+    });
+    const res = await fetch(`/api/spots?${qs.toString()}`, {
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error ?? res.statusText);
     }
-    chunks.push(decoder.decode());
-    text = chunks.join("");
-  } else {
-    text = await response.text();
+    const chunk = (await res.json()).data as Spot[] | undefined;
+    if (!chunk) throw new Error("取得に失敗しました");
+    all.push(...chunk);
+    onProgress({ loadedCount: all.length, totalCount });
+    // 返った件数がlimit未満なら最後のチャンク(ちょうど割り切れる場合は
+    // 次が0件で返って終わる)
+    if (chunk.length < SPOT_DOWNLOAD_CHUNK) return all;
   }
-  const data = (JSON.parse(text) as { data?: Spot[] }).data;
-  if (!data) throw new Error("取得に失敗しました");
-  return data;
 }
 
 /**
@@ -151,15 +169,8 @@ export async function downloadSpotCacheFor(
 ): Promise<SpotCacheEntry | null> {
   let spots: Spot[];
   try {
-    const qs = new URLSearchParams({ status: "published", type: typeKey });
-    const res = await fetch(`/api/spots?${qs.toString()}`, {
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.error ?? res.statusText);
-    }
-    spots = await readSpotsBody(res, onProgress);
+    const totalCount = await fetchPublishedSpotCount(typeKey);
+    spots = await fetchPublishedSpots(typeKey, controller, totalCount, onProgress);
   } catch (err) {
     if (controller.signal.aborted) return null;
     throw err;
@@ -197,13 +208,11 @@ export function useSpotCache(
   const [ready, setReady] = useState(false);
   const [downloadPrompt, setDownloadPrompt] =
     useState<SpotDownloadPromptReason | null>(null);
-  // ダウンロード本体を読む前に、サイズが分かった時点で見せる確認ダイアログ
-  // (sizeBytesはContent-Lengthそのもの=これから受信する生JSONのバイト数。
-  // 実際にIndexedDBへ保存するのは間引き後のデータのため、保存サイズはこれより小さくなる)
-  const [manualConfirm, setManualConfirm] = useState<{ sizeBytes: number } | null>(
+  // ダウンロード本体を取りに行く前に、件数が分かった時点で見せる確認ダイアログ
+  const [manualConfirm, setManualConfirm] = useState<{ spotCount: number } | null>(
     null
   );
-  // 手動ダウンロードのヘッダー確認中(まだ本体は読んでいない)。この間はまだ
+  // 手動ダウンロードの件数確認中(まだ本体は取っていない)。この間はまだ
   // downloading=falseなので、全画面の進捗ダイアログは出さずボタン側だけ待機表示にする
   const [checkingSize, setCheckingSize] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -211,17 +220,14 @@ export function useSpotCache(
   const [error, setError] = useState<string | null>(null);
   const autoPromptedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
-  // manualConfirm表示中、ヘッダーだけ受信済みでまだ読んでいないレスポンスを保持する
-  const pendingResponseRef = useRef<
-    { response: Response; controller: AbortController } | null
-  >(null);
+  // manualConfirm表示中、確認ダイアログに出している件数(同意されたら進捗の分母に使う)
+  const pendingCountRef = useRef<number | null>(null);
 
   // アンマウント時(ダイアログごと画面が消えるページ遷移等)は進行中・保留中の
   // ダウンロードを打ち切る
   useEffect(
     () => () => {
       abortRef.current?.abort();
-      pendingResponseRef.current?.controller.abort();
     },
     []
   );
@@ -294,45 +300,19 @@ export function useSpotCache(
   );
 
   /**
-   * リクエストを送り、レスポンスのヘッダーまで受け取った時点で返す(ボディはまだ読まない)。
-   * ここでContent-Lengthが分かれば、ボディを読み始める前にサイズを確認できる。
-   * 失敗時はerrorをセットしてnullを返す。
+   * 公開スポットを分割取得する(進捗ダイアログにその都度件数を出す)。
+   * キャンセル時はエラー扱いにせずnullを返す。`totalCount`は進捗の分母で、
+   * 確認ダイアログで既に件数を聞いてある場合はその値を渡して二度聞きを避ける。
    */
-  const openFetch = useCallback(async (): Promise<
-    { response: Response; controller: AbortController } | null
-  > => {
-    const controller = new AbortController();
-    setError(null);
-    try {
-      const qs = new URLSearchParams({ status: "published", type: typeKey });
-      const res = await fetch(`/api/spots?${qs.toString()}`, {
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        setError(body?.error ?? res.statusText);
-        return null;
-      }
-      return { response: res, controller };
-    } catch (err) {
-      if (!controller.signal.aborted) {
-        setError(err instanceof Error ? err.message : "取得に失敗しました");
-      }
-      return null;
-    }
-  }, [typeKey]);
-
-  /**
-   * openFetchが返したレスポンスのボディを、進捗ダイアログに受信バイト数を出しながら
-   * 読み切ってSpot[]にパースする(本体はreadSpotsBody)。キャンセル時はエラー扱いに
-   * せずnullを返す。
-   */
-  const readBody = useCallback(
-    async (response: Response, controller: AbortController): Promise<Spot[] | null> => {
+  const download = useCallback(
+    async (totalCount: number | null): Promise<Spot[] | null> => {
+      const controller = new AbortController();
       abortRef.current = controller;
+      setError(null);
       setDownloading(true);
       try {
-        return await readSpotsBody(response, setProgress);
+        const total = totalCount ?? (await fetchPublishedSpotCount(typeKey));
+        return await fetchPublishedSpots(typeKey, controller, total, setProgress);
       } catch (err) {
         if (!controller.signal.aborted) {
           setError(err instanceof Error ? err.message : "取得に失敗しました");
@@ -344,15 +324,8 @@ export function useSpotCache(
         setProgress(null);
       }
     },
-    []
+    [typeKey]
   );
-
-  /** ヘッダー確認を挟まず、一気に取得する(「未ダウンロードです」「更新があります」ダイアログ用) */
-  const fetchPublished = useCallback(async (): Promise<Spot[] | null> => {
-    const opened = await openFetch();
-    if (!opened) return null;
-    return readBody(opened.response, opened.controller);
-  }, [openFetch, readBody]);
 
   /**
    * 公開ルートを取得する(公開スポットのダウンロードと同時にキャッシュへ保存する)。
@@ -367,48 +340,45 @@ export function useSpotCache(
   /** 進捗ダイアログの「キャンセル」ボタン: 進行中のダウンロードを打ち切る */
   const cancelDownload = useCallback(() => abortRef.current?.abort(), []);
 
+  /** ダウンロードした結果をキャッシュへ反映する(3つの入口で共通) */
+  const store = useCallback(
+    async (spots: Spot[]) => {
+      const stored = toStored(spots, await fetchPublicRoutes());
+      setEntry(toEntry(stored));
+      persist(stored);
+    },
+    [persist, fetchPublicRoutes]
+  );
+
   /**
-   * 歯車メニューの「ダウンロード」ボタン: まずヘッダーだけ受け取り、サイズ
-   * (Content-Length、間引き前の生JSONバイト数)が事前にわかる場合だけ本文を読む前に
-   * 確認ダイアログを出す。圧縮転送等でサイズが事前にわからない場合は、ダウンロード後に
-   * 今さら「ダウンロードしますか?」と聞いても意味がない(既に受信済みのため)ので、
-   * 確認なしでそのままダウンロードする。
+   * 歯車メニューの「ダウンロード」ボタン: まず件数だけを軽く聞き、それを見せてから
+   * 取りに行く(数万件になる種別があるため、通信量の見当が付かないまま始めない)。
+   * 件数が取れなかったときは確認を省いてそのままダウンロードする —— 取り終わってから
+   * 「ダウンロードしますか?」と聞いても意味がないため。
    */
   const startManualDownload = useCallback(async () => {
     setCheckingSize(true);
-    const opened = await openFetch();
+    const spotCount = await fetchPublishedSpotCount(typeKey);
     setCheckingSize(false);
-    if (!opened) return;
-
-    const sizeBytes = knownContentLength(opened.response);
-    if (sizeBytes !== null) {
-      pendingResponseRef.current = opened;
-      setManualConfirm({ sizeBytes });
+    if (spotCount !== null) {
+      pendingCountRef.current = spotCount;
+      setManualConfirm({ spotCount });
       return;
     }
-
-    const data = await readBody(opened.response, opened.controller);
-    if (!data) return;
-    const stored = toStored(data, await fetchPublicRoutes());
-    setEntry(toEntry(stored));
-    persist(stored);
-  }, [openFetch, readBody, persist, fetchPublicRoutes]);
+    const data = await download(null);
+    if (data) await store(data);
+  }, [typeKey, download, store]);
 
   const confirmManualDownload = useCallback(async () => {
-    const pending = pendingResponseRef.current;
-    pendingResponseRef.current = null;
+    const pendingCount = pendingCountRef.current;
+    pendingCountRef.current = null;
     setManualConfirm(null);
-    if (!pending) return;
-    const data = await readBody(pending.response, pending.controller);
-    if (!data) return;
-    const stored = toStored(data, await fetchPublicRoutes());
-    setEntry(toEntry(stored));
-    persist(stored);
-  }, [readBody, persist, fetchPublicRoutes]);
+    const data = await download(pendingCount);
+    if (data) await store(data);
+  }, [download, store]);
 
   const cancelManualDownload = useCallback(() => {
-    pendingResponseRef.current?.controller.abort();
-    pendingResponseRef.current = null;
+    pendingCountRef.current = null;
     setManualConfirm(null);
   }, []);
 
@@ -416,16 +386,14 @@ export function useSpotCache(
   const confirmDownloadPrompt = useCallback(async () => {
     const reason = downloadPrompt;
     setDownloadPrompt(null);
-    const data = await fetchPublished();
+    const data = await download(null);
     if (!data) {
       // 失敗・キャンセル時は確認ダイアログに戻す(エラーはそのダイアログ内に表示される)
       setDownloadPrompt(reason);
       return;
     }
-    const stored = toStored(data, await fetchPublicRoutes());
-    setEntry(toEntry(stored));
-    persist(stored);
-  }, [downloadPrompt, fetchPublished, persist, fetchPublicRoutes]);
+    await store(data);
+  }, [downloadPrompt, download, store]);
 
   const dismissDownloadPrompt = useCallback(() => setDownloadPrompt(null), []);
 

@@ -11,10 +11,21 @@ types.setTypeParser(types.builtins.DATE, (value) => value);
 
 const globalForPg = globalThis as unknown as { pgPool?: Pool };
 
+/**
+ * 1インスタンスが張る接続数の上限(未設定なら`pg`の既定=10)。
+ *
+ * **サーバーレスで下げるための設定**。関数インスタンスは同時に何本も立ち上がり、
+ * それぞれがこのプールを持つため、既定のままだと接続プーラー側の枠を食い潰す
+ * (Supabaseの無料プランは接続数が限られる)。Vercelでは3程度に下げる。
+ * 常駐プロセス1つで動くDocker運用では未設定のままでよい。
+ */
+const poolMax = Number(process.env.PG_POOL_MAX) || undefined;
+
 export const pool =
   globalForPg.pgPool ??
   new Pool({
     connectionString: process.env.DATABASE_URL,
+    max: poolMax,
   });
 
 if (process.env.NODE_ENV !== "production") {

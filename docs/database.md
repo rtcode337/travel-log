@@ -123,8 +123,13 @@ erDiagram
     }
 ```
 
-- 自由サインアップは無く、管理者が作成する。**最初の1アカウントだけ**セットアップ
-  画面から作成でき、自動的に admin になる
+- 既定では自由サインアップは無く、管理者が作成する。**最初の1アカウントだけ**セットアップ
+  画面から作成でき、自動的に admin になる(`GOOGLE_AUTO_SIGNUP=true` の環境では、
+  Googleログインで一般ユーザーが自動作成される)
+- 退会(`DELETE /api/account`)で行を消すと、`on delete cascade` の訪問記録・訪問予定・
+  訪問予定リスト・口コミ・非表示設定・エクスポートジョブが一緒に消える。
+  スポットとルートは `created_by` が `on delete set null` なので**残る**
+  (非公開スポットだけはAPI側で明示的に削除する)
 
 ### スポットとルート
 
@@ -272,6 +277,7 @@ erDiagram
 | spots | `region` / `rank` / `series` / `spot_type_id` | 地図・一覧の絞り込み |
 | spots | `categories`(GIN) | 複数カテゴリの包含検索(`&&`) |
 | spots | `(spot_type_id, key)` ユニーク(key が null 以外) | CSV・ルートからの参照キー |
+| spots | `(spot_type_id, region, name, id)` | 公開スポットのダウンロード(`limit`/`offset` の分割取得)の並び |
 | spot_deletions | `spot_type_id` | 還元用エクスポートの抽出 |
 | spot_routes | `series` | シリーズ絞り込みとの連動 |
 | spot_route_points | `spot_id` | スポットからの逆引き |

@@ -156,6 +156,11 @@ create index spots_spot_type_id_idx on spots (spot_type_id);
 create index spots_categories_idx on spots using gin (categories);
 create unique index spots_spot_type_key_idx
   on spots (spot_type_id, key) where key is not null;
+-- 公開スポットのダウンロード(GET /api/spots の limit/offset 分割取得)用。
+-- 並びと同じ順の索引が無いと、チャンクごとに該当行を全部ソートし直すことになる
+-- (5万件規模の種別では26回のソートになる)。並びに id を含めるのは全順序に
+-- するため —— region・name だけでは同値の行の順が実行ごとに変わりうる
+create index spots_download_order_idx on spots (spot_type_id, region, name, id);
 
 -- =============================================================
 -- spot_deletions: 画面から個別削除された公開スポットの記録(削除の墓標)。

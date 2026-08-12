@@ -5,6 +5,10 @@ import { SPOT_ADMIN_ROLES, type Spot, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { parseRank } from "@/lib/rank";
 
+// 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
+// (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
+export const maxDuration = 60;
+
 interface BulkUpdateRecord {
   id: string;
   name: string;

@@ -15,6 +15,10 @@ import {
   isValidWikipediaTitleSource,
 } from "@/lib/region";
 
+// 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
+// (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
+export const maxDuration = 60;
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
