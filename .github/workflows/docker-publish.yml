@@ -170,3 +170,31 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=db-init
           cache-to: type=gha,mode=max,scope=db-init
+
+  # 古い版を消して直近 10 世代だけ残す。
+  #
+  # 公開パッケージなので GHCR の容量・転送は無料枠を消費しないが、版は放っておくと
+  # 際限なく積み上がる(`latest` を付け替えても前の版は SHA タグ付きで残る)。
+  # 一覧が読めなくなるのと、どれが生きているか分からなくなるのを防ぐための掃除。
+  #
+  # **専用のジョブにして、両方の push が終わってから走らせる。** db-init のジョブは
+  # 本体のビルドと並行に走るので、そちらに相乗りさせると「新しい版が出来る前に掃除する」
+  # 順序になりうる。
+  #
+  # **actions/delete-package-versions は使わない。** このリポジトリはマルチアーキで、
+  # 1 つのタグが manifest list ＋ アーキごとの子イメージで構成される。あちらは
+  # 子イメージを「タグ無しの版」として消してしまい、残したはずのタグが壊れる。
+  # この action は manifest list を理解して親子まとめて扱う。
+  cleanup:
+    needs: [merge, build-and-push-db-init]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: 古いイメージを削除して直近 10 世代だけ残す
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          packages: travel-log,travel-log-db-init
+          keep-n-tagged: 10
+          delete-untagged: true
+          token: ${{ secrets.GITHUB_TOKEN }}
