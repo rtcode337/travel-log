@@ -106,7 +106,14 @@ export function buildGeminiAskUrl(
   spot: Spot,
   spotType?: SpotType | null
 ): string {
-  return `https://www.google.com/search?udm=50&q=${encodeURIComponent(
-    buildSpotQuestion(spot, spotType)
-  )}`;
+  return buildGeminiSearchUrl(buildSpotQuestion(spot, spotType));
+}
+
+/**
+ * 任意の質問文でGemini(Google検索のAIモード)を開くURL。
+ * **「Geminiをどう開くか」はここ1か所に置く** —— 上記のとおり渡し方に癖があり、
+ * 変わったときに直す場所を散らさないため(天気の質問もこれを使う。lib/weather.ts)。
+ */
+export function buildGeminiSearchUrl(question: string): string {
+  return `https://www.google.com/search?udm=50&q=${encodeURIComponent(question)}`;
 }
