@@ -3,11 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api-client";
 import { formatPlanDateRange } from "@/lib/planListDraft";
-import {
-  buildSpotWeatherAskUrl,
-  planWeatherDate,
-  weatherLinkLabel,
-} from "@/lib/weather";
+import { planWeatherDate } from "@/lib/weather";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import { formatSpotMeta } from "@/lib/spotMeta";
 import type { Spot, VisitPlanList } from "@/lib/types";
@@ -15,18 +11,9 @@ import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
 import SpotBadge from "@/components/SpotBadge";
 import HelpTip from "@/components/HelpTip";
 import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
+import WeatherAskLink from "@/components/WeatherAskLink";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { usePathname } from "next/navigation";
-
-/** 天気アイコン(太陽)。外部の天気ページへ開くリンクの印 */
-function SunIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M12 17a5 5 0 100-10 5 5 0 000 10z" />
-      <path d="M12 1.5a1 1 0 011 1V4a1 1 0 11-2 0V2.5a1 1 0 011-1zm0 17a1 1 0 011 1v1.5a1 1 0 11-2 0V19.5a1 1 0 011-1zM22.5 12a1 1 0 01-1 1H20a1 1 0 110-2h1.5a1 1 0 011 1zm-17 0a1 1 0 01-1 1H3a1 1 0 110-2h1.5a1 1 0 011 1zm13.6-6.6a1 1 0 010 1.42l-1.06 1.06a1 1 0 11-1.42-1.42l1.06-1.06a1 1 0 011.42 0zM7.38 16.62a1 1 0 010 1.41l-1.06 1.06a1 1 0 11-1.41-1.41l1.06-1.06a1 1 0 011.41 0zm11.24 2.47a1 1 0 01-1.42 0l-1.06-1.06a1 1 0 111.42-1.41l1.06 1.06a1 1 0 010 1.41zM7.38 7.38a1 1 0 01-1.41 0L4.91 6.32A1 1 0 016.32 4.9l1.06 1.06a1 1 0 010 1.42z" />
-    </svg>
-  );
-}
 
 /**
  * 訪問予定リスト(旅程)の詳細モーダル。タイトル・説明・訪問予定期間と、
@@ -296,23 +283,8 @@ export default function VisitPlanListDetailModal({
                         </HelpTip>
                       </div>
                     )}
-                    {/* そのスポットの、予定の日の天気。**天気サービスは日付を指定して
-                        開けない**ので、日付を添えてAIに聞く形にしてある(lib/weather.ts)。
-                        日は開始日→終了日→今日の順。**行のボタンの中には置けない**
-                        (ボタンの入れ子になるため)ので、独立したリンクとして隣に並べる */}
-                    {spot && (
-                      <a
-                        href={buildSpotWeatherAskUrl(spot, weatherDate)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title={weatherLinkLabel(spot.name, weatherDate)}
-                        aria-label={weatherLinkLabel(spot.name, weatherDate)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="mr-1 shrink-0 rounded-full p-1.5 text-amber-500 hover:bg-amber-50"
-                      >
-                        <SunIcon className="size-5" />
-                      </a>
-                    )}
+                    {/* そのスポットの、予定の日の天気(地図の経路詳細にも同じものを出す) */}
+                    {spot && <WeatherAskLink spot={spot} date={weatherDate} className="mr-1" />}
                     {/* 訪問済みの付け外し。訪問記録を付ければ自動で付くが、ここでも直せる
                         (訪問済みは経路から外れるだけで、リストからは消えない) */}
                     <button
