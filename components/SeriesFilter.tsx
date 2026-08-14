@@ -54,19 +54,20 @@ export default function SeriesFilter({
         return {
           value: r,
           title: r,
-          // 中身が無いシリーズ(アイコンも文字も未設定)はシリーズ名をそのまま出す
-          // —— チップは押す対象なので、空の四角では選べない。
-          // 詰めて並べるのはアイコン・画像と1〜2文字のラベルまで。それより長い
-          // 文字(シリーズ名・長いラベル)は折り返す幅が要る(`label`は自由入力)
-          compact:
-            mark.kind === "icon" ||
-            mark.kind === "image" ||
-            (mark.kind === "text" && mark.text.length <= 2),
+          // **絵の下にシリーズ名を添える。** アイコンだけでは何のシリーズか読めない
+          // (丼の絵が3種類並ぶような種別では特に見分けが付かない)。
+          // 中身が無いシリーズ(アイコンも文字も未設定)は名前だけを出す ——
+          // チップは押す対象なので、空の四角では選べない。
+          // **詰めて並べる`compact`は使わない** —— 名前を出すぶんの幅が要る
+          // (`compact`はアイコン+左右の余白ぶんしかなく、名前が1文字ずつに潰れる)
           content:
             mark.kind === "none" ? (
               r
             ) : (
-              <SpotMarkGlyph mark={mark} alt={r} className="mx-auto h-4 w-4" />
+              <span className="flex flex-col items-center gap-0.5 leading-tight">
+                <SpotMarkGlyph mark={mark} alt={r} className="h-4 w-4" />
+                <span className="text-[10px]">{r}</span>
+              </span>
             ),
         };
       })}
