@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PlanBuildPanel from "@/components/PlanBuildPanel";
 import HelpTip from "@/components/HelpTip";
+import WeatherAskLink from "@/components/WeatherAskLink";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 import { useNavVisibility } from "@/components/AppFrame";
 import {
@@ -47,6 +48,7 @@ import {
 import { resolveCategories } from "@/lib/category";
 import { resolveSpotFace, resolveSpotMark, resolveSpotShape } from "@/lib/spotStyle";
 import { formatSpotMeta } from "@/lib/spotMeta";
+import { planWeatherDate } from "@/lib/weather";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import {
   downloadSpotCacheFor,
@@ -3086,7 +3088,12 @@ export default function MapView({
       lat: number;
       legDescription?: string | null;
       badge: ReturnType<typeof pointBadge>;
+      /** 天気のリンクに渡すスポット。**訪問予定リストのときだけ入る** ——
+       *  ルートと訪問順は済んだ話で、これから行く日が無い(天気を聞く意味が無い) */
+      weatherSpot?: Spot;
     }[];
+    /** 天気を聞く日(訪問予定リストのときだけ)。開始日→終了日→今日 */
+    weatherDate?: string;
   } | null = detailRoute
     ? {
         title: detailRoute.name,
@@ -3148,7 +3155,9 @@ export default function MapView({
                 lng: s.lng,
                 lat: s.lat,
                 badge: pointBadge(s.id),
+                weatherSpot: s,
               })),
+              weatherDate: planWeatherDate(list),
             };
           })()
         : null;
@@ -4166,6 +4175,16 @@ export default function MapView({
                         >
                           {point.name}
                         </button>
+                        {/* そのスポットの、予定の日の天気。**リスト詳細と同じものを
+                            ここにも出す** —— 旅程を見る場所が2つあり、片方だけに
+                            天気があると地図から見たときだけ調べ直すことになる */}
+                        {point.weatherSpot && routeDetailView.weatherDate && (
+                          <WeatherAskLink
+                            spot={point.weatherSpot}
+                            date={routeDetailView.weatherDate}
+                            className="-my-1"
+                          />
+                        )}
                       </div>
                       {/* 区間の説明は次の地点との間に表示(最終地点には次の区間が無い) */}
                       {i < routeDetailView.points.length - 1 && (
