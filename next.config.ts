@@ -1,10 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // 左下は自前のユーザーメニューボタンを置くため、開発インジケーターは右下に逃がす
-  devIndicators: {
-    position: "bottom-right",
-  },
   // 本番用Dockerイメージ(Dockerfileのprodステージ)を最小構成にするため
   output: "standalone",
   // 開発サーバをLAN内の別端末(スマホ実機での確認など)からホスト名・IPで開くと、
