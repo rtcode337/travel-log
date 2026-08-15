@@ -3,13 +3,48 @@
 import { useMemo, useState } from "react";
 
 import type { Series } from "@/lib/types";
-import { type SeriesStyleDefinition } from "@/lib/seriesStyle";
+import type { SpotMark } from "@/lib/spotStyle";
+import { UNSET_SERIES, type SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { resolveSeriesChip } from "@/lib/spotStyle";
 import SpotMarkGlyph from "@/components/SpotMarkGlyph";
 import ChoiceRow, { toggleChoice } from "@/components/ChoiceRow";
 
-/** シリーズの選択肢がこれを超える種別(放送回番号など)はボタン列を並べきれないため検索できる一覧にする */
-export const SERIES_FILTER_BUTTONS_MAX = 12;
+/**
+ * ボタン列で並べられる上限。**アイコンで見分けられる種別だけがここまで並べられる。**
+ * アイコンがあっても数十個になれば探せないので、上限自体は残す
+ * (それを超える種別は検索できる一覧に回す)。
+ */
+export const SERIES_FILTER_TILE_MAX = 20;
+
+/** 詰めて並べられる中身の長さ(ラベルが1〜2文字ならアイコンと同じ扱い) */
+const TILEABLE_LABEL_MAX = 2;
+
+/**
+ * ボタン列で並べられるか。**数ではなく中身で決める。**
+ *
+ * アイコン(や1〜2文字のラベル)なら、絵で見分けが付くので詰めて並べられる。
+ * 一方、**番組タイトルや作品名のような長い名前は3〜4個でも横に並べると読めない**
+ * ——1つあたりの幅が要るうえ、折り返して2行になった名前は隣とくっついて見える。
+ * そういう種別は数が少なくても検索できる一覧のほうが読みやすい。
+ *
+ * かつては「12個まではボタン列」と数だけで決めていたが、観光地(11個)が
+ * 境目に張り付いていて、シリーズを1つ足すだけで見た目が切り替わっていた。
+ */
+function canTileSeries(
+  series: Series[],
+  seriesStyles: SeriesStyleDefinition[]
+): boolean {
+  if (series.length > SERIES_FILTER_TILE_MAX) return false;
+  return series.every((r) => {
+    // 「未設定」はアイコンを持たないが、アプリが出す短い固定の名前なので詰められる
+    // (シリーズ未設定のスポットが1件でもあれば必ず選択肢に入るため、
+    //  例外にしないとアイコンの揃った種別まで一覧に落ちる)
+    if (r === UNSET_SERIES) return true;
+    const { mark } = resolveSeriesChip(r, seriesStyles);
+    if (mark.kind === "icon" || mark.kind === "image") return true;
+    return mark.kind === "text" && mark.text.length <= TILEABLE_LABEL_MAX;
+  });
+}
 
 /**
  * シリーズによる複数選択の絞り込みUI。地図・一覧の絞り込み(FilterBar)と
@@ -30,10 +65,10 @@ export default function SeriesFilter({
 }) {
   if (series.length === 0) return null;
 
-  // ボタンを並べきれない種別(放送回番号・作品名など)は、検索できる一覧にする。
+  // アイコンで見分けられない種別(放送回番号・作品名など)は、検索できる一覧にする。
   // かつては単一選択のプルダウンだったが、アニメ聖地のようにシリーズが数百ある
   // 種別では目当ての値を探せず、複数選択もできなかった
-  if (series.length > SERIES_FILTER_BUTTONS_MAX) {
+  if (!canTileSeries(series, seriesStyles)) {
     return (
       <SearchableSeriesFilter
         series={series}
@@ -51,24 +86,27 @@ export default function SeriesFilter({
     <ChoiceRow
       options={series.map((r) => {
         const { mark } = resolveSeriesChip(r, seriesStyles);
+        // **中身が無いシリーズ(「未設定」)は名前の1文字目を絵の代わりに置く。**
+        // 名前だけを出すと、絵のある選択肢と背の高さが揃わず、行の中で1つだけ
+        // 浮いて見える。「未」の下に「未設定」と並べれば、他と同じ形になる。
+        const glyph: SpotMark =
+          mark.kind === "none" ? { kind: "text", text: r.slice(0, 1) } : mark;
         return {
           value: r,
           title: r,
           // **絵の下にシリーズ名を添える。** アイコンだけでは何のシリーズか読めない
           // (丼の絵が3種類並ぶような種別では特に見分けが付かない)。
-          // 中身が無いシリーズ(アイコンも文字も未設定)は名前だけを出す ——
-          // チップは押す対象なので、空の四角では選べない。
           // **詰めて並べる`compact`は使わない** —— 名前を出すぶんの幅が要る
           // (`compact`はアイコン+左右の余白ぶんしかなく、名前が1文字ずつに潰れる)
-          content:
-            mark.kind === "none" ? (
-              r
-            ) : (
-              <span className="flex flex-col items-center gap-0.5 leading-tight">
-                <SpotMarkGlyph mark={mark} alt={r} className="h-4 w-4" />
-                <span className="text-[10px]">{r}</span>
+          content: (
+            <span className="flex flex-col items-center gap-0.5 leading-tight">
+              {/* 文字の中身も絵と同じ高さに収める(揃えないと行ごとに背がずれる) */}
+              <span className="flex h-4 items-center justify-center text-sm leading-none">
+                <SpotMarkGlyph mark={glyph} alt={r} className="h-4 w-4" />
               </span>
-            ),
+              <span className="text-[10px]">{r}</span>
+            </span>
+          ),
         };
       })}
       selected={selected}
