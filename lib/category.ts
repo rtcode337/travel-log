@@ -5,14 +5,16 @@ import type { Category, SpotType } from "./types";
  * 同じく値がbooleanではないためSpotTypeSettingKeyの仕組みとは別扱いで、
  * spot_type_settingsの'categories'キーにJSON文字列(string[])として保存する。
  * 配列の並び順がそのまま絞り込みチップ・サジェストの並び順になる。
- * 未設定・parse失敗時はDEFAULT_CATEGORIES(観光地の現行カテゴリ)にフォールバックする。
+ * 未設定・parse失敗時はDEFAULT_CATEGORIES(観光地が当初使っていたカテゴリ)にフォールバックする。
  */
 export const CATEGORIES_SETTING_KEY = "categories";
 
 /**
- * 観光地(tourist)が実際に使っているカテゴリをそのまま既定値として使う
- * (旧lib/types.tsのCATEGORIESハードコードの後継)。spots.categories列自体は
- * 自由入力のままで、この一覧に無い値も動作はする(並び順は一覧の後ろになる)
+ * カテゴリ一覧を設定していない種別の既定値(旧lib/types.tsのCATEGORIESハードコードの後継)。
+ * **観光地(tourist)が当初使っていた一覧をそのまま残したもので、「観光地の現行カテゴリ」ではない**
+ * —— 分類の軸はシリーズへ移り、いまの観光地は categories を空配列で明示している。
+ * spots.categories列自体は自由入力のままで、この一覧に無い値も動作はする
+ * (並び順は一覧の後ろになる)
  */
 export const DEFAULT_CATEGORIES: Category[] = [
   "神社仏閣",
@@ -43,7 +45,7 @@ export function parseCategories(json: string): Category[] | null {
 
 /**
  * スポット種別のsettingsから、そのカテゴリ一覧(並び順込み)を解決する。
- * 未設定・不正な値の場合は観光地のカテゴリ(DEFAULT_CATEGORIES)を返す。
+ * 未設定・不正な値の場合はDEFAULT_CATEGORIESを返す。
  * 明示的に空配列("[]")を保存した種別は「定義済みカテゴリなし」の扱いになる
  */
 export function resolveCategories(
