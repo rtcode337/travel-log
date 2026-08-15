@@ -29,7 +29,7 @@ export default function VisitFields({
   onPhotosChange: (photos: string[]) => void;
   /** 写真の縮小処理中を親へ伝える(送信ボタンのdisable用) */
   onProcessingChange?: (processing: boolean) => void;
-  /** 訪問日時欄の下の説明文。未訪問記録では空欄の意味が「時期不明」ではなく
+  /** 訪問日時欄の下の説明文。未訪問記録では空にした意味が「時期不明」ではなく
    *  「下調べ」になるため、呼び出し側で差し替えられるようにしてある */
   visitedOnHint?: string;
 }) {
@@ -118,7 +118,9 @@ export default function VisitFields({
           </button>
         )}
         <p className="mt-1 text-xs text-gray-400">
-          {visitedOnHint ?? "空欄のままにすると「時期不明」として記録されます。"}
+          {/* **既定は現在日時が入っている。** 「空欄のままにすると」では、
+              自分で消さないと空にならないことが読み取れない */}
+          {visitedOnHint ?? "「削除」で空にすると「時期不明」として記録されます。"}
         </p>
       </div>
 

@@ -10,7 +10,7 @@ import { SESSION_COOKIE } from "@/lib/auth/session";
 export const maxDuration = 60;
 
 /**
- * 退会(本人による自分のアカウントの削除)。
+ * アカウント削除(本人による自分のアカウントの削除)。
  *
  * **消えるもの**: アカウント行(メールアドレス・Googleの紐付け・パスワード)と、
  * FKの`on delete cascade`で連れて消える訪問記録・訪問予定・訪問予定リスト・
@@ -23,7 +23,7 @@ export const maxDuration = 60;
  * (他のユーザーの地図から突然スポットが消えないようにするため)。
  *
  * 管理者による他人の削除は`/api/admin/users/[id]`のDELETE。**あちらと違い、
- * 最後の管理者かどうかのガードはここでも要る** —— 自分で退会して誰も
+ * 最後の管理者かどうかのガードはここでも要る** —— 自分でアカウントを削除して誰も
  * 管理画面に入れなくなるのを防ぐため。
  */
 export async function DELETE() {
@@ -41,7 +41,7 @@ export async function DELETE() {
       return NextResponse.json(
         {
           error:
-            "最後の管理者は退会できません。先に別のユーザーを管理者にしてください。",
+            "最後の管理者はアカウントを削除できません。先に別のユーザーを管理者にしてください。",
         },
         { status: 400 }
       );
@@ -81,14 +81,14 @@ export async function DELETE() {
   } catch (err) {
     await client.query("rollback").catch(() => {});
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "退会に失敗しました。" },
+      { error: err instanceof Error ? err.message : "アカウントの削除に失敗しました。" },
       { status: 500 }
     );
   } finally {
     client.release();
   }
 
-  // ファイルの削除はDBのコミット後。失敗しても退会自体は成立させる
+  // ファイルの削除はDBのコミット後。失敗しても削除自体は成立させる
   // (孤児ファイルが残るだけで、参照する行はもう無い)
   await deleteVisitPhotos(photoPaths);
   for (const path of exportPaths) {

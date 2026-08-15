@@ -118,7 +118,7 @@ export default function VisitFormModal({
             onProcessingChange={setProcessingPhotos}
             visitedOnHint={
               unvisited
-                ? "空欄のままなら下調べのメモになります(どの経路にも含まれず、訪問予定も残ります)。"
+                ? "「削除」で空にすると下調べのメモになります(どの経路にも含まれず、訪問予定も残ります)。"
                 : undefined
             }
           />
