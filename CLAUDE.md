@@ -24,7 +24,7 @@ LAN内の別端末から開発サーバを開くときは`ALLOWED_DEV_ORIGINS`(`
 
 `docker-compose.standalone.example.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義の雛形。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。**リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
 
-このプロジェクトにテストスイート/テストコマンドは存在しない。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
+このプロジェクトにアプリコードのテストスイート/テストコマンドは存在しない(唯一のテストは`scripts/bootstrap-sql_test.sh`で、Supabase向けの一括SQLが`init`サービスと同じスキーマを作るかを突き合わせるもの。`db/migrations/README.md`参照)。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
 
 ### スキーマ変更のルール
 
@@ -76,7 +76,7 @@ docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgr
 
 
 
-[travel-log-data](../travel-log-data)側の`tourist/spots.csv`(観光地データ全件。列は`name,name_kana,lat,lng,region,series,categories,description`)を編集する際は、本番の`spots`/`spot_types`テーブルではなく使い捨てのスキーマで検証すること(このリポジトリの過去のやり方: `create schema lint_check`→`create table lint_check.spots (like public.spots including all)`→`search_path`をそこに向けてCOPYする→`drop schema lint_check cascade`)。シードファイルの検証のために本物の`public.spots`を`truncate`・再投入しないこと。
+[travel-log-data](../travel-log-data)側の`tourist/spots.csv`(観光地データ全件。列は`name,name_kana,lat,lng,region,rank,series,categories,description,key`)を編集する際は、本番の`spots`/`spot_types`テーブルではなく使い捨てのスキーマで検証すること(このリポジトリの過去のやり方: `create schema lint_check`→`create table lint_check.spots (like public.spots including all)`→`search_path`をそこに向けてCOPYする→`drop schema lint_check cascade`)。シードファイルの検証のために本物の`public.spots`を`truncate`・再投入しないこと。
 
 スポットのシードデータは`db/init/`に置かず、`tourist`を含む全種別のスポットデータを`/[type]/admin`のCSVインポートから手動で取り込む(下記「外部データソース」の段落参照)。
 
@@ -134,7 +134,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 単一の`spots`テーブルを`spot_types`により複数の「種別」で使い回す設計。`tourist`(観光地)がアプリ初期化時(`db/init/01_schema.sql`)に必ず作成される唯一の既定種別で、それ以外の種別は管理者が`/[type]/admin`から追加する(空の種別ではデータが入らないだけで、削除しない限り存在し続ける)。既定種別といっても自動で作られるのは`spot_types`の行だけで、スポットデータ自体は他の種別と同様シードデータを`db/init/`に直接コミットせず外部リポジトリ[travel-log-data](../travel-log-data)にCSVとして置き、`/[type]/admin`のCSVインポートから取り込む(下記「外部データソース」の段落参照)。観光地データの`description`はWikipedia記事冒頭文の引用でCC BY-SA 4.0、`lat`/`lng`はWikipedia記事座標(CC BY-SA 4.0)またはWikidata `P625`(CC0)由来のため、travel-logリポジトリ本体には同梱せずtravel-log-data側でのみ管理・出典表示する。
 
-画面は`/[type]/map`のように`spot_types.key`をURLの動的セグメントとして持ち、種別ごとに独立してアクセスする(ルート`/`アクセス時のリダイレクト先は、最後に開いていた種別のCookie `last_spot_type` — `lib/last-spot-type.ts`。`proxy.ts`が`/[type]/(map|spots|account|admin)`アクセス時に書き込み、`app/page.tsx`が読み取り時に`canViewSpotType`で検証する — を最優先し、無い・開けない場合に`app_settings.active_spot_type_id`の既定へフォールバックする。どちらも他の種別を隠すものではない)。種別の切り替えは`/[type]/map`の**左下の種別チップ(`MapView`。現在の種別名を表示し、タップすると種別の一覧メニューが上向きに開き、選ぶと`/[別種別]/map`へ遷移する)**から行う。**メニューには今表示中の種別も出す**(押せない・「表示中」と添える) —— 他の種別だけを並べると、どこから切り替わったのか・全部で何種類あるのかが読めないため。**並びは`spot_types.sort_order`**(→同値なら作成順。`SPOT_TYPE_ORDER`)で、`/[type]/admin`の「別のスポット種別の管理」から**ドラッグで並び替えられる**(`POST /api/spot-types/order`がIDの順で0からの連番に振り直す。1件ずつのPATCHにしないのは、途中で失敗すると並びが中途半端になるうえ「何番目か」が1件だけでは決まらないため)。この並びは種別が一覧に出るところ全部(地図のメニュー・アカウント画面・管理画面)に効く(かつてはアカウントタブ`AccountView`の「別のスポットを見る」一覧だったが、地図から直接切り替えられるよう移した。アカウントタブは現在のモード表示のみ残す)。他の種別が無いときはチップはタップしても何も起きない(現在名の表示だけ)。`public_visible=false`の種別はAPI(`api.spotTypes.list`)がadmin/spot_admin以外には返さないため、一般ユーザーのメニューには公開種別のみ並ぶ。種別ごとの公開範囲は`spot_type_settings`の`public_visible`設定(既定false=admin/spot_admin限定)で制御し、`lib/spot-type-access.ts`の`canViewSpotType`で判定する(`/[type]/admin`だけは`public_visible`に関わらず常にアクセス可)。かつてあった`spot_types.visibility`列(`public`/`admin_only`/`disabled`の3値)は廃止し、`disabled`(誰にも見せない)相当は種別自体の削除で代替するようにした。
+画面は`/[type]/map`のように`spot_types.key`をURLの動的セグメントとして持ち、種別ごとに独立してアクセスする(ルート`/`アクセス時のリダイレクト先は、最後に開いていた種別のCookie `last_spot_type` — `lib/last-spot-type.ts`。`proxy.ts`が`/[type]/(map|spots|account|admin)`アクセス時に書き込み、`app/page.tsx`が読み取り時に`canViewSpotType`で検証する — を最優先し、無い・開けない場合に`app_settings.active_spot_type_id`の既定へフォールバックする。どちらも他の種別を隠すものではない)。種別の切り替えは`/[type]/map`の**左下の種別チップ(`MapView`。現在の種別名を表示し、タップすると種別の一覧メニューが上向きに開き、選ぶと`/[別種別]/map`へ遷移する)**から行う。**メニューには今表示中の種別も出す**(押せない・「表示中」と添える) —— 他の種別だけを並べると、どこから切り替わったのか・全部で何種類あるのかが読めないため。**並びは`spot_types.sort_order`**(→同値なら作成順。`SPOT_TYPE_ORDER`)で、`/[type]/admin`の「別のスポット種別の管理」から**ドラッグで並び替えられる**(`POST /api/spot-types/order`がIDの順で0からの連番に振り直す。1件ずつのPATCHにしないのは、途中で失敗すると並びが中途半端になるうえ「何番目か」が1件だけでは決まらないため)。この並びは種別が一覧に出るところ全部(地図のメニュー・管理画面)に効く(かつてはアカウントタブ`AccountView`の「別のスポットを見る」一覧だったが、地図から直接切り替えられるよう移した。アカウントタブは現在のモード表示のみ残す)。他の種別が無いときはチップはタップしても何も起きない(現在名の表示だけ)。`public_visible=false`の種別はAPI(`api.spotTypes.list`)がadmin/spot_admin以外には返さないため、一般ユーザーのメニューには公開種別のみ並ぶ。種別ごとの公開範囲は`spot_type_settings`の`public_visible`設定(既定false=admin/spot_admin限定)で制御し、`lib/spot-type-access.ts`の`canViewSpotType`で判定する(`/[type]/admin`だけは`public_visible`に関わらず常にアクセス可)。かつてあった`spot_types.visibility`列(`public`/`admin_only`/`disabled`の3値)は廃止し、`disabled`(誰にも見せない)相当は種別自体の削除で代替するようにした。
 
 新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, series?, categories? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/series/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/series/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。
 
@@ -256,7 +256,7 @@ A〜Eはランクへ移した)。配列の並び順がそのままシリーズ�
 チップで出し、検索欄で部分一致(大文字小文字は無視)に絞った候補をタップでトグルする複数選択で、
 描くのは既定で`INITIAL_RESULT_LIMIT`(12)件、「さらに表示」で`SEARCH_RESULT_LIMIT`(60)件まで
 (超過分は件数だけ出す)。かつては単一選択の
-プルダウンだったが、アニメ聖地(anime_seichi、685シリーズ)のようにシリーズが数百ある種別では
+プルダウンだったが、アニメ聖地(anime_seichi、337シリーズ)のようにシリーズが数百ある種別では
 目当ての値を探せず、複数選択もできなかったため置き換えた。
 **候補一覧に内側のスクロール領域は作らない**(高さを固定して中でスクロールさせない) ——
 実機のスマホ(Safari・Chromeとも。PCの開発者ツールのスマホ表示では再現しない)で、
@@ -264,7 +264,8 @@ A〜Eはランクへ移した)。配列の並び順がそのままシリーズ�
 右端の✓が見えたり見えなかったりしたため。件数を絞ってページ・モーダル側のスクロールに任せる。
 **シリーズ数が増える種別を足すときはこのUIで選べるかを確認すること。**
 **判断を数から中身へ変えたのは、境目に張り付く種別があったため** —— 観光地は
-シリーズ11個+「未設定」でちょうど12で、1つ足すだけで見た目が切り替わっていた。
+当時シリーズ11個+「未設定」でちょうど12で、1つ足すだけで見た目が切り替わっていた
+(その後シリーズは12個になっている)。
 それに**長い名前は数が少なくても横に並べると読めない**(番組タイトル・作品名は
 3〜4個でも1つあたりの幅が要り、折り返した2行が隣とくっついて見える)。
 アイコンで見分けが付くかどうかが、実際の分かれ目になっている。
@@ -276,7 +277,7 @@ A〜Eはランクへ移した)。配列の並び順がそのままシリーズ�
 かつて訪問状況だけ「すべて」を持たず「最後の1つは外せない」にしていたが、
 軸ごとに操作が違うほうが分かりにくいのでそろえた。
 **行は常に折り返す**(`flex-wrap`)。選択肢の数は種別の設定で決まる(観光地のシリーズは
-11個)ので、1行に収まる前提を置くと**狭い画面で最後の選択肢が押せなくなる** ——
+12個)ので、1行に収まる前提を置くと**狭い画面で最後の選択肢が押せなくなる** ——
 器は`overflow-hidden`なので、はみ出した分は見えないまま切られる(実際に観光地の
 シリーズで起きた)。**1つあたりの最小幅は選択肢ごとに選ぶ**(`ChoiceRowOption`の
 `compact`)—— アイコン・1〜2文字(シリーズのアイコン・ランクのA〜E・「すべて」)は
@@ -497,7 +498,7 @@ Maps URLsの`waypoints`は9件までのため、それを超える経路は**並
 
 **非公開スポットは`SpotDetailModal`の「位置を修正」から座標をドラッグで直せる**(`SpotRepositionModal`)。ドラッグできる赤マーカーの付いた地図を出し、保存でPATCHする(座標以外は既存値をそのまま送る — PATCHは`name/lat/lng/region/series/description`を無条件に上書きするため、送らないとnullで消える)。公開スポットは編集フォームの緯度経度欄で直す(この機能は非公開のみ)。
 
-CSVのヘッダーに`CSV_COLUMNS`(ルートCSVは`ROUTE_CSV_COLUMNS`)に無い列があるときは、`unknownCsvColumns`が検出してインポートを中止する。知らない列は読み飛ばされるだけなので、綴り違いや旧フォーマットのCSV(シリーズ改名前の`rank`/`category`など)を取り込んでもエラーが出ず、該当の値だけが欠けた状態で登録されてしまうため(実際に郵便局データ2.4万件が`series`なしで入り、地図が白いピンになった)。必須列(`name`/`lat`/`lng`/`region`)の存在チェックとは別。
+CSVのヘッダーに`CSV_COLUMNS`(ルートCSVは`ROUTE_CSV_COLUMNS`)に無い列があるときは、`unknownCsvColumns`が検出してインポートを中止する。知らない列は読み飛ばされるだけなので、綴り違いや旧フォーマットのCSV(カテゴリ改名前の`category`など)を取り込んでもエラーが出ず、該当の値だけが欠けた状態で登録されてしまうため(実際に郵便局データ2.4万件が`series`なしで入り、地図が白いピンになった)。必須列(`name`/`lat`/`lng`/`region`)の存在チェックとは別。
 
 CSVインポートは差分更新で、`AdminView`側が事前読み込み済みの全件(status問わず)と突き合わせる。同一判定は`key`一致を最優先し、keyで見つからなければ**keyを持たない既存行に限り**`name`+`lat`+`lng`の完全一致で行う(keyを振る前に取り込んだ行を拾うための道)。**同名・同座標でkeyだけ違う行は別スポットとして通す** —— 1つの場所が複数のシリーズに登場する種別(水曜どうでしょうの同じ港が複数企画に出るなど)で、同じ地点に複数のスポットを置けるようにするため。フォールバックで拾った既存行は使用済みにして、CSVの別の行が同じ行を二重に上書きしないようにしている。一致した既存行は内容がCSVと異なればCSVの内容で上書き更新し(keyが同じなら改名・座標修正もCSVから反映される)、同一ならスキップ、どちらにも一致しない行だけを新規として`app/api/spots/route.ts`に送る(上書きは公開スポットのみ。公開以外=他ユーザーの承認待ち等は編集権限が投稿者本人に限られるため触らない。CSVにkey列が無い場合は既存行のkeyを消さず維持する)。かつてあった「SQLシードとの同期」「重複スポットの削除」機能はこの差分インポートに一本化して廃止した。新規分・上書き分とも`AdminView`側で1,000件ずつのチャンクに分けて順番に送信し(新規はPOST `/api/spots`の一括INSERT、上書きはPOST `/api/spots/bulk-update`の一括UPDATE — 公開スポットのみ・spot_admin/admin専用。1件ずつのPATCHはGitHub取り込みのような大量更新でラウンドトリップの積み重ねが重すぎたため一括化した)、進捗(◯件/◯件)を画面に表示する(1リクエストにまとめると大量データでタイムアウトする恐れがあるため)。
 
@@ -505,7 +506,7 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 ### `reviews`と`visits`の非対称設計
 
-`reviews`=公開・本文のみ・`(user_id, spot_id)`ごとに1件(再投稿はupsert)、シリーズの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される(**訪問予定リストの側は削除せず`visited_at`で訪問済みにする**。「訪問予定リスト(旅程)」参照)。`photos`(text[])にはBase64ではなく、保存先からの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する(`lib/photos.ts`)。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
+`reviews`=公開・本文のみ・**掲示板方式**(1ユーザーが同じスポットに何件でも書ける。POSTは毎回insertで、ユニーク制約もupsertも無い)、シリーズの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される(**訪問予定リストの側は削除せず`visited_at`で訪問済みにする**。「訪問予定リスト(旅程)」参照)。`photos`(text[])にはBase64ではなく、保存先からの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する(`lib/photos.ts`)。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
 
 **写真の保存先は`PHOTO_STORAGE`環境変数で切り替えられる**(`lib/photoStorage.ts`の`PhotoStorage`インターフェース)。`fs`(既定)はローカルのファイルシステム(docker-composeが`./photos`を`/app/photos`にbindマウント。Docker運用はこちら。`PHOTOS_DIR`で変更可)、`supabase`はSupabase Storage(`SUPABASE_URL`/`SUPABASE_SECRET_KEY`/`SUPABASE_STORAGE_BUCKET`)。**キーは世代で渡し方が違う** —— 新しいSecret key(`sb_secret_...`)は`apikey`ヘッダだけに載せ、レガシーの`service_role`はJWTなので`Authorization: Bearer`にも載せる(新しいキーをBearerに載せるとJWTとしてパースされて`Invalid JWT`で弾かれる)。接頭辞`sb_`で判定して`supabaseConfig()`が組み立てる。環境変数は`SUPABASE_SECRET_KEY`が正で、`SUPABASE_SERVICE_ROLE_KEY`は既存デプロイのための読み替え(レガシーキーは2026年末に廃止予定で、新規プロジェクトでは発行されない)。**永続ディスクを持てないホスト(Vercel等のサーバーレスやボリューム無しのコンテナホスト)へ載せるための切り替え**で、DBが`DATABASE_URL`だけで差し替わるのと同じ考え方。Supabase StorageはRESTが素直なのでSDKを足さず素の`fetch`だけで実装している(依存を増やさない方針。S3/R2直はSigV4署名が要るため未対応 — 足すならこのインターフェースに実装を1つ追加するだけ)。どの保存先でも公開URLは使わず、必ず認証付き配信ルートから読み出して返す(写真は非公開のため)。**この切り替えを含め、Vercel等のサーバーレスに載せるときの設定は[docs/hosting-vercel-supabase.md](docs/hosting-vercel-supabase.md)にまとめてある**(`PG_POOL_MAX`・`NEXT_PUBLIC_MAX_UPLOAD_BYTES`と、`lib/features.ts`の機能フラグ。**どれも未設定なら従来どおりの挙動**なのでDocker運用には影響しない)。`lib/photos.ts`はパスの生成・検証とdata URLのデコードだけを持ち、保存先には依存しない(読み出しは`readVisitPhoto`に集約)。1件あたりの枚数上限(`MAX_PHOTOS_PER_VISIT`=10)は`lib/visitPhoto.ts`に置き、POST/PATCHの両ルートがそれを読む(**1枚あたりの書き出しサイズをこの枚数で割って決める**ため、片方だけ変えると上限の計算が合わなくなる)。**写真の添付自体を`NEXT_PUBLIC_PHOTOS_ENABLED=false`で畳める**(`lib/features.ts`の`photosEnabled`)。畳むと`VisitFields`は選択ボタンを出さず、POST `/api/visits`は写真つきを、PATCH `/api/visits/[id]`は**data URL(=新規追加)だけ**を503で拒む —— **既にある写真の閲覧・取り外しは止めない**(畳んだ理由は「これ以上増やさない」であって、記録済みのものを見せない理由は無い)。訪問記録はスポット詳細の訪問履歴から後から編集できる(`VisitFormModal`の編集モード=`visit` prop+PATCH `/api/visits/[id]`。写真は「既存の相対パス=残す」「data URL=新規追加」の混在で受け取り、相対パスはその訪問記録が現在持つものに限定して検証、外された写真のファイルはDB更新成功後に削除する。口コミは訪問記録と独立のデータのため編集モードでは入力欄を出さない)。
 
@@ -587,7 +588,7 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 **編集は作成フローを再利用する**。詳細の「編集」→ `VisitPlanListFormModal`(`edit`propに既存リストを渡して基本情報を初期表示)→ 下書きに`editingId`と既存の`spotIds`を入れて地図の作成モードへ → スポットを足す/外す/並び替えて「更新」で`PATCH /api/visit-plan-lists/[id]`。PATCHは基本情報を更新し、経由スポットは受け取った`spot_ids`で**丸ごと置き換える**(items全削除→seq付きで入れ直し)。作成モードは下書きの`editingId`の有無で「入力完了(新規=POST)」と「更新(編集=PATCH)」を出し分ける(`completeBuild`)。
 
-**作成モード中は、下書きの選択済みスポットを選んだ順に紫の矢印で結んだ経路を地図に描く**(`MapView`の`buildDraftPath`。訪問予定リストの経路表示と同じ`spot-routes`ソース/色で、追加・削除・並び替えに即追従する。保存済みリストの経路表示と同じく、現在地(青丸)の表示中は現在地から下書き先頭のスポットまでも青(`CURRENT_LOCATION_PATH_COLOR`)の線・矢印で結ぶ。線のタップで詳細は開かない — 作成中のタップはピンの追加操作を優先するため`pathKind`を付けない)。編集対象のリスト自身を絞り込みの「訪問予定リスト」経路表示(`filters.planListId`)にしていた場合は、更新前の経路が古い形のまま二重に残らないよう保存済み側は描かない。下書きの経由スポットも**ピンは絞り込みに従う**(線だけがそのスポットを通る)。**作成中パネルの一覧は、本体スポット+重ね表示+補完(`pathExtraSpots`)で名前を解決する**(`buildPanelSpotById`) —— 補完を混ぜないと、線には出ているのにパネルだけ「(読み込み中のスポット)」のままになる(重ねていない別種別のスポットは補完でしか名前が手に入らない)。それでも解決できない行には**理由の説明を`HelpTip`で出す**(取得中 / 削除済み / 他人の非公開スポット / 通信失敗)—— 何が起きているのか画面から分からないため。訪問予定リストの詳細(`VisitPlanListDetailModal`)にも同じ説明を置いてある。本体種別で解決できないスポット(別種別を重ねて追加したもの)は経路表示中のリストと同じ補完(`planListExtraSpots`)で座標を解決する。編集など**スポットが既にある下書きで作成モードに入ったときは、経路全体が見えるよう一度だけ`fitBounds`する**(`buildFitPendingRef`。新規作成で最初のスポットを足したときには動かさない)。
+**作成モード中は、下書きの選択済みスポットを選んだ順に紫の矢印で結んだ経路を地図に描く**(`MapView`の`buildDraftPath`。訪問予定リストの経路表示と同じ`spot-routes`ソース/色で、追加・削除・並び替えに即追従する。保存済みリストの経路表示と同じく、現在地(青丸)の表示中は現在地から下書き先頭のスポットまでも青(`CURRENT_LOCATION_PATH_COLOR`)の線・矢印で結ぶ。線のタップで詳細は開かない — 作成中のタップはピンの追加操作を優先するため`pathKind`を付けない)。編集対象のリスト自身を絞り込みの「訪問予定リスト」経路表示(`filters.planListId`)にしていた場合は、更新前の経路が古い形のまま二重に残らないよう保存済み側は描かない。下書きの経由スポットも**ピンは絞り込みに従う**(線だけがそのスポットを通る)。**作成中パネルの一覧は、本体スポット+重ね表示+補完(`pathExtraSpots`)で名前を解決する**(`buildPanelSpotById`) —— 補完を混ぜないと、線には出ているのにパネルだけ「(読み込み中のスポット)」のままになる(重ねていない別種別のスポットは補完でしか名前が手に入らない)。それでも解決できない行には**理由の説明を`HelpTip`で出す**(取得中 / 削除済み / 他人の非公開スポット / 通信失敗)—— 何が起きているのか画面から分からないため。訪問予定リストの詳細(`VisitPlanListDetailModal`)にも同じ説明を置いてある。本体種別で解決できないスポット(別種別を重ねて追加したもの)は経路表示中のリストと同じ補完(`pathExtraSpots`)で座標を解決する。編集など**スポットが既にある下書きで作成モードに入ったときは、経路全体が見えるよう一度だけ`fitBounds`する**(`buildFitPendingRef`。新規作成で最初のスポットを足したときには動かさない)。
 
 ### touristのランクについて
 
