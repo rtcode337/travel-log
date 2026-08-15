@@ -61,7 +61,9 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # スマホ実機など、LAN内の別端末から開発サーバを開くときに許可するホスト名・IP
       # (カンマ区切り)。未設定だと/_next配下の開発用リソースが403になり真っ白になる
-      # (next.config.tsのallowedDevOrigins)。手元の.envに書く
+      # (next.config.tsのallowedDevOrigins)。手元の.envに書く。
+      # **1つでも書いたらlocalhost・127.0.0.1も一緒に書くこと**(書いたものだけが
+      # 許可されるので、開発機自身のブラウザから開いても真っ白になる)
       ALLOWED_DEV_ORIGINS: ${ALLOWED_DEV_ORIGINS:-}
       NODE_ENV: development
     ports:

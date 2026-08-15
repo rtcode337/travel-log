@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
   // Next.jsは/_next配下の開発用リソース(JS・CSS)をクロスオリジンとして403で拒み、
   // 画面が真っ白になる。許可するホストは環境ごとに違うため、リポジトリに焼き込まず
   // 環境変数ALLOWED_DEV_ORIGINS(カンマ区切り。ポートは書かない)から読む。
+  // **1つでも書くと「書いたものだけ」になる** —— localhost・127.0.0.1を落とすと
+  // 開発機自身のブラウザからも真っ白になる(画面は200で返るのにJSが動かないので、
+  // 原因が分かりにくい。実際に踏んだ)。
   // 本番(next start)には影響しない設定
   allowedDevOrigins: (process.env.ALLOWED_DEV_ORIGINS ?? "")
     .split(",")
