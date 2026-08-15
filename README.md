@@ -2,7 +2,11 @@
 
 観光地への「訪問記録」を主役にしたアプリ。
 
-![地図画面](docs/images/01-map.png)
+| 地図 | 訪問記録 |
+|---|---|
+| ![地図画面](docs/images/01-map.png) | ![訪問記録](docs/images/04-visit.png) |
+
+ランクで大きさと色が、シリーズでピンの中のアイコンが決まる。訪問記録は日時・写真・メモを残せる。
 
 ## 主な機能
 
@@ -21,13 +25,17 @@
 
 ## スクリーンショット
 
-| 地図 | スポット一覧 |
+| 地図 | 訪問記録 |
 |---|---|
-| ![地図画面](docs/images/01-map.png) | ![スポット一覧](docs/images/02-spots.png) |
+| ![地図画面](docs/images/01-map.png) | ![訪問記録](docs/images/04-visit.png) |
 
-| スポット詳細 | 管理画面 |
+| スポット一覧 | スポット詳細 |
 |---|---|
-| ![スポット詳細モーダル](docs/images/02b-spot-detail.png) | ![管理画面](docs/images/03-admin.png) |
+| ![スポット一覧](docs/images/02-spots.png) | ![スポット詳細モーダル](docs/images/02b-spot-detail.png) |
+
+| 管理画面 | |
+|---|---|
+| ![管理画面](docs/images/03-admin.png) | |
 
 *スクリーンショットはすべてサンプルデータです。*
 
