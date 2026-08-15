@@ -99,7 +99,7 @@ export const api = {
     me: () => request<{ id: string; role: Role; email: string }>("/api/auth/me"),
   },
   account: {
-    /** 退会(自分のアカウントと個人データの削除)。成功するとセッションも切れる */
+    /** アカウント削除(自分のアカウントと個人データの削除)。成功するとセッションも切れる */
     remove: () => request<{ ok: boolean }>("/api/account", { method: "DELETE" }),
   },
   spots: {

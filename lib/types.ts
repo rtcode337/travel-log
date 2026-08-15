@@ -283,7 +283,7 @@ export interface ExportJob {
   /** エクスポートの対象ユーザー */
   user_id: string;
   user_email: string;
-  /** 実行した管理者(退会するとnull) */
+  /** 実行した管理者(アカウントを削除するとnull) */
   requested_by: string | null;
   status: "running" | "done" | "failed";
   file_size: number | null;
