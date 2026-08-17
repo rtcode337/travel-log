@@ -85,7 +85,7 @@ const CLUSTER_SOURCE_ID = "spots-cluster";
 const CLUSTER_LAYER_ID = "spots-clusters";
 const CLUSTER_COUNT_LAYER_ID = "spots-cluster-count";
 const UNCLUSTERED_LAYER_ID = "spots-unclustered-point";
-/** 同じ座標に複数のスポットが重なっているピンに出す「+N」バッジ */
+/** 同じ座標に複数のスポットが重なっているピンに出す重なり数のバッジ */
 const STACK_BADGE_LAYER_ID = "spots-stack-badge";
 /**
  * 描いている線が通るスポット専用のソース・レイヤー。**クラスタ化しない** ——
@@ -404,7 +404,7 @@ function addOverlaySpotLayers(
     paint: { "icon-opacity": OVERLAY_OPACITY },
   });
 
-  // 同じ座標に重なっているスポットの「+N」。**本体と同じものを重ね表示にも出す**
+  // 同じ座標に重なっているスポットの数。**本体と同じものを重ね表示にも出す**
   // —— 重ねた種別のピンも完全に重なれば下のスポットに気づけない
   addStackBadgeLayer(map, ids.source, ids.stackBadge, clustered, OVERLAY_OPACITY);
 }
@@ -521,8 +521,8 @@ function ensureOverlayLayers(
     });
   });
 
-  // ピンと「+N」バッジのタップ。**バッジにも同じ処理を付ける** ——
-  // 「+N」の文字はピンの右肩にずらして描くので、そこを押すとピンの当たり判定から外れる
+  // ピンと重なり数のバッジのタップ。**バッジにも同じ処理を付ける** ——
+  // 重なり数の文字はピンの右肩にずらして描くので、そこを押すとピンの当たり判定から外れる
   for (const layerId of [ids.unclustered, ids.stackBadge]) {
     map.on("click", layerId, (e) => {
       if (
@@ -873,7 +873,7 @@ type ClusterFeatureProps = {
   visited: boolean;
   /** ensurePinImageで登録済みのピン画像ID */
   icon: string;
-  /** 同じ座標にあるスポットの数(1なら重なりなし)。「+N」バッジの表示に使う */
+  /** 同じ座標にあるスポットの数(1なら重なりなし)。重なり数のバッジの表示に使う */
   stack: number;
 };
 
@@ -901,7 +901,7 @@ function visitedPinOf(
   return !showVisitedOriginalPin && visitedIds.has(spotId);
 }
 
-/** 座標が同じスポットの件数(「+N」バッジ用)。**表示するスポット全体で数える** */
+/** 座標が同じスポットの件数(重なり数のバッジ用)。**表示するスポット全体で数える** */
 function countStacks(spots: Spot[]): Map<string, number> {
   const stacks = new Map<string, number>();
   for (const spot of spots) {
@@ -919,7 +919,7 @@ function buildClusterGeoJSON(
   /**
    * 重なり件数。**ソースを分けても表示中の全スポットで数えたものを渡す** ——
    * 分けたあとの集合ごとに数えると、経路上のピンと重なっている普通のピンが
-   * 「+N」に出てこなくなる(クラスタが解けた拡大率では完全に重なるので、
+   * バッジに出てこなくなる(クラスタが解けた拡大率では完全に重なるので、
    * 数が出ないと下のピンの存在に気づけない)
    */
   stacks: Map<string, number>,
@@ -953,7 +953,7 @@ function buildClusterGeoJSON(
 }
 
 /**
- * ピンと「+N」バッジのレイヤーを、指定のソースに同じ見た目で足す。
+ * ピンと重なり数のバッジのレイヤーを、指定のソースに同じ見た目で足す。
  * クラスタ用(`clustered`)は集約された点を除く filter が要る一方、
  * 経路用のソースには集約が無いので filter を付けない。
  * **2つのソースで見た目が割れないよう、レイアウトはここ1か所に置く。**
@@ -985,7 +985,7 @@ function addPinLayers(
 }
 
 /**
- * 座標が同じスポットが2件以上あるピンの右肩に「+N」(Nは隠れている件数)を出す。
+ * 座標が同じスポットが2件以上あるピンの右肩に**重なっている数**(2・3…)を出す。
  * これが無いと、下に重なっているスポットの存在に気づけない。
  * **本体と重ね表示で見た目が割れないよう、定義はここ1か所に置く** ——
  * 違うのは重ね表示が半透明(`opacity`)であることだけ。
@@ -1005,11 +1005,15 @@ function addStackBadgeLayer(
     source: sourceId,
     filter: clustered ? ["all", notCluster, stacked] : stacked,
     layout: {
-      "text-field": ["concat", "+", ["to-string", ["-", ["get", "stack"], 1]]],
+      // 隠れている数(+N)ではなく**重なっている総数**を出す。ピンが何枚あるのかを
+      // そのまま読めるほうが分かりやすい(1件のときは filter で出さない)
+      "text-field": ["to-string", ["get", "stack"]],
       "text-font": ["Noto Sans Regular"],
       "text-size": 11,
       "text-anchor": "bottom",
-      "text-offset": [1.3, -1.6],
+      // 単位は文字サイズ(em)。**ピンに少し重ねて置く** —— 右へ離すと、隣のピンの
+      // ほうへ寄って「どのピンの数か」が読み取りにくくなる
+      "text-offset": [0.9, -1.6],
       "text-allow-overlap": true,
       "text-ignore-placement": true,
     },
@@ -1136,12 +1140,12 @@ function ensureClusterLayers(
   });
 
   // ピンのタップ。**クラスタ用と経路用の両方のレイヤーに同じ処理を付ける**
-  // ピンと「+N」バッジのタップ。**押されたピンの座標をそのまま渡す** ——
+  // ピンと重なり数のバッジのタップ。**押されたピンの座標をそのまま渡す** ——
   // 同じ地点に何件あるかの解決は呼び出し側(表示中のスポットを持っている側)に任せる。
   // ここで`queryRenderedFeatures`から拾うと**描かれているピンしか数えられず**、
-  // 拡大率が低いときに相方がクラスタへ吸われていると「+N」と食い違う
-  // (Nは表示中の全スポットで数えているため)。
-  // バッジにも同じ処理を付ける —— 「+N」の文字はピンの右肩にずらして描くので、
+  // 拡大率が低いときに相方がクラスタへ吸われているとバッジの数と食い違う
+  // (バッジの数は表示中の全スポットで数えているため)。
+  // バッジにも同じ処理を付ける —— 重なり数の文字はピンの右肩にずらして描くので、
   // そこを押すとピンの当たり判定から外れることがある
   for (const layerId of [
     UNCLUSTERED_LAYER_ID,
@@ -1764,9 +1768,9 @@ export default function MapView({
   }, []);
 
   /**
-   * 地図でピン(または「+N」バッジ)を押したとき。**同じ座標のスポットは
+   * 地図でピン(または重なり数のバッジ)を押したとき。**同じ座標のスポットは
    * 表示中の全件から引き直す** —— 描かれているピンだけを見ると、拡大率が低くて
-   * 相方がクラスタに吸われているときに1件しか見つからず、「+N」と食い違う。
+   * 相方がクラスタに吸われているときに1件しか見つからず、バッジの数と食い違う。
    * 2件以上あれば、どれを開くかを選ばせる(上のピンだけ開くと下は永久に開けない)
    */
   const handleMapSpotSelect = useCallback(
@@ -1920,10 +1924,10 @@ export default function MapView({
    */
   const overlayClusteredRef = useRef<Map<string, boolean>>(new Map());
   /**
-   * 重ね表示種別ごとの、いま地図に描いているスポット。「+N」を押したときに
+   * 重ね表示種別ごとの、いま地図に描いているスポット。バッジを押したときに
    * 同じ地点のスポットを引き直すのに使う(本体の`displayedSpotsRef`と同じ役割)。
    * **描かれているピンから数えてはいけない** —— 拡大率が低いと相方がクラスタへ
-   * 吸われていて「+N」と食い違う
+   * 吸われていてバッジの数と食い違う
    */
   const overlayDisplayedRef = useRef<Map<string, Spot[]>>(new Map());
 
@@ -1952,7 +1956,7 @@ export default function MapView({
   }, []);
 
   /**
-   * 重ね表示のピン(と「+N」バッジ)のタップ。本体と同じく、**押されたスポット
+   * 重ね表示のピン(と重なり数のバッジ)のタップ。本体と同じく、**押されたスポット
    * 自身の座標**でその種別の表示中スポットを引き直し、2件以上なら一覧を出す
    * (描かれているピンから数えると、クラスタへ吸われている相方を数え落とす)
    */
@@ -4533,7 +4537,7 @@ export default function MapView({
       {/* スポット詳細モーダル */}
       {/* 同じ座標にスポットが重なっているときの選択一覧。ピンは完全に重なって
           しまい下のスポットを開く手段が無くなるため、タップでここに列挙する
-          (ピン側には「+N」バッジを出して重なりの存在を知らせている) */}
+          (ピン側には重なり数のバッジを出して重なりの存在を知らせている) */}
       {stack &&
         (() => {
           // 重ね表示のピンから開いたときは、名前もランク・カテゴリの表記も
