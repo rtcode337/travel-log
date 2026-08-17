@@ -117,6 +117,7 @@ function overlayIds(typeKey: string) {
     cluster: `overlay-clusters:${typeKey}`,
     clusterCount: `overlay-cluster-count:${typeKey}`,
     unclustered: `overlay-unclustered-point:${typeKey}`,
+    stackBadge: `overlay-stack-badge:${typeKey}`,
     routeSource: `overlay-routes:${typeKey}`,
     routeLine: `overlay-routes-line:${typeKey}`,
     routeArrow: `overlay-routes-arrow:${typeKey}`,
@@ -134,7 +135,7 @@ const MAIN_PIN_LAYERS = [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_
 function overlayPinLayerIds(typeKeys: string[]): string[] {
   return typeKeys.flatMap((key) => {
     const ids = overlayIds(key);
-    return [ids.cluster, ids.unclustered];
+    return [ids.cluster, ids.unclustered, ids.stackBadge];
   });
 }
 
@@ -334,68 +335,24 @@ function ensureRouteLayers(
 }
 
 /**
- * 別種別の重ね表示用のsource/layerを(まだなければ)その種別のぶんだけ追加する。冪等。
- * 本体のレイヤーの上に置く(タップも重ね表示側が優先)ため、beforeIdは指定せず
- * 最上位へ追加し、以後の描画のたびにmoveOverlayLayersToTopで最上位を維持する。
- * コールバックは初回のレイヤー作成時にしか登録しないため、再レンダーで変わらない
- * 関数(setState)を渡すこと(そのときどきの重ね表示の状態はoverlayKeysRefから読む)。
- *
- * 重ねるのをやめた種別のレイヤーは削除せず、データを空にして残す
- * (重ね直しが軽く、クリックハンドラの解除も要らない。空のsourceは描画されない)
+ * 重ね表示のスポット用のsource/layer。**クラスタのオン/オフで作りが変わるのは
+ * ソースだけ**(GeoJSONソースの`cluster`は作成時にしか決められない)なので、
+ * 切り替えは`setOverlayClusterMode`が作り直して受ける。
+ * レイヤーは4枚とも常に作る —— クラスタを止めたソースには`point_count`を持つ
+ * フィーチャが出てこないので、まとまりの円と件数のレイヤーは何にも一致せず、
+ * 塗りの上書き(`setPaintProperty`)やクリックハンドラの登録先を分岐させずに済む。
  */
-function ensureOverlayLayers(
+function addOverlaySpotLayers(
   map: maplibregl.Map,
   typeKey: string,
-  overlayKeysRef: OverlayKeysRef,
-  onSelectSpot: (id: string) => void,
-  onSelectRoute: (routeId: string) => void
+  clustered: boolean
 ) {
   const ids = overlayIds(typeKey);
-  if (map.getSource(ids.source)) return;
-
-  // ルート(線・矢印・当たり判定)。重ね表示のピンより下になるよう先に追加する
-  map.addSource(ids.routeSource, {
-    type: "geojson",
-    data: { type: "FeatureCollection", features: [] },
-  });
-  map.addLayer({
-    id: ids.routeLine,
-    type: "line",
-    source: ids.routeSource,
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: {
-      "line-color": ["get", "color"],
-      "line-width": 2.5,
-      "line-opacity": OVERLAY_LINE_OPACITY,
-    },
-  });
-  map.addLayer({
-    id: ids.routeArrow,
-    type: "symbol",
-    source: ids.routeSource,
-    layout: {
-      "symbol-placement": "line",
-      "symbol-spacing": 70,
-      "icon-image": ["get", "icon"],
-      "icon-allow-overlap": true,
-      "icon-ignore-placement": true,
-    },
-    paint: { "icon-opacity": OVERLAY_OPACITY },
-  });
-  map.addLayer({
-    id: ids.routeHit,
-    type: "line",
-    source: ids.routeSource,
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-width": 22, "line-opacity": 0 },
-  });
-
   map.addSource(ids.source, {
     type: "geojson",
     data: { type: "FeatureCollection", features: [] },
-    cluster: true,
-    clusterMaxZoom: 16,
-    clusterRadius: 50,
+    // クラスタの有無はソース作成時にしか決められない(あとから切り替えられない)
+    ...(clustered ? { cluster: true, clusterMaxZoom: 16, clusterRadius: 50 } : {}),
   });
   map.addLayer({
     id: ids.cluster,
@@ -447,6 +404,96 @@ function ensureOverlayLayers(
     paint: { "icon-opacity": OVERLAY_OPACITY },
   });
 
+  // 同じ座標に重なっているスポットの「+N」。**本体と同じものを重ね表示にも出す**
+  // —— 重ねた種別のピンも完全に重なれば下のスポットに気づけない
+  addStackBadgeLayer(map, ids.source, ids.stackBadge, clustered, OVERLAY_OPACITY);
+}
+
+/** 重ね表示のスポット用のlayer/sourceを消す(クラスタの切り替えで作り直すため) */
+function removeOverlaySpotLayers(map: maplibregl.Map, typeKey: string) {
+  const ids = overlayIds(typeKey);
+  // sourceを消す前に、それを参照しているlayerを全部消す
+  for (const id of [ids.cluster, ids.clusterCount, ids.unclustered, ids.stackBadge]) {
+    if (map.getLayer(id)) map.removeLayer(id);
+  }
+  if (map.getSource(ids.source)) map.removeSource(ids.source);
+}
+
+/**
+ * 重ね表示のクラスタ表示のオン/オフを切り替える(作り直し)。
+ * **クリックハンドラは付け直さない** —— `map.on(type, layerId, ...)`はレイヤーIDで
+ * 引き当てるので、同じIDで作り直せばそのまま効く(付け直すと二重に発火する)。
+ * 呼び出し後は描画側が`setData`と塗りの上書きをやり直すこと(作り直した直後は空)。
+ */
+function setOverlayClusterMode(
+  map: maplibregl.Map,
+  typeKey: string,
+  clustered: boolean
+) {
+  removeOverlaySpotLayers(map, typeKey);
+  addOverlaySpotLayers(map, typeKey, clustered);
+}
+
+/**
+ * 別種別の重ね表示用のsource/layerを(まだなければ)その種別のぶんだけ追加する。冪等。
+ * 本体のレイヤーの上に置く(タップも重ね表示側が優先)ため、beforeIdは指定せず
+ * 最上位へ追加し、以後の描画のたびにmoveOverlayLayersToTopで最上位を維持する。
+ * コールバックは初回のレイヤー作成時にしか登録しないため、再レンダーで変わらない
+ * 関数(setState)を渡すこと(そのときどきの重ね表示の状態はoverlayKeysRefから読む)。
+ *
+ * 重ねるのをやめた種別のレイヤーは削除せず、データを空にして残す
+ * (重ね直しが軽く、クリックハンドラの解除も要らない。空のsourceは描画されない)
+ */
+function ensureOverlayLayers(
+  map: maplibregl.Map,
+  typeKey: string,
+  overlayKeysRef: OverlayKeysRef,
+  onSelectSpot: (id: string, typeKey: string) => void,
+  onSelectRoute: (routeId: string) => void,
+  clustered: boolean
+) {
+  const ids = overlayIds(typeKey);
+  if (map.getSource(ids.source)) return;
+
+  // ルート(線・矢印・当たり判定)。重ね表示のピンより下になるよう先に追加する
+  map.addSource(ids.routeSource, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addLayer({
+    id: ids.routeLine,
+    type: "line",
+    source: ids.routeSource,
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": ["get", "color"],
+      "line-width": 2.5,
+      "line-opacity": OVERLAY_LINE_OPACITY,
+    },
+  });
+  map.addLayer({
+    id: ids.routeArrow,
+    type: "symbol",
+    source: ids.routeSource,
+    layout: {
+      "symbol-placement": "line",
+      "symbol-spacing": 70,
+      "icon-image": ["get", "icon"],
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+    paint: { "icon-opacity": OVERLAY_OPACITY },
+  });
+  map.addLayer({
+    id: ids.routeHit,
+    type: "line",
+    source: ids.routeSource,
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-width": 22, "line-opacity": 0 },
+  });
+
+  addOverlaySpotLayers(map, typeKey, clustered);
+
   map.on("click", ids.cluster, async (e) => {
     // 同じ位置で自分より上に重なっている種別のピンがあれば、そちらに譲る
     if (
@@ -474,19 +521,25 @@ function ensureOverlayLayers(
     });
   });
 
-  map.on("click", ids.unclustered, (e) => {
-    if (
-      hasFeatureAt(
-        map,
-        e.point,
-        overlayPinLayerIds(higherOverlayKeys(overlayKeysRef.current, typeKey))
-      )
-    ) {
-      return;
-    }
-    const id = e.features?.[0]?.properties?.id;
-    if (id) onSelectSpot(id);
-  });
+  // ピンと「+N」バッジのタップ。**バッジにも同じ処理を付ける** ——
+  // 「+N」の文字はピンの右肩にずらして描くので、そこを押すとピンの当たり判定から外れる
+  for (const layerId of [ids.unclustered, ids.stackBadge]) {
+    map.on("click", layerId, (e) => {
+      if (
+        hasFeatureAt(
+          map,
+          e.point,
+          overlayPinLayerIds(higherOverlayKeys(overlayKeysRef.current, typeKey))
+        )
+      ) {
+        return;
+      }
+      // 座標はフィーチャから読まない(タイル化で丸められている)。IDだけ渡して
+      // 呼び出し側が元のスポットの座標で同じ地点を引き直す(本体と同じ理由)
+      const id = e.features?.[0]?.properties?.id;
+      if (typeof id === "string") onSelectSpot(id, typeKey);
+    });
+  }
 
   map.on("click", ids.routeHit, (e) => {
     // ピン(重ね表示・本体どちらも)と重なった位置のタップはピン側を優先し、
@@ -508,7 +561,12 @@ function ensureOverlayLayers(
     if (routeId) onSelectRoute(routeId);
   });
 
-  for (const layerId of [ids.cluster, ids.unclustered, ids.routeHit]) {
+  for (const layerId of [
+    ids.cluster,
+    ids.unclustered,
+    ids.stackBadge,
+    ids.routeHit,
+  ]) {
     map.on("mouseenter", layerId, () => {
       map.getCanvas().style.cursor = "pointer";
     });
@@ -529,7 +587,12 @@ function moveOverlayLayersToTop(map: maplibregl.Map, typeKeys: string[]) {
   const idsList = typeKeys.map(overlayIds);
   const ordered = [
     ...idsList.flatMap((ids) => [ids.routeLine, ids.routeArrow, ids.routeHit]),
-    ...idsList.flatMap((ids) => [ids.cluster, ids.clusterCount, ids.unclustered]),
+    ...idsList.flatMap((ids) => [
+      ids.cluster,
+      ids.clusterCount,
+      ids.unclustered,
+      ids.stackBadge,
+    ]),
   ];
   for (const id of ordered) {
     if (map.getLayer(id)) map.moveLayer(id);
@@ -918,8 +981,23 @@ function addPinLayers(
     },
   });
 
-  // 座標が同じスポットが2件以上あるピンの右肩に「+N」(Nは隠れている件数)を出す。
-  // これが無いと、下に重なっているスポットの存在に気づけない
+  addStackBadgeLayer(map, sourceId, badgeLayerId, clustered);
+}
+
+/**
+ * 座標が同じスポットが2件以上あるピンの右肩に「+N」(Nは隠れている件数)を出す。
+ * これが無いと、下に重なっているスポットの存在に気づけない。
+ * **本体と重ね表示で見た目が割れないよう、定義はここ1か所に置く** ——
+ * 違うのは重ね表示が半透明(`opacity`)であることだけ。
+ */
+function addStackBadgeLayer(
+  map: maplibregl.Map,
+  sourceId: string,
+  badgeLayerId: string,
+  clustered: boolean,
+  opacity = 1
+) {
+  const notCluster: maplibregl.FilterSpecification = ["!", ["has", "point_count"]];
   const stacked: maplibregl.FilterSpecification = [">", ["get", "stack"], 1];
   map.addLayer({
     id: badgeLayerId,
@@ -939,6 +1017,7 @@ function addPinLayers(
       "text-color": "#ffffff",
       "text-halo-color": "#1f2937",
       "text-halo-width": 2,
+      "text-opacity": opacity,
     },
   });
 }
@@ -1548,7 +1627,15 @@ export default function MapView({
   const filtersActive = hasActiveFilters(filters);
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   /** 同じ地点に重なっているスポットの選択一覧(nullなら非表示) */
-  const [stackSpotIds, setStackSpotIds] = useState<string[] | null>(null);
+  /**
+   * 同じ座標に重なっているスポットの選択一覧。`overlayTypeKey`がnullなら本体の
+   * スポット、そうでなければその重ね表示種別のスポット
+   * (名前・バッジの解決先と、選んだときの開き方が変わる)
+   */
+  const [stack, setStack] = useState<{
+    ids: string[];
+    overlayTypeKey: string | null;
+  } | null>(null);
   /** いま地図に出しているスポット(絞り込み後)。ピンのタップ処理は地図の
    *  レイヤー生成時に一度だけ束縛されるので、最新の一覧はrefで参照する */
   const displayedSpotsRef = useRef<Spot[]>([]);
@@ -1687,7 +1774,7 @@ export default function MapView({
       const ids = clicked
         ? shown.filter((spot) => stackKey(spot) === stackKey(clicked)).map((s) => s.id)
         : [id];
-      if (ids.length > 1) setStackSpotIds(ids);
+      if (ids.length > 1) setStack({ ids, overlayTypeKey: null });
       else handleSpotSelect(id);
     },
     [handleSpotSelect]
@@ -1804,6 +1891,19 @@ export default function MapView({
    * 空にするために覚えておく(レイヤー自体は作り直しを避けるため消さない)
    */
   const createdOverlayKeysRef = useRef<Set<string>>(new Set());
+  /**
+   * 重ね表示種別ごとの、いま作ってあるレイヤーのクラスタ有無。
+   * GeoJSONソースの`cluster`は作成時にしか決められないので、設定が変わったかを
+   * これで見て`setOverlayClusterMode`が作り直す
+   */
+  const overlayClusteredRef = useRef<Map<string, boolean>>(new Map());
+  /**
+   * 重ね表示種別ごとの、いま地図に描いているスポット。「+N」を押したときに
+   * 同じ地点のスポットを引き直すのに使う(本体の`displayedSpotsRef`と同じ役割)。
+   * **描かれているピンから数えてはいけない** —— 拡大率が低いと相方がクラスタへ
+   * 吸われていて「+N」と食い違う
+   */
+  const overlayDisplayedRef = useRef<Map<string, Spot[]>>(new Map());
 
   // 重ね表示側のシリーズ・カテゴリ設定は種別ごとに要るため、hook(useSeriesStyles /
   // useCategories は1種別ぶん)ではなく取得済みの種別一覧から直接解決する
@@ -1824,10 +1924,30 @@ export default function MapView({
   // 重ね表示(別種別)のピンのタップ: 作成モード中は本体ピンと同じく追加確認へ回す。
   // それ以外は従来どおり読み取り専用の詳細を開く。ハンドラはレイヤー生成時に一度だけ
   // 束縛されるため、buildModeRef を見て呼び出し時に分岐する(handleSpotSelectと同じ理由)
-  const handleOverlaySpotSelect = useCallback((id: string) => {
+  const openOverlaySpot = useCallback((id: string) => {
     if (buildModeRef.current) setAddCandidate(id);
     else setOverlayDetailSpotId(id);
   }, []);
+
+  /**
+   * 重ね表示のピン(と「+N」バッジ)のタップ。本体と同じく、**押されたスポット
+   * 自身の座標**でその種別の表示中スポットを引き直し、2件以上なら一覧を出す
+   * (描かれているピンから数えると、クラスタへ吸われている相方を数え落とす)
+   */
+  const handleOverlaySpotSelect = useCallback(
+    (id: string, typeKey: string) => {
+      const shown = overlayDisplayedRef.current.get(typeKey) ?? [];
+      const clicked = shown.find((spot) => spot.id === id);
+      const ids = clicked
+        ? shown
+            .filter((spot) => stackKey(spot) === stackKey(clicked))
+            .map((spot) => spot.id)
+        : [id];
+      if (ids.length > 1) setStack({ ids, overlayTypeKey: typeKey });
+      else openOverlaySpot(id);
+    },
+    [openOverlaySpot]
+  );
 
   // 重ね表示スポットのID→Spot(全種別ぶんをまとめる)。作成中パネルや追加確認で
   // 別種別スポットの名前を解決する
@@ -2209,6 +2329,7 @@ export default function MapView({
     pendingMapReadyRef.current = [];
     // 地図ごと作り直されるとレイヤーも消えるため、作成済みの記録もリセットする
     createdOverlayKeysRef.current.clear();
+    overlayClusteredRef.current.clear();
     map.on("styledata", () => {
       if (mapReadyRef.current) return;
       mapReadyRef.current = true;
@@ -2959,7 +3080,10 @@ export default function MapView({
       // 選択が外れた(・注視で消した)種別は、作成済みレイヤーのデータを空にする
       // (レイヤー自体は残しても害がない。ensureOverlayLayers参照)
       for (const key of createdOverlayKeysRef.current) {
-        if (!active.includes(key)) clearOverlayData(map, key);
+        if (!active.includes(key)) {
+          clearOverlayData(map, key);
+          overlayDisplayedRef.current.delete(key);
+        }
       }
 
       const render = async () => {
@@ -2969,22 +3093,35 @@ export default function MapView({
           if (!data) {
             if (createdOverlayKeysRef.current.has(typeKey)) {
               clearOverlayData(map, typeKey);
+              overlayDisplayedRef.current.delete(typeKey);
             }
             continue;
           }
+          const typeFilters = overlayFilters.get(typeKey) ?? DEFAULT_FILTERS;
+          // クラスタ表示のオン/オフは重ね先の種別の設定に従う(本体とは独立)
+          const clustered = !typeFilters.disableCluster;
           ensureOverlayLayers(
             map,
             typeKey,
             overlayKeysRef,
             handleOverlaySpotSelect,
-            setOverlayDetailRouteId
+            setOverlayDetailRouteId,
+            clustered
           );
+          // 設定が変わったらソースごと作り直す(clusterは作成時にしか決められない)。
+          // 直後のsetDataと塗りの上書きで中身は入り直す
+          if (
+            createdOverlayKeysRef.current.has(typeKey) &&
+            overlayClusteredRef.current.get(typeKey) !== clustered
+          ) {
+            setOverlayClusterMode(map, typeKey, clustered);
+          }
           createdOverlayKeysRef.current.add(typeKey);
+          overlayClusteredRef.current.set(typeKey, clustered);
 
           const ids = overlayIds(typeKey);
           const styles = overlaySeriesStylesOf(typeKey);
           const overlayRank = overlayRankEnabledOf(typeKey);
-          const typeFilters = overlayFilters.get(typeKey) ?? DEFAULT_FILTERS;
           const spotById = new Map(data.spots.map((s) => [s.id, s]));
           // 「これだけを表示」中は重ね表示のルートも隠す
           // (注視中の経路だけの地図にする)
@@ -3036,6 +3173,7 @@ export default function MapView({
             )
           );
           if (cancelled) return;
+          overlayDisplayedRef.current.set(typeKey, filtered);
           (
             map.getSource(ids.source) as maplibregl.GeoJSONSource | undefined
           )?.setData(
@@ -3946,6 +4084,31 @@ export default function MapView({
                   categories={overlayCategoriesOf(typeKey)}
                   showRouteToggle={data.routes.length > 0}
                 />
+                {/* 地図の見せ方の切り替え(絞り込みではない)。本体の絞り込みパネルの
+                    「表示」の節と同じ扱いで、重ね表示側にも要る —— 重ねた種別のピンが
+                    「N件」の丸にまとまったままだと、本体のピンとの位置関係が読めない。
+                    「訪問済みも元のピンで表示」は本体の値を種別をまたいで効かせる設定
+                    なので、ここには出さない */}
+                <div className="border-t border-gray-100 pt-3">
+                  <p className="mb-2 text-sm font-medium">表示</p>
+                  <button
+                    type="button"
+                    aria-pressed={typeFilters.disableCluster}
+                    onClick={() =>
+                      setOverlayFiltersAndSave(typeKey, {
+                        ...typeFilters,
+                        disableCluster: !typeFilters.disableCluster,
+                      })
+                    }
+                    className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                      typeFilters.disableCluster
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-gray-300 bg-white text-gray-400"
+                    }`}
+                  >
+                    クラスタ表示を無効化
+                  </button>
+                </div>
               </div>
             </div>
           );
@@ -4346,66 +4509,83 @@ export default function MapView({
       {/* 同じ座標にスポットが重なっているときの選択一覧。ピンは完全に重なって
           しまい下のスポットを開く手段が無くなるため、タップでここに列挙する
           (ピン側には「+N」バッジを出して重なりの存在を知らせている) */}
-      {stackSpotIds && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-          onClick={() => setStackSpotIds(null)}
-        >
-          {/* 横幅は一覧に必要な分だけ。件数が多いと縦に伸びるので、画面の高さいっぱいまで
-              使い、はみ出す分だけ一覧側をスクロールさせる */}
-          <div
-            className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-              <h2 className="text-sm font-semibold">
-                この地点のスポット({stackSpotIds.length}件)
-              </h2>
-              <button
-                type="button"
-                className="text-slate-400 hover:text-slate-600"
-                aria-label="閉じる"
-                onClick={() => setStackSpotIds(null)}
+      {stack &&
+        (() => {
+          // 重ね表示のピンから開いたときは、名前もランク・カテゴリの表記も
+          // **そのスポットが属する種別**の設定で解決する(本体の設定で描くと
+          // 名前が出ない・ランクのラベルがずれる)
+          const overlayTypeKey = stack.overlayTypeKey;
+          const stackSpotById = overlayTypeKey ? overlaySpotById : spotById;
+          const stackRankEnabled = overlayTypeKey
+            ? overlayRankEnabledOf(overlayTypeKey)
+            : rankEnabled;
+          const stackCategories = overlayTypeKey
+            ? overlayCategoriesOf(overlayTypeKey)
+            : categories;
+          return (
+            <div
+              className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+              onClick={() => setStack(null)}
+            >
+              {/* 横幅は一覧に必要な分だけ。件数が多いと縦に伸びるので、画面の高さいっぱいまで
+                  使い、はみ出す分だけ一覧側をスクロールさせる */}
+              <div
+                className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
+                onClick={(e) => e.stopPropagation()}
               >
-                ✕
-              </button>
+                <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+                  <h2 className="text-sm font-semibold">
+                    この地点のスポット({stack.ids.length}件)
+                  </h2>
+                  <button
+                    type="button"
+                    className="text-slate-400 hover:text-slate-600"
+                    aria-label="閉じる"
+                    onClick={() => setStack(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <ul className="min-h-0 flex-1 divide-y overflow-y-auto">
+                  {stack.ids.map((id) => {
+                    const spot = stackSpotById.get(id);
+                    if (!spot) return null;
+                    return (
+                      <li key={id}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50"
+                          onClick={() => {
+                            setStack(null);
+                            if (overlayTypeKey) openOverlaySpot(id);
+                            else handleSpotSelect(id);
+                          }}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm">{spot.name}</span>
+                            {/* 一覧・詳細と同じ1行(同じ地点なので地域は出さない) */}
+                            <span className="block truncate text-xs text-slate-500">
+                              {formatSpotMeta(spot, {
+                                rankEnabled: stackRankEnabled,
+                                categories: stackCategories,
+                                includeRegion: false,
+                              })}
+                            </span>
+                          </span>
+                          {visitedIds.has(id) && (
+                            <span className="shrink-0 text-xs text-green-600">
+                              ✓訪問済み
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             </div>
-            <ul className="min-h-0 flex-1 divide-y overflow-y-auto">
-              {stackSpotIds.map((id) => {
-                const spot = spotById.get(id);
-                if (!spot) return null;
-                return (
-                  <li key={id}>
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50"
-                      onClick={() => {
-                        setStackSpotIds(null);
-                        handleSpotSelect(id);
-                      }}
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm">{spot.name}</span>
-                        {/* 一覧・詳細と同じ1行(同じ地点なので地域は出さない) */}
-                        <span className="block truncate text-xs text-slate-500">
-                          {formatSpotMeta(spot, {
-                            rankEnabled,
-                            categories,
-                            includeRegion: false,
-                          })}
-                        </span>
-                      </span>
-                      {visitedIds.has(id) && (
-                        <span className="shrink-0 text-xs text-green-600">✓訪問済み</span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </div>
-      )}
+          );
+        })()}
 
       {detailSpotId && (
         <SpotDetailModal
