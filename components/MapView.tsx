@@ -1192,8 +1192,12 @@ function showClusterLayers(map: maplibregl.Map) {
  * 同じセッション内であれば保持される)。これがあれば再訪時は現在地取得をせず
  * そのまま復元し、なければ(このセッションで初めてその種別の/mapを開いたとき)
  * 初期表示の決定(日本の種別は現在地取得、それ以外はスポット全体へのフィット)に進む。
- * 種別ごとに分けるのは、日本の種別と海外の種別を行き来したとき、直前の種別の
- * 表示位置を引き継いでも意味がないため。
+ * 種別ごとに分けるのは、種別を跨いだ行き来のあとで戻ってきたときに、その種別で
+ * 最後に見ていた場所が出るようにするため。
+ * **種別チップのメニューで切り替えるときだけは、いま見ている場所を切り替え先へ
+ * 書き写す**(`carryViewTo`) —— 切り替えは「同じ場所を別の種別で見たい」ことが
+ * 多く、切り替え先の古い記憶や初期表示(現在地・スポット全体)へ飛ぶと、
+ * どこを見ていたのか分からなくなる。
  */
 const lastViews = new Map<string, { center: [number, number]; zoom: number }>();
 
@@ -1862,6 +1866,24 @@ export default function MapView({
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
   // 左下の種別チップをタップして開く「別の種別へ切り替え」メニューの開閉
   const [showTypeMenu, setShowTypeMenu] = useState(false);
+
+  /**
+   * 種別を切り替えるとき、**いま見ている場所を切り替え先の記憶(`lastViews`)へ
+   * 書き写す**。切り替え先は自分の記憶を持っていればそこ・持っていなければ
+   * 初期表示(現在地の取得 or スポット全体へのフィット)へ飛んでいたので、
+   * 「同じ場所を別の種別で見たい」(この地図に何があるかを比べたい)という
+   * 切り替えの動機と食い違っていた。
+   * **書き込むのは切り替え先のキー**で、いまの種別の記憶は地図の後片付け
+   * (`saveView`)がそのまま残す —— 戻ってきたときに同じ場所が出るのは変わらない。
+   */
+  const carryViewTo = useCallback((targetTypeKey: string) => {
+    const map = mapRef.current;
+    if (!map) return;
+    lastViews.set(targetTypeKey, {
+      center: map.getCenter().toArray() as [number, number],
+      zoom: map.getZoom(),
+    });
+  }, []);
   const [overlayDetailSpotId, setOverlayDetailSpotId] = useState<string | null>(null);
   const [overlayDetailRouteId, setOverlayDetailRouteId] = useState<string | null>(null);
   // 未ダウンロードの種別を選んだときの「ダウンロードしますか?」確認(値は対象の種別キー)
@@ -3515,7 +3537,10 @@ export default function MapView({
                     <Link
                       key={t.id}
                       href={`/${t.key}/map`}
-                      onClick={() => setShowTypeMenu(false)}
+                      onClick={() => {
+                        carryViewTo(t.key);
+                        setShowTypeMenu(false);
+                      }}
                       className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                     >
                       {label}
