@@ -186,6 +186,9 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 `resolveSpotShape`)。地図ピン(`lib/pinIcon.ts`)・バッジ(`components/SpotBadge.tsx`)・
 ミニ地図(`MiniMap`)・作成パネルの色玉(`PlanBuildPanel`)が同じ答えを使う ——
 別々に決めていると、同じスポットが地図と一覧で違う見た目になって対応が取れなくなる。
+**同じ関数を呼ぶだけでは足りず、引数もそろえること** —— 作成パネルの色玉は
+ランクを渡さず`rankEnabled: false`で解決していたため、ランクを使う種別
+(シリーズが色を持たない観光地など)で**全部が既定の灰色**になっていた。
 `lib/pinIcon.ts`は**何を描くかを決めない**(解決済みの面・中身・形を受け取って描くだけ)。
 
 #### ランク(`rank_enabled`)
@@ -584,6 +587,20 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 複数スポットを順序付きでまとめる「訪問予定リスト」(旅程)。1スポットごとの`visit_plans`(行きたい場所のブックマーク)とは**独立**で、`/[type]/spots`の訪問予定欄に個別の予定スポットと**混じって**並ぶ(見出しは0件でも常に表示する)。スキーマは`visit_plan_lists`(種別ごと=`spot_type_id`、`title`・`description`・`start_date`・`end_date`(単日は開始=終了)・`user_id`)+`visit_plan_list_items`(`list_id`・`spot_id`・`seq`・`visited_at`、`(list_id, spot_id)`一意)の2テーブル(`db/init/01_schema.sql`、移行は`migrations/006`と`008`)。**種別ごと**(地図の作成が`/[type]/map`上で行われるため。CLAUDE作成時の判断で種別横断は不可)。
 
 作成フローは、訪問予定欄の「+ 訪問予定リストを追加」→ 基本情報モーダル(`VisitPlanListFormModal`。タイトル・説明・期間)→ **下書きをlocalStorageへ保存**(`lib/planListDraft.ts`。「入力完了」までDBに保存しないため、SpotsView→MapViewのページ遷移をまたいで保持する必要がある)→ `/[type]/map?buildList=1`へ遷移して**地図の作成モード**に入る。作成モードでは`MapView`が右側に`PlanBuildPanel`(リスト名・選択済みスポットの並び替え/削除・「入力完了」)を出し、**ピンのタップを詳細表示ではなく追加確認ダイアログに回す**(`buildModeRef`で`ensureClusterLayers`が一度だけ束縛するクリックハンドラ`handleSpotSelect`の分岐を切り替える)。この確認ダイアログには名前だけでなく**スポットの説明とWikipediaの概要への入口**(スポット詳細と同じ`SpotInfoModal`)を出す —— 名前だけでは入れるかどうか決められないため。**表示にはスポットを`api.spots.get`で取り直す**(`addCandidateDetail`)—— 地図の公開スポットはIndexedDBキャッシュ由来で、容量のため`description`も`spot_type_id`も保存されておらず`expandSpot`がnull・空文字を返すため(`lib/spotCacheDb.ts`)。**空の`spot_type_id`のまま種別を引くと必ず見つからず、Wikipediaの可否が種別の設定ではなく既定値(true)で決まってしまう**ので、取り直しが済むまでボタン自体を出さない(ちらつき防止も兼ねる)。Wikipediaの言語・検索の起点は**スポット自身の種別**の設定で引く(重ね表示のピンから開いたときは今の地図の種別と食い違う)。並び替えはタッチでも動くようポインタイベントの自前実装(ライブラリ非依存。3本線ハンドル)で、**`lib/useDragReorder.ts`に切り出してリスト詳細・経路詳細と共用する**(下記「経由スポットの並び替え」)。「入力完了」で`POST /api/visit-plan-lists`(`{ type, title, description, start_date, end_date, spot_ids }`。spot_idsはseq順)して下書きを消し`/[type]/spots`へ戻る。
+
+**作成中のパネルの行をタップすると、地図がそのスポットへ寄って丸が敷かれる**
+(`MapView`の`focusedBuildSpotId` / `focusBuildSpot`、パネル側は`onFocusSpot`)。
+一覧に名前が並んでいても、それが地図のどのピンなのかは探さないと分からないため。
+
+- **丸は専用のソース・レイヤー**(`spot-focus`。`ensureClusterLayers`の**先頭**で作るので、
+  後から足すクラスタ・ピンのレイヤーが上に乗り、ピンを隠さず足元に敷ける)。
+  **クラスタ化しない**ので、拡大率が低くてピンがクラスタへ吸われていても
+  「どこを見ているか」は出る
+- **寄せるときに今より引かない**(`Math.max(map.getZoom(), 15)`)。ズームを固定すると、
+  押すたびに縮尺が飛ぶ
+- **押した行も同じ青で目立たせる**(地図とパネルのどちらを見ていても対応が取れるように)
+- **ドラッグは`≡`の側だけ**なので、行の本体をボタンにしても並び替えとは競合しない
+- **作成モードを抜けたら丸も消す**(地図に置き去りにしない)
 
 一覧APIは`GET /api/visit-plan-lists?type=<キー>`で、各リストの経由スポットを**seq順の`spot_ids`(UUID配列)**と、そのうち訪問済みの**`visited_spot_ids`**として返す(スポット詳細は呼び出し側が保持済みの一覧から解決するため軽い)。この列の作り方は3つのAPIで同じものを使う(`lib/visitPlanListSql.ts`の`PLAN_LIST_COLUMNS`)。リストのタップで`VisitPlanListDetailModal`(タイトル・説明・期間・経由スポット一覧・並び替え・編集・削除)。`GET/PATCH/DELETE /api/visit-plan-lists/[id]`は作成者本人のみ。
 

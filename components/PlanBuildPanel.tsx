@@ -11,8 +11,14 @@ import HelpTip from "@/components/HelpTip";
  * 訪問予定リスト作成モードで地図の右側に出すパネル。リストのタイトルと、
  * 選択済みスポットの一覧(左端の三本線ハンドルをつかんでドラッグで並び替え)、
  * 「入力完了」ボタンを表示する。並び替えは`useDragReorder`(リスト詳細・経路詳細と共通)。
- * シリーズは名前のバッジではなく色玉(シリーズの色+縁取り)で示す
- * (シリーズ名が長いとスポット名の幅を食って何行にも折り返してしまうため)。
+ * シリーズは名前のバッジではなく色玉で示す(シリーズ名が長いとスポット名の幅を食って
+ * 何行にも折り返してしまうため)。**色玉の色は地図のピンと同じ解決**を通す
+ * (`resolveSpotFace`にそのスポットのランクと種別の`rankEnabled`を渡す)——
+ * ランクを使う種別ではシリーズが色を持たず、ランクを渡さないと全部が既定の灰色になる。
+ *
+ * **行を押すとそのスポットへ地図が寄り、押した行と地図の両方が目立つ**
+ * (`onFocusSpot`)。一覧に名前が並んでいても、それが地図のどのピンなのかは
+ * 探さないと分からないため。
  */
 export default function PlanBuildPanel({
   title,
@@ -20,7 +26,10 @@ export default function PlanBuildPanel({
   spotIds,
   spotsById,
   seriesStyles,
+  rankEnabled = false,
   saving,
+  focusedSpotId = null,
+  onFocusSpot,
   onReorder,
   onRemove,
   onComplete,
@@ -32,7 +41,13 @@ export default function PlanBuildPanel({
   spotIds: string[];
   spotsById: Map<string, Spot>;
   seriesStyles: SeriesStyleDefinition[];
+  /** その種別がランクを使うか(色玉の色の出どころが変わる。lib/useRankEnabled.ts) */
+  rankEnabled?: boolean;
   saving: boolean;
+  /** 地図で目立たせているスポット(押した行)。行にも同じ印を出す */
+  focusedSpotId?: string | null;
+  /** 行を押したときに呼ばれる(地図側がそこへ寄せて丸を敷く) */
+  onFocusSpot?: (spotId: string) => void;
   onReorder: (spotIds: string[]) => void;
   onRemove: (spotId: string) => void;
   onComplete: () => void;
@@ -55,7 +70,7 @@ export default function PlanBuildPanel({
         </p>
         <h2 className="break-words font-bold leading-snug">{title}</h2>
         <p className="mt-0.5 text-xs text-gray-500">
-          ピンをタップして追加({spotIds.length}件)
+          ピンをタップして追加({spotIds.length}件)。行をタップすると地図がそこへ寄ります。
         </p>
       </div>
 
@@ -70,11 +85,13 @@ export default function PlanBuildPanel({
         )}
         {spotIds.map((spotId, i) => {
           const spot = spotsById.get(spotId);
-          // 色玉はピン・バッジと同じ解決を通す(ランクを使う種別ではランクの色)。
-          // ここでは種別の設定を持っていないので、色の出どころがシリーズになる
-          // ランク未使用の扱いで解決する —— 作成中の一覧は色の細かい段階より
-          // 「どのスポットか」が読めればよい
-          const face = spot ? resolveSpotFace(null, spot.series, seriesStyles, false) : null;
+          // 色玉はピン・バッジとまったく同じ解決を通す(ランクを使う種別では
+          // ランクの色、シリーズが色を持つ種別ではその色)。**ランクを渡さないと
+          // 観光地のような種別で全部が既定の灰色になる**
+          const face = spot
+            ? resolveSpotFace(spot.rank, spot.series, seriesStyles, rankEnabled)
+            : null;
+          const focused = spotId === focusedSpotId;
           const seriesName =
             spot && spot.series && spot.series.length > 0
               ? spot.series
@@ -84,7 +101,12 @@ export default function PlanBuildPanel({
               key={spotId}
               ref={setRowRef(i)}
               className={`flex select-none items-center gap-2 py-1.5 pr-2.5 ${
-                dragIndex === i ? "bg-blue-100" : ""
+                dragIndex === i
+                  ? "bg-blue-100"
+                  : focused
+                    ? // 地図で目立たせているスポット。地図側の丸と同じ青でそろえる
+                      "bg-blue-50 ring-1 ring-inset ring-blue-400"
+                    : ""
               }`}
             >
               {/* 並び替えハンドル。touch-action: noneはここにだけ当てる
@@ -96,12 +118,19 @@ export default function PlanBuildPanel({
                 <span className="flex h-full items-center">≡</span>
               </span>
               {spot && face ? (
-                <>
+                /* 押すと地図がこのスポットへ寄る。**ドラッグは≡の側だけ**なので、
+                   ここをボタンにしても並び替えとは競合しない */
+                <button
+                  type="button"
+                  onClick={() => onFocusSpot?.(spot.id)}
+                  title={`${spot.name}(タップで地図をここへ)`}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
                   {/* シリーズは色玉で示す(名前のバッジだと長いシリーズ名が
-                      スポット名の幅を食うため出さない。名前はtitleで確認できる) */}
+                      スポット名の幅を食うため出さない) */}
                   <span
                     className="h-3.5 w-3.5 shrink-0 rounded-full"
-                    title={seriesName}
+                    aria-label={seriesName}
                     style={{
                       backgroundColor: face.color,
                       border: `1.5px ${
@@ -109,10 +138,14 @@ export default function PlanBuildPanel({
                       } ${face.borderColor}`,
                     }}
                   />
-                  <span className="min-w-0 flex-1 break-words text-sm leading-snug">
+                  <span
+                    className={`min-w-0 flex-1 break-words text-sm leading-snug ${
+                      focused ? "font-medium text-blue-700" : ""
+                    }`}
+                  >
                     {spot.name}
                   </span>
-                </>
+                </button>
               ) : (
                 <span className="flex min-w-0 flex-1 items-center gap-1 break-words text-sm text-gray-400">
                   (読み込み中のスポット)
