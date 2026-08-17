@@ -92,6 +92,12 @@ const STACK_BADGE_LAYER_ID = "spots-stack-badge";
  * GeoJSONソースの`cluster`はソース単位でしか切り替えられないので、
  * まとめたくないスポットは別のソースに分ける必要がある
  */
+// 作成モードでパネルの行を押したスポットを目立たせる丸(ピンの下に敷く)。
+// **クラスタ化しない自前のソース**にするので、拡大率が低くてピンがクラスタへ
+// 吸われているときでも「どこを見ているか」が出る
+const FOCUS_SOURCE_ID = "spot-focus";
+const FOCUS_LAYER_ID = "spot-focus-halo";
+
 const PATH_PIN_SOURCE_ID = "spots-path";
 const PATH_PIN_LAYER_ID = "spots-path-point";
 const PATH_STACK_BADGE_LAYER_ID = "spots-path-stack-badge";
@@ -946,6 +952,27 @@ function ensureClusterLayers(
 ) {
   if (map.getSource(CLUSTER_SOURCE_ID)) return;
 
+  // フォーカスの丸を先に作る —— 後から足すクラスタ・ピンのレイヤーが上に乗るので、
+  // ピンを隠さずその足元に敷ける
+  map.addSource(FOCUS_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addLayer({
+    id: FOCUS_LAYER_ID,
+    type: "circle",
+    source: FOCUS_SOURCE_ID,
+    paint: {
+      // 拡大率で大きさを変える(遠くでは小さく、近くではピンを囲む大きさに)
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 10, 16, 22],
+      "circle-color": "#2563eb",
+      "circle-opacity": 0.2,
+      "circle-stroke-width": 3,
+      "circle-stroke-color": "#2563eb",
+      "circle-stroke-opacity": 0.9,
+    },
+  });
+
   map.addSource(CLUSTER_SOURCE_ID, {
     type: "geojson",
     data: { type: "FeatureCollection", features: [] },
@@ -1562,6 +1589,9 @@ export default function MapView({
   const [addCandidateInfo, setAddCandidateInfo] = useState(false);
   const [savingList, setSavingList] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
+  // 作成モードのパネルで押した行のスポット。地図をそこへ寄せ、丸を敷いて目立たせる
+  // (どのピンが一覧のどの行なのかは、名前だけでは地図の上で見つけられないため)
+  const [focusedBuildSpotId, setFocusedBuildSpotId] = useState<string | null>(null);
   // ピンのクリックハンドラ(レイヤー作成時に一度だけ束縛される)から現在の作成モードを
   // 参照するためのref。作成モード中はピンタップを詳細表示でなくリスト追加に回す
   const buildModeRef = useRef(false);
@@ -1573,6 +1603,8 @@ export default function MapView({
   useEffect(() => {
     buildModeRef.current = buildDraft !== null;
     setHideNav(buildDraft !== null);
+    // 作成モードを抜けたらフォーカスの丸も消す(地図に置き去りにしない)
+    if (buildDraft === null) setFocusedBuildSpotId(null);
     return () => setHideNav(false);
   }, [buildDraft, setHideNav]);
   // マウント時/種別切替時に ?buildList=1 なら下書きを読み込んで作成モードに入る
@@ -1884,6 +1916,49 @@ export default function MapView({
     for (const [id, s] of spotById) m.set(id, s);
     return m;
   }, [overlaySpotById, pathExtraSpots, spotById]);
+
+  // パネルの行を押したときに、そのスポットへ地図を寄せる。**今より引かない**
+  // (十分寄っているのにズームを固定すると、押すたびに縮尺が飛ぶ)
+  const focusBuildSpot = useCallback(
+    (spotId: string) => {
+      setFocusedBuildSpotId(spotId);
+      const map = mapRef.current;
+      const spot = buildPanelSpotById.get(spotId);
+      if (!map || !spot) return;
+      runWhenMapReady(() =>
+        map.flyTo({
+          center: [spot.lng, spot.lat],
+          zoom: Math.max(map.getZoom(), 15),
+        })
+      );
+    },
+    [buildPanelSpotById, runWhenMapReady]
+  );
+
+  // フォーカスの丸。押した行のスポットの足元に1つだけ敷く
+  // (座標が手元に無いスポットは敷けないので空にする)
+  useEffect(() => {
+    const spot = focusedBuildSpotId
+      ? buildPanelSpotById.get(focusedBuildSpotId)
+      : undefined;
+    runWhenMapReady(() => {
+      const source = mapRef.current?.getSource(FOCUS_SOURCE_ID) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      source?.setData({
+        type: "FeatureCollection",
+        features: spot
+          ? [
+              {
+                type: "Feature",
+                properties: {},
+                geometry: { type: "Point", coordinates: [spot.lng, spot.lat] },
+              },
+            ]
+          : [],
+      });
+    });
+  }, [focusedBuildSpotId, buildPanelSpotById, runWhenMapReady]);
 
   // 作成モード中の下書きの経路(選択済みスポットを選んだ順に繋いだもの)。地図に
   // 訪問予定リストと同じ紫の矢印で描き、追加・削除・並び替えに即追従する。
@@ -3890,7 +3965,10 @@ export default function MapView({
           spotIds={buildDraft.spotIds}
           spotsById={buildPanelSpotById}
           seriesStyles={seriesStyles}
+          rankEnabled={rankEnabled}
           saving={savingList}
+          focusedSpotId={focusedBuildSpotId}
+          onFocusSpot={focusBuildSpot}
           onReorder={(spotIds) =>
             updateBuildDraft({ ...buildDraft, spotIds })
           }
