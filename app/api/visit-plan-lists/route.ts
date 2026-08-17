@@ -11,6 +11,11 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * seq順の spot_ids(UUID配列)として返す(スポットの詳細は呼び出し側が保持済みの
  * 一覧から解決する)。訪問済みの経由スポットは spot_ids に残したまま
  * visited_spot_ids にも入る。
+ *
+ * **既定ではアーカイブしたリストを返さない**(`?archived=1`のときだけ、
+ * アーカイブしたものだけを新しくアーカイブした順で返す)。呼び出し側は
+ * 一覧・地図の経路・「リストに追加」など全部この口を通るので、ここで外せば
+ * アーカイブ済みが現役の導線に出てこない。
  */
 export async function GET(request: Request) {
   const userId = await getCurrentUserId();
@@ -22,6 +27,7 @@ export async function GET(request: Request) {
   if (!typeKey) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
   }
+  const archived = searchParams.get("archived") === "1";
 
   const { rows } = await query<VisitPlanList>(
     `select ${PLAN_LIST_COLUMNS}
@@ -29,8 +35,15 @@ export async function GET(request: Request) {
        left join visit_plan_list_items i on i.list_id = l.id
       where l.user_id = $1
         and l.spot_type_id = (select id from spot_types where key = $2)
+        and l.archived_at is ${archived ? "not null" : "null"}
       group by l.id
-      order by l.start_date desc, l.created_at desc`,
+      order by ${
+        // アーカイブの一覧は「最近しまったもの」から見たいので archived_at 順。
+        // 通常の一覧は従来どおり訪問予定期間の新しい順
+        archived
+          ? "l.archived_at desc"
+          : "l.start_date desc, l.created_at desc"
+      }`,
     [userId, typeKey]
   );
 

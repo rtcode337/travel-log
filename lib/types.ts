@@ -346,6 +346,26 @@ export interface Visit {
   created_at: string;
 }
 
+/**
+ * 訪問記録への追記(`visit_notes`)。後から思い出したこと・分かったことを、
+ * **訪問回数を増やさずに**同じ訪問記録へぶら下げる。1件の訪問記録に何件でも付き、
+ * 画面では「<作成日時>に追記」として元の記録の下(写真も元の写真の後ろ)に
+ * 古い順で並ぶ。所有者は元の訪問記録(`visits.user_id`)で決まる
+ */
+export interface VisitNote {
+  id: string;
+  visit_id: string;
+  body: string | null;
+  photos: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** 追記の見出し(「2026/8/17 21:30 に追記」)。日時の書式は訪問日時と同じ */
+export function formatVisitNoteAt(createdAt: string): string {
+  return `${formatVisitedOn(createdAt)}に追記`;
+}
+
 /** 訪問済みの判定(ピンの緑色・訪問状況の絞り込み・✓件数)に数える訪問記録だけを返す
  * (未訪問記録=unvisitedの行を除く) */
 export function countedVisits(visits: Visit[]): Visit[] {
@@ -396,6 +416,12 @@ export interface VisitPlanList {
   spot_ids: string[];
   /** `spot_ids` のうち訪問済みのもの。経路(地図の矢印・Google マップ)から外す判定に使う */
   visited_spot_ids: string[];
+  /**
+   * アーカイブした日時(nullなら通常のリスト)。回り終わった旅程を一覧から下げる印で、
+   * 削除と違い中身は残る。アーカイブ済みは通常の一覧・地図の経路・「リストに追加」からは
+   * 外れ、アーカイブの一覧(スポット画面の訪問予定リストから開く)にだけ出る
+   */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }

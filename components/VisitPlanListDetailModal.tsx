@@ -149,6 +149,28 @@ export default function VisitPlanListDetailModal({
     onChanged?.();
   };
 
+  // アーカイブの付け外し。**削除とは別物**(中身は消えず、通常の一覧・地図の経路・
+  // 「リストに追加」から外れて、アーカイブの一覧にだけ出るようになる)
+  const [archiving, setArchiving] = useState(false);
+  const archived = !!list?.archived_at;
+  const toggleArchived = async () => {
+    if (!list) return;
+    setArchiving(true);
+    setError(null);
+    const { data, error } = await api.visitPlanLists.setArchived(
+      list.id,
+      !archived
+    );
+    setArchiving(false);
+    if (error) {
+      setError("アーカイブの更新に失敗しました: " + error.message);
+      return;
+    }
+    if (data) setList(data);
+    // 呼び出し元の一覧からは消える(または戻る)ので取り直してもらう
+    onChanged?.();
+  };
+
   const handleDelete = async () => {
     if (!list) return;
     if (!confirm(`「${list.title}」を削除しますか?`)) return;
@@ -183,7 +205,14 @@ export default function VisitPlanListDetailModal({
           <>
             <div className="mb-2 flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <h2 className="text-lg font-bold leading-tight">{list.title}</h2>
+                <h2 className="text-lg font-bold leading-tight">
+                  {list.title}
+                  {archived && (
+                    <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-xs font-normal text-gray-600">
+                      アーカイブ済み
+                    </span>
+                  )}
+                </h2>
                 <p className="mt-0.5 text-xs text-gray-500">
                   {formatPlanDateRange(list.start_date, list.end_date)}
                   {" ・ "}
@@ -326,7 +355,9 @@ export default function VisitPlanListDetailModal({
             {/* このリストだけを地図で見る。地図側は`?planList=`を受け取ると、そのリストを
                 経路の対象に選び「これだけを表示」にして全体が入るよう移動する
                 (MapView)。地図から開いたときは出さない —— 今いる画面へのリンクになるため */}
-            {!onMapPage && typeKey && (
+            {/* アーカイブ済みは地図側の一覧(現役のリストだけを引く)に出てこないため、
+                リンクを押しても経路が選ばれない。出さずに、戻してから使ってもらう */}
+            {!onMapPage && typeKey && !archived && (
               <a
                 href={`/${typeKey}/map?planList=${encodeURIComponent(list.id)}`}
                 className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-600 py-2 text-sm font-medium text-blue-600"
@@ -356,6 +387,25 @@ export default function VisitPlanListDetailModal({
             >
               このリストを編集
             </button>
+            <button
+              type="button"
+              onClick={toggleArchived}
+              disabled={archiving}
+              className="mt-2 w-full rounded-lg border border-gray-300 py-2 text-sm text-gray-600 disabled:opacity-50"
+            >
+              {archiving
+                ? "更新中…"
+                : archived
+                  ? "アーカイブから戻す"
+                  : "このリストをアーカイブする"}
+            </button>
+            {/* 押す前に「消えるわけではない」と分かるようにしておく
+                (削除ボタンが隣にあるので、取り違えると取り返しがつかない) */}
+            <p className="mt-1 text-xs text-gray-400">
+              {archived
+                ? "戻すと、訪問予定リストの一覧と地図の経路にまた出るようになります。"
+                : "回り終わった旅程を一覧から下げます。中身は残り、スポット画面の「アーカイブ」からいつでも読めます。"}
+            </p>
             <button
               type="button"
               onClick={handleDelete}

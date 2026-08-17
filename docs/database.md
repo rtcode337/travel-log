@@ -41,6 +41,7 @@ erDiagram
     spots ||--o{ visit_plans : ""
     spots ||--o{ visit_plan_list_items : ""
     spots ||--o{ reviews : ""
+    visits ||--o{ visit_notes : "追記"
 
     spot_routes ||--o{ spot_route_points : "seq 順"
     visit_plan_lists ||--o{ visit_plan_list_items : "seq 順"
@@ -73,6 +74,9 @@ erDiagram
   `photos/` に置く(`lib/photos.ts`)。DB と `photos/` は一緒にバックアップする
 - **`visits.visited_on` の null は「時期不明」**(訪問した日を覚えていない)。
   `unvisited = true` は「未訪問記録」で、訪問済みの判定には数えない
+- **`visit_notes` は訪問記録への「追記」**で、行が増えても**訪問回数は増えない**
+  (数えるのは `visits` の側だけ)。所有者は `visits.user_id` で決まるため
+  `user_id` 列を持たない —— 持つと元の記録と食い違いうる
 
 ## テーブル
 
@@ -127,7 +131,8 @@ erDiagram
   画面から作成でき、自動的に admin になる(`GOOGLE_AUTO_SIGNUP=true` の環境では、
   Googleログインで一般ユーザーが自動作成される)
 - アカウント削除(`DELETE /api/account`)で行を消すと、`on delete cascade` の訪問記録・訪問予定・
-  訪問予定リスト・口コミ・非表示設定・エクスポートジョブが一緒に消える。
+  訪問予定リスト・口コミ・非表示設定・エクスポートジョブが一緒に消える
+  (訪問記録にぶら下がる追記も `visits` 経由で消える)。
   スポットとルートは `created_by` が `on delete set null` なので**残る**
   (非公開スポットだけはAPI側で明示的に削除する)
 
@@ -234,6 +239,7 @@ erDiagram
         text description
         date start_date
         date end_date
+        timestamptz archived_at "アーカイブした日時(null=通常のリスト)"
     }
     visit_plan_list_items {
         uuid id PK
@@ -241,6 +247,13 @@ erDiagram
         uuid spot_id FK "リスト×スポットでユニーク"
         integer seq "リスト内の並び順"
         timestamptz visited_at "訪問済みになった日時(null=未訪問)"
+    }
+    visit_notes {
+        uuid id PK
+        uuid visit_id FK "追記先の訪問記録"
+        text body
+        text_array photos "photos/ 配下の相対パス"
+        timestamptz created_at "画面の「◯◯に追記」はこれ"
     }
     reviews {
         uuid id PK
@@ -250,6 +263,7 @@ erDiagram
         text visibility "public / private"
     }
     visit_plan_lists ||--o{ visit_plan_list_items : ""
+    visits ||--o{ visit_notes : ""
 ```
 
 - **`visits` は同一スポットへの複数回訪問を許容する**(トグルではない)
@@ -259,6 +273,13 @@ erDiagram
   「その旅行で何を回ったか」の記録でもあるため、行が消えると後から辿れない。
   印の付いた経由スポットは経路(地図の矢印・Google マップの経路検索)から外れる。
   画面から手で付け外しもできる(`PATCH /api/visit-plan-lists/[id]/items/[spotId]`)
+- **`visit_notes` は訪問記録への追記**(1件の訪問記録に何件でも)。**訪問回数には
+  数えない** —— 「後から書き足した」だけで、行った回数は変わらないため。画面では
+  元の記録の下に `created_at` の古い順で並び、写真も元の記録の写真の後ろに続く。
+  訪問記録を消せば `on delete cascade` で一緒に消える
+- **`visit_plan_lists.archived_at` はアーカイブの印**(null なら通常のリスト)。
+  削除と違って中身は残り、一覧APIが `?archived=1` のときだけ返すので、
+  通常の一覧・地図の経路・「リストに追加」からは外れる
 - **`export_jobs` は訪問記録エクスポートのジョブ**。管理者が対象ユーザーを指定して
   実行し、生成はバックグラウンドで進む(`running` → `done` / `failed`)。ZIP本体は
   `/app/exports`(ホストの `./exports` をバインド)に置き、ここには相対パスだけを持つ
@@ -284,6 +305,7 @@ erDiagram
 | visits / spot_hides / visit_plans | `user_id` / `spot_id` | ユーザーの記録の取得と逆引き |
 | visit_plan_lists | `user_id` / `spot_type_id` | 旅程の一覧 |
 | visit_plan_list_items | `list_id` / `spot_id` | 旅程の中身と逆引き |
+| visit_notes | `visit_id` | 訪問記録にぶら下がる追記の取得 |
 | export_jobs | `user_id` | 対象ユーザーの結果の取得 |
 | reviews | `spot_id` | スポット詳細の口コミ一覧 |
 
