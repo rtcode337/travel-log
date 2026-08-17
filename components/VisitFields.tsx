@@ -1,15 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { readPhotoTakenAt } from "@/lib/exif";
-import { visitPhotoSrc } from "@/lib/types";
-import { resizeImageToDataUrl, toDateTimeLocalValue } from "@/lib/visitPhoto";
-import { photosEnabled } from "@/lib/features";
+import { toDateTimeLocalValue } from "@/lib/visitPhoto";
+import VisitPhotoFields from "@/components/VisitPhotoFields";
 
 /**
  * 訪問記録の入力欄(訪問日時・写真・メモ)。訪問記録モーダル(VisitFormModal)と、
  * スポット追加時の「訪問を記録する」(AddSpotModal)で共用する。写真は「既存の相対パス」
- * または「追加写真のdata URL」の混在で親が保持し、この形のまま保存に渡す。
+ * または「追加写真のdata URL」の混在で親が保持し、この形のまま保存に渡す
+ * (写真欄そのものは`VisitPhotoFields`。訪問記録への追記でも同じものを使う)。
  */
 export default function VisitFields({
   visitedOn,
@@ -33,46 +32,9 @@ export default function VisitFields({
    *  「下調べ」になるため、呼び出し側で差し替えられるようにしてある */
   visitedOnHint?: string;
 }) {
-  // photosと同じ並びの各写真のExif撮影日時(取得できなければnull)。既存写真は
-  // 元ファイルが手元に無くExifを読めないためnull。add/removeはこの中で並行して更新する
-  const [photoTakenAts, setPhotoTakenAts] = useState<(Date | null)[]>(() =>
-    photos.map(() => null)
-  );
-  const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
-    if (files.length === 0) return;
-    setProcessing(true);
-    onProcessingChange?.(true);
-    setError(null);
-    try {
-      // 撮影日時は縮小前の元ファイルから読む(canvasで描き直すとExifは失われる)
-      const takenAts = await Promise.all(files.map(readPhotoTakenAt));
-      const dataUrls = await Promise.all(files.map(resizeImageToDataUrl));
-      onPhotosChange([...photos, ...dataUrls]);
-      setPhotoTakenAts((prev) => [...prev, ...takenAts]);
-    } catch {
-      setError("写真の読み込みに失敗しました。");
-    } finally {
-      setProcessing(false);
-      onProcessingChange?.(false);
-    }
-  };
-
-  const removePhoto = (index: number) => {
-    onPhotosChange(photos.filter((_, i) => i !== index));
-    setPhotoTakenAts((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  // 複数枚を選んだときは最も古い撮影日時=その場所に着いた時刻を採用する
-  const earliestTakenAt = photoTakenAts.reduce<Date | null>(
-    (earliest, takenAt) =>
-      takenAt && (!earliest || takenAt < earliest) ? takenAt : earliest,
-    null
-  );
+  // 選択中の写真のExif撮影日時のうち最も古いもの(=その場所に着いた時刻)。
+  // 訪問日時欄に入れるボタンを出すためだけに持つ(自動では入れない)
+  const [earliestTakenAt, setEarliestTakenAt] = useState<Date | null>(null);
   const takenAtValue = earliestTakenAt
     ? toDateTimeLocalValue(earliestTakenAt)
     : null;
@@ -124,62 +86,12 @@ export default function VisitFields({
         </p>
       </div>
 
-      {/* 写真を畳んだ環境(lib/features.ts)でも、既に付いている写真は出す
-          —— 畳んだ理由は「これ以上増やさない」であって、記録済みのものを
-          見せない・消せなくする理由は無い。増やす側(選択ボタン)だけを消す */}
-      {(photosEnabled || photos.length > 0) && (
-      <div className="border-t border-gray-100 pt-3">
-        <label className="mb-1 block text-sm font-medium">写真(非公開)</label>
-        {photosEnabled && (
-          <p className="mb-2 text-xs text-gray-400">
-            自分だけに表示されます。他のユーザーには公開されません。
-            <br />
-            ※ 保存時に縮小・圧縮されます(長辺1280px・JPEG)。キレイに残したい写真は、
-            元のデータを手元に保管しておいてください。
-          </p>
-        )}
-        {photos.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {photos.map((photo, i) => (
-              <div key={i} className="relative">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={photo.startsWith("data:") ? photo : visitPhotoSrc(photo)}
-                  alt=""
-                  className="h-16 w-16 rounded-lg object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={() => removePhoto(i)}
-                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-700 text-xs text-white"
-                  aria-label="写真を削除"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        {photosEnabled ? (
-          <label className="inline-block cursor-pointer rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600">
-            {processing ? "読み込み中…" : "+ 写真を選択"}
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              disabled={processing}
-              onChange={handlePhotoChange}
-            />
-          </label>
-        ) : (
-          <p className="text-xs text-gray-400">
-            この環境では写真の追加を利用できません。
-          </p>
-        )}
-        {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
-      </div>
-      )}
+      <VisitPhotoFields
+        photos={photos}
+        onPhotosChange={onPhotosChange}
+        onProcessingChange={onProcessingChange}
+        onEarliestTakenAtChange={setEarliestTakenAt}
+      />
 
       <div className="border-t border-gray-100 pt-3">
         <label className="mb-1 block text-sm font-medium">メモ(非公開)</label>

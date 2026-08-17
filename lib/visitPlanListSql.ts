@@ -13,7 +13,7 @@ export const PLAN_LIST_COLUMNS = `
   l.id, l.spot_type_id, l.title, l.description,
   to_char(l.start_date, 'YYYY-MM-DD') as start_date,
   to_char(l.end_date, 'YYYY-MM-DD') as end_date,
-  l.created_at, l.updated_at,
+  l.archived_at, l.created_at, l.updated_at,
   coalesce(
     array_agg(i.spot_id order by i.seq)
       filter (where i.spot_id is not null),

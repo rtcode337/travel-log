@@ -261,6 +261,26 @@ create index visits_user_id_idx on visits (user_id);
 create index visits_spot_id_idx on visits (spot_id);
 
 -- =============================================================
+-- visit_notes: 訪問記録への「追記」。行った日に書ききれなかったこと・後から
+-- 分かったことを、**訪問回数を増やさずに**同じ訪問記録へぶら下げる。
+-- 1つの訪問記録に何件でも付けられ、画面では「<作成日時>に追記」として
+-- 元の記録の下(写真も元の写真の後ろ)に古い順で並ぶ。
+-- 所有者は visits 側の user_id で決まる(この表には持たない。訪問記録が
+-- 消えれば追記も cascade で消える)。photos は visits と同じ相対パス
+-- 「<ユーザーID>/<年>/<月>/<uuid>.<拡張子>」(lib/photos.ts参照)
+-- =============================================================
+create table visit_notes (
+  id         uuid primary key default gen_random_uuid(),
+  visit_id   uuid not null references visits (id) on delete cascade,
+  body       text,
+  photos     text[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index visit_notes_visit_id_idx on visit_notes (visit_id);
+
+-- =============================================================
 -- spot_hides: 非表示スポット。公開スポットのうち「自分は興味がない」ものを
 -- ユーザーごとに地図・一覧から隠すための設定(スポット自体には一切影響しない)。
 -- 同一ユーザー×同一スポットは1件まで(トグル管理。visit_plansと同じ構造)
@@ -304,6 +324,11 @@ create table visit_plan_lists (
   description   text,
   start_date    date not null,
   end_date      date not null,
+  -- アーカイブした日時(nullなら通常のリスト)。回り終わった旅程を一覧から
+  -- 下げるための印で、消すのとは違い中身はそのまま残る。アーカイブ済みは
+  -- 通常の一覧・地図の経路・「リストに追加」の対象から外れ、
+  -- アーカイブの一覧(スポット画面の訪問予定リストから開く)にだけ出る
+  archived_at   timestamptz,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
@@ -416,6 +441,10 @@ create trigger spot_hides_set_updated_at
 
 create trigger visit_plans_set_updated_at
   before update on visit_plans
+  for each row execute function set_updated_at();
+
+create trigger visit_notes_set_updated_at
+  before update on visit_notes
   for each row execute function set_updated_at();
 
 create trigger visit_plan_lists_set_updated_at

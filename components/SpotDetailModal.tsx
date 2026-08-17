@@ -8,6 +8,7 @@ import { useRouteOrigin } from "@/lib/useRouteOrigin";
 import {
   countedVisits,
   formatVisitedOn,
+  formatVisitNoteAt,
   getSpotTypeSetting,
   REVIEWS_PAGE_SIZE,
   SPOT_ADMIN_ROLES,
@@ -17,6 +18,7 @@ import {
   type Spot,
   type SpotType,
   type Visit,
+  type VisitNote,
   type VisitPlanList,
 } from "@/lib/types";
 import { formatPlanDateRange } from "@/lib/planListDraft";
@@ -31,11 +33,13 @@ import {
 import { resolveCategories } from "@/lib/category";
 import { formatSpotMeta } from "@/lib/spotMeta";
 import VisitFormModal from "@/components/VisitFormModal";
+import VisitNoteFormModal from "@/components/VisitNoteFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
 import AddToPlanListModal from "@/components/AddToPlanListModal";
 import AskAiButton from "@/components/AskAiButton";
+import CopyTextButton from "@/components/CopyTextButton";
 import { DirectionsIcon } from "@/components/GoogleMapsRouteLink";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
@@ -158,6 +162,13 @@ export default function SpotDetailModal({
   const typeKey = useCurrentSpotTypeKey();
   const [spot, setSpot] = useState<Spot | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
+  // 訪問記録への追記(古い順)。visit_idでまとめて各記録の下に並べる。
+  // 訪問記録とは別の口で引く —— 追記はこの画面でしか使わないので、
+  // 地図・一覧が全件を読む GET /api/visits には載せていない
+  const [visitNotes, setVisitNotes] = useState<VisitNote[]>([]);
+  // 追記の追加(対象の訪問記録)と編集(対象の追記)
+  const [addingNoteVisit, setAddingNoteVisit] = useState<Visit | null>(null);
+  const [editingNote, setEditingNote] = useState<VisitNote | null>(null);
   const [spotTypes, setSpotTypes] = useState<SpotType[]>([]);
   const [reviews, setReviews] = useState<PublicReview[]>([]);
   const [reviewsTotal, setReviewsTotal] = useState(0);
@@ -192,6 +203,17 @@ export default function SpotDetailModal({
   // 「Google マップで経路を表示」のorigin(出発地)に使う現在地
   const routeOrigin = useRouteOrigin();
 
+  // 訪問記録IDごとの追記(APIが古い順で返すので、この順のまま下に積む)
+  const notesByVisit = useMemo(() => {
+    const map = new Map<string, VisitNote[]>();
+    for (const note of visitNotes) {
+      const list = map.get(note.visit_id);
+      if (list) list.push(note);
+      else map.set(note.visit_id, [note]);
+    }
+    return map;
+  }, [visitNotes]);
+
   // 拡大表示中はEscキーでも閉じられるようにする
   useEffect(() => {
     if (!photoPreview) return;
@@ -206,18 +228,21 @@ export default function SpotDetailModal({
     const [
       { data: spotData },
       { data: visitsData },
+      { data: notesData },
       { data: typesData },
       { data: plansData },
       { data: hidesData },
     ] = await Promise.all([
       api.spots.get(spotId),
       api.visits.list(spotId),
+      api.visitNotes.list({ spotId }),
       api.spotTypes.list(),
       api.visitPlans.list(spotId),
       api.spotHides.list(spotId),
     ]);
     setSpot(spotData ?? null);
     setVisits(visitsData ?? []);
+    setVisitNotes(notesData ?? []);
     setSpotTypes(typesData ?? []);
     setPlanned((plansData?.length ?? 0) > 0);
     setHidden((hidesData?.length ?? 0) > 0);
@@ -371,6 +396,14 @@ export default function SpotDetailModal({
     onVisitChange?.();
   };
 
+  // 追記の削除。**訪問記録そのものは消さない**(訪問回数にも影響しない)ので、
+  // 呼び出し元へ知らせる必要はなく、この画面を読み直すだけでよい
+  const deleteVisitNote = async (id: string) => {
+    if (!confirm("この追記を削除しますか?")) return;
+    await api.visitNotes.delete(id);
+    load();
+  };
+
   // 非表示のトグル(公開スポットのみ)。地図・一覧への反映は呼び出し元が行う
   const toggleHidden = async () => {
     setHideUpdating(true);
@@ -439,6 +472,14 @@ export default function SpotDetailModal({
                 <div className="min-w-0">
                   <h2 className="text-lg font-bold leading-tight">
                     {spot.name}
+                    {/* 名前の最後の文字のすぐ右上。検索や共有へ渡すために
+                        文字を選択させると、モーダルの中では掴みにくい。
+                        読み取り専用(重ね表示)でも出す */}
+                    <CopyTextButton
+                      text={spot.name}
+                      label="スポット名をコピー"
+                      className="ml-0.5"
+                    />
                     {spot.status === "private" && (
                       <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-xs font-normal text-gray-600">
                         非公開
@@ -491,7 +532,8 @@ export default function SpotDetailModal({
               </div>
               {/* ×ボタンと、その左に訪問予定のブックマーク風★トグル(塗り=予定あり)。
                   一時期×を外して外側タップだけにしていたが、このモーダルは画面の
-                  ほぼ全体を占めるため外側の余白が狭すぎて閉じにくく、復活させた */}
+                  ほぼ全体を占めるため外側の余白が狭すぎて閉じにくく、復活させた。
+                  スポット名のコピーは名前の直後(h2の中)に置いてある */}
               <div className="flex shrink-0 items-center gap-1">
                 {!readOnly && (
                   <button
@@ -723,6 +765,75 @@ export default function SpotDetailModal({
                               ))}
                             </div>
                           )}
+                          {/* 追記。**訪問回数は増やさず**、同じ訪問記録の下に
+                              書いた順で積む(写真も元の記録の写真の後ろになる)。
+                              左の縦線で「元の記録にぶら下がっている」ことを示す */}
+                          {(notesByVisit.get(visit.id) ?? []).map((note) => (
+                            <div
+                              key={note.id}
+                              className="mt-2 border-l-2 border-gray-200 pl-2.5"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-xs font-medium text-gray-500">
+                                  {formatVisitNoteAt(note.created_at)}
+                                </p>
+                                {!readOnly && (
+                                  <div className="flex shrink-0 gap-2">
+                                    <button
+                                      onClick={() => setEditingNote(note)}
+                                      className="text-xs text-gray-400 hover:text-blue-600"
+                                    >
+                                      編集
+                                    </button>
+                                    <button
+                                      onClick={() => deleteVisitNote(note.id)}
+                                      className="text-xs text-gray-400 hover:text-red-500"
+                                    >
+                                      削除
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              {note.body && (
+                                <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
+                                  {note.body}
+                                </p>
+                              )}
+                              {note.photos.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {note.photos.map((photo, i) => (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      onClick={() =>
+                                        setPhotoPreview(visitPhotoSrc(photo))
+                                      }
+                                      className="cursor-zoom-in"
+                                      aria-label="写真を拡大表示"
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
+                                        src={visitPhotoSrc(photo)}
+                                        alt=""
+                                        className="h-14 w-14 rounded-lg object-cover"
+                                      />
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          {/* 追記の追加。訪問記録の編集(右の「編集」)とは別物
+                              —— こちらは記録を書き換えず、後から足すだけ */}
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              onClick={() => setAddingNoteVisit(visit)}
+                              className="mt-2 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                            >
+                              + 追記
+                            </button>
+                          )}
                         </div>
                         {!readOnly && (
                           <div className="flex shrink-0 gap-2">
@@ -923,6 +1034,33 @@ export default function SpotDetailModal({
             load();
             // 訪問日時の変更は呼び出し元の訪問日絞り込み・訪問順の矢印にも影響する
             onVisitChange?.();
+          }}
+        />
+      )}
+
+      {/* 追記の追加・編集。どちらも訪問回数には影響しないので、保存後は
+          この画面を読み直すだけでよい(呼び出し元の一覧・ピンは変わらない) */}
+      {addingNoteVisit && (
+        <VisitNoteFormModal
+          visit={addingNoteVisit}
+          onClose={() => setAddingNoteVisit(null)}
+          onSaved={() => {
+            setAddingNoteVisit(null);
+            load();
+          }}
+        />
+      )}
+
+      {/* 対象の訪問記録が手元に無い状態では開かない(見出しに出す訪問日時が無く、
+          そもそも読み直しと行き違ったときしか起きない) */}
+      {editingNote && visits.some((v) => v.id === editingNote.visit_id) && (
+        <VisitNoteFormModal
+          visit={visits.find((v) => v.id === editingNote.visit_id)!}
+          note={editingNote}
+          onClose={() => setEditingNote(null)}
+          onSaved={() => {
+            setEditingNote(null);
+            load();
           }}
         />
       )}

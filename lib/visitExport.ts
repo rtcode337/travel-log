@@ -29,6 +29,7 @@ function formatVisitedAtJst(visitedOn: Date | null): string {
 }
 
 interface ExportRow {
+  id: string;
   type_key: string;
   visited_on: Date | null;
   memo: string | null;
@@ -53,6 +54,9 @@ const CSV_HEADER = [
   "カテゴリ",
   "訪問日時(JST)",
   "メモ",
+  // 追記(visit_notes)は訪問記録にぶら下がるので行を増やさず、1列にまとめる
+  // (「<追記日時> <本文>」を改行区切り)。写真は元の記録の写真の後ろに続ける
+  "追記",
   "写真",
   "未訪問記録",
 ];
@@ -67,7 +71,8 @@ export async function buildVisitExportZip(
   userId: string
 ): Promise<VisitExportResult> {
   const { rows } = await query<ExportRow>(
-    `select st.key as type_key,
+    `select v.id,
+            st.key as type_key,
             v.visited_on, v.memo, v.photos, v.unvisited,
             s.name, s.name_kana, s.lat, s.lng, s.region, s.series, s.categories
      from visits v
@@ -78,6 +83,28 @@ export async function buildVisitExportZip(
     [userId]
   );
 
+  // 訪問記録への追記。訪問記録と同じZIPに入れないと、追記に付けた写真だけが
+  // 手元に残らない —— エクスポートは記録の持ち出しなので、抜けがあってはいけない
+  const { rows: noteRows } = await query<{
+    visit_id: string;
+    body: string | null;
+    photos: string[];
+    created_at: Date;
+  }>(
+    `select n.visit_id, n.body, n.photos, n.created_at
+       from visit_notes n
+       join visits v on v.id = n.visit_id
+      where v.user_id = $1
+      order by n.created_at asc`,
+    [userId]
+  );
+  const notesByVisit = new Map<string, typeof noteRows>();
+  for (const note of noteRows) {
+    const list = notesByVisit.get(note.visit_id);
+    if (list) list.push(note);
+    else notesByVisit.set(note.visit_id, [note]);
+  }
+
   const photoEntries: ZipEntry[] = [];
   // 種別キー → その種別のCSV行(先頭は見出し)
   const csvByType = new Map<string, (string | number | null)[][]>();
@@ -86,8 +113,10 @@ export async function buildVisitExportZip(
     // 実際に読めた写真だけをZIPに入れ、CSVにもそれだけを載せる
     // (ファイル欠損でエクスポート全体を失敗させない)。ファイル名は保存時のUUIDの
     // ため、種別をまたいでphotos/直下に平坦化しても衝突しない
+    const notes = notesByVisit.get(row.id) ?? [];
     const zipPaths: string[] = [];
-    for (const relPath of row.photos) {
+    // 追記の写真は元の記録の写真の後ろに続ける(画面の並びと同じ)
+    for (const relPath of [...row.photos, ...notes.flatMap((n) => n.photos)]) {
       const parsed = parseVisitPhotoPath(relPath);
       if (!parsed || parsed.userId !== userId) continue;
       const data = await readVisitPhoto(parsed.relPath);
@@ -109,6 +138,11 @@ export async function buildVisitExportZip(
       formatCategoryList(row.categories),
       formatVisitedAtJst(row.visited_on),
       row.memo,
+      notes
+        .map(
+          (n) => `${formatVisitedAtJst(n.created_at)} ${n.body ?? ""}`.trimEnd()
+        )
+        .join("\n"),
       zipPaths.join(";"),
       // 未訪問記録(訪問済みに数えない記録)は「未訪問」、通常の訪問記録は空欄
       row.unvisited ? "未訪問" : "",

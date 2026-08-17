@@ -12,6 +12,7 @@ import type {
   SpotType,
   SpotTypeSettingKey,
   Visit,
+  VisitNote,
   VisitPlan,
   VisitPlanList,
 } from "@/lib/types";
@@ -300,6 +301,31 @@ export const api = {
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/visits/${id}`, { method: "DELETE" }),
   },
+  /** 訪問記録への追記(訪問回数は増やさず、同じ記録にぶら下がる) */
+  visitNotes: {
+    // spot_id を渡すと、そのスポットの自分の訪問記録すべての追記が古い順で返る
+    list: (params: { spotId?: string; visitId?: string }) =>
+      request<VisitNote[]>(
+        `/api/visit-notes?${
+          params.spotId
+            ? `spot_id=${encodeURIComponent(params.spotId)}`
+            : `visit_id=${encodeURIComponent(params.visitId ?? "")}`
+        }`
+      ),
+    create: (visitId: string, note: { body: string | null; photos: string[] }) =>
+      request<VisitNote>("/api/visit-notes", {
+        method: "POST",
+        body: JSON.stringify({ visit_id: visitId, ...note }),
+      }),
+    // 写真は訪問記録の編集と同じく「既存の相対パス(残す)」と「data URL(追加)」の混在
+    update: (id: string, note: { body: string | null; photos: string[] }) =>
+      request<VisitNote>(`/api/visit-notes/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(note),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/api/visit-notes/${id}`, { method: "DELETE" }),
+  },
   spotHides: {
     // 非表示スポット(自分の地図・一覧から隠す設定)。spot_id省略時は自分の全件
     list: (spotId?: string) =>
@@ -351,9 +377,12 @@ export const api = {
     downloadUrl: (id: string) => `/api/exports/${id}/download`,
   },
   visitPlanLists: {
-    list: (typeKey: string) =>
+    /** archived: true でアーカイブしたリストだけを返す(既定は現役のリストだけ) */
+    list: (typeKey: string, options?: { archived?: boolean }) =>
       request<VisitPlanList[]>(
-        `/api/visit-plan-lists?type=${encodeURIComponent(typeKey)}`
+        `/api/visit-plan-lists?type=${encodeURIComponent(typeKey)}${
+          options?.archived ? "&archived=1" : ""
+        }`
       ),
     get: (id: string) =>
       request<VisitPlanList>(`/api/visit-plan-lists/${id}`),
@@ -382,6 +411,13 @@ export const api = {
       request<VisitPlanList>(`/api/visit-plan-lists/${id}`, {
         method: "PATCH",
         body: JSON.stringify(input),
+      }),
+    /** リストのアーカイブを付け外しする(更新後のリストが返る)。
+     *  基本情報のupdateと分けてあるのは、あちらが経由スポットを丸ごと置き換えるため */
+    setArchived: (id: string, archived: boolean) =>
+      request<VisitPlanList>(`/api/visit-plan-lists/${id}/archive`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived }),
       }),
     /** 経由スポット1件の「訪問済み」を付け外しする(更新後のリストが返る) */
     setItemVisited: (id: string, spotId: string, visited: boolean) =>

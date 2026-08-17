@@ -31,6 +31,7 @@ import SpotBadge from "@/components/SpotBadge";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
+import PlanListArchiveModal from "@/components/PlanListArchiveModal";
 import { formatPlanDateRange } from "@/lib/planListDraft";
 import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getSeriesOrder } from "@/lib/seriesStyle";
@@ -210,6 +211,9 @@ export default function SpotsView({
   const [visits, setVisits] = useState<Visit[]>([]);
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
+  // アーカイブした訪問予定リスト(新しくしまった順)。**件数を出すために常に読む**
+  // —— 1件も無いのに入口だけ置いても、押した先が空で終わるため
+  const [archivedPlanLists, setArchivedPlanLists] = useState<VisitPlanList[]>([]);
   const [myReviews, setMyReviews] = useState<MyReview[]>([]);
   // 非表示にしたスポット(全種別分。spot_id基準のため、この種別のスポットに
   // 絞る処理は表示側で行う)
@@ -224,6 +228,8 @@ export default function SpotsView({
   // 編集対象の訪問予定リスト(詳細の「編集」から。VisitPlanListFormModalのeditに渡す)
   const [editingList, setEditingList] = useState<VisitPlanList | null>(null);
   const [detailListId, setDetailListId] = useState<string | null>(null);
+  // アーカイブの一覧(訪問予定リストの「アーカイブ」から開く)
+  const [showArchive, setShowArchive] = useState(false);
 
   const [browseMode, setBrowseMode] = useState<BrowseMode>("series");
   const [managementItems, setManagementItems] = useState<Spot[]>([]);
@@ -298,9 +304,15 @@ export default function SpotsView({
     setVisitPlans(data ?? []);
   }, []);
 
+  // 現役のリストとアーカイブしたリストは別々に引く(APIは既定でアーカイブを返さない)。
+  // 片方だけ取り直すと、アーカイブした直後に一覧と件数が食い違う
   const loadPlanLists = useCallback(async () => {
-    const { data } = await api.visitPlanLists.list(spotTypeKey);
+    const [{ data }, { data: archived }] = await Promise.all([
+      api.visitPlanLists.list(spotTypeKey),
+      api.visitPlanLists.list(spotTypeKey, { archived: true }),
+    ]);
     setPlanLists(data ?? []);
+    setArchivedPlanLists(archived ?? []);
   }, [spotTypeKey]);
 
   const loadMyReviews = useCallback(async () => {
@@ -581,13 +593,27 @@ export default function SpotsView({
             <div className="mb-6">
               <div className="mb-4 flex items-center justify-between gap-2">
                 <h1 className="text-lg font-bold">訪問予定リスト</h1>
-                <button
-                  type="button"
-                  onClick={() => setShowListForm(true)}
-                  className="shrink-0 rounded-lg border border-blue-600 bg-white px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
-                >
-                  + 訪問予定リストを追加
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  {/* アーカイブの入口。**1件もしまっていないうちは出さない** ——
+                      押した先が空で終わるだけのボタンになるため(アーカイブ自体は
+                      リストの詳細から行うので、そこで存在を知れる) */}
+                  {archivedPlanLists.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowArchive(true)}
+                      className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      🗄️ アーカイブ({archivedPlanLists.length})
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowListForm(true)}
+                    className="rounded-lg border border-blue-600 bg-white px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                  >
+                    + 訪問予定リストを追加
+                  </button>
+                </div>
               </div>
               {planLists.length === 0 ? (
                 <p className="text-sm text-gray-500">
@@ -1023,6 +1049,15 @@ export default function SpotsView({
           />
         )}
 
+        {/* アーカイブの一覧。詳細はこの上に重なるので、閉じるとここへ戻ってくる */}
+        {showArchive && (
+          <PlanListArchiveModal
+            lists={archivedPlanLists}
+            onClose={() => setShowArchive(false)}
+            onOpenList={setDetailListId}
+          />
+        )}
+
         {detailListId && (
           <VisitPlanListDetailModal
             listId={detailListId}
@@ -1032,6 +1067,8 @@ export default function SpotsView({
             onClose={() => setDetailListId(null)}
             onEdit={(list) => {
               setDetailListId(null);
+              // 編集は地図の作成モードへ進む導線なので、アーカイブの一覧は閉じる
+              setShowArchive(false);
               setEditingList(list);
             }}
             onDeleted={() => {
