@@ -58,16 +58,21 @@ export default function ChoiceRow<T extends string>({
   onChange: (selected: T[]) => void;
 }) {
   if (options.length === 0) return null;
+  // 「すべて」の幅は**その行の選択肢と同じ基準**にする —— 3文字固定なので詰められる
+  // (以前はそうしていた)が、名前を出す選択肢の隣に細い「すべて」が並ぶと、
+  // 1つだけ幅が違って行の頭が欠けたように見える。詰めるのは選択肢の側も
+  // 全部詰めている行(ランクのようにアイコン・1文字だけの行)に限る
+  const allBasis = options.every((opt) => opt.compact) ? BASIS_COMPACT : BASIS;
   return (
-    <div className="flex flex-wrap gap-px overflow-hidden rounded-l-lg border border-gray-300 bg-gray-300 text-sm">
+    // **四隅とも直角**。かつては左端だけ角丸にしていた(枠も rounded-l-lg)——
+    // 右端を直角にしているのは、枠が角丸だと overflow-hidden が最後のチップの角を
+    // 丸く切ってしまい、そこだけ形が違って見えるため。ただし左右で形が違うほうが
+    // 目立つので、角丸をやめて統一した(折り返した2行目以降の先頭も直角でそろう)
+    <div className="flex flex-wrap gap-px overflow-hidden border border-gray-300 bg-gray-300 text-sm">
       <button
         type="button"
         onClick={() => onChange([])}
-        // 角丸は左端だけ(枠も rounded-l-lg)。**右端は直角**にする ——
-        // 枠が角丸だと overflow-hidden が最後のチップの角を丸く切ってしまい、
-        // そこだけ形が違って見えるため(折り返した2行目以降の先頭も直角のまま)。
-        // 「すべて」は3文字固定なので詰めてよい(折り返させない)
-        className={`grow ${BASIS_COMPACT} rounded-l-lg px-2 py-1.5 font-medium ${
+        className={`grow ${allBasis} px-2 py-1.5 font-medium ${
           selected.length === 0
             ? "bg-blue-600 text-white"
             : "bg-gray-100 text-gray-500 hover:bg-gray-200"
