@@ -9,14 +9,15 @@ services:
       POSTGRES_DB: travel_log
       # データの置き場をdata/1つにまとめ、その下をdb/photos/exportsに切っている
       # (本番と同じ形。docker-compose.ymlのdbサービスのコメント参照)
-      PGDATA: /var/lib/postgresql/db/18/docker
+      PGDATA: /data/db/18/docker
     volumes:
       # db/initはマウントしない。スキーマ本体(01_schema.sql)はinitサービスが流す
       # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
       #  スキーマを更新したときにgit pullが失敗するようになるため)
-      # マウント先が /var/lib/postgresql/data ではなく1段上なのは本番用と同じ理由
-      # (docker-compose.ymlのdbサービスのコメント参照)
-      - ./data:/var/lib/postgresql
+      # マウント先とPGDATAの決め方は本番用と同じ(docker-compose.ymlのコメント参照)
+      - ./data:/data
+    tmpfs:
+      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s

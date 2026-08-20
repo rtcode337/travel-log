@@ -22,7 +22,9 @@ LAN内の別端末から開発サーバを開くときは`ALLOWED_DEV_ORIGINS`(`
 
 3つのcomposeファイル(`docker-compose.yml`=本番用 / `docker-compose.dev.yml`=開発用 / `docker-compose.standalone.example.yml`)はどれもプロジェクト名を`travel-log`に揃えてある。同じホスト上で本番用と開発用を**同時に**は動かせない(ポート7040も`data`も共有しているため、名前を分けても同時起動はできない)。切り替えるときは先に`docker compose -f <今動いている方> down`すること。
 
-`docker-compose.standalone.example.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義の雛形。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。**リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
+`docker-compose.standalone.example.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義の雛形。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。**bindマウントは短い書き方(`"ホスト:コンテナ"`の1文字列)で書く。** 長い書き方(`type: bind`)は**`create_host_path`の既定がかつてfalseだった**(短い書き方でだけ暗黙にtrue)ため、古いDockerでは置き場がホストに無いとマウントできずに落ちる —— 新しい版は既定がtrueなので**手元では再現せず、NASでだけ出る**(実際にNASで落ち、短い書き方に直したら起動した)。この形を保つために、**3つのサービスとも置き場を同じ`/data`にマウントする**(1本のアンカーを共有できる。YAMLは文字列を連結できないので、ターゲットが分かれると短い書き方では書けない)。dbだけは`PGDATA`を`/data/db/18/docker`に移してそこへ寄せてあり、代わりに空く`/var/lib/postgresql`(postgresイメージの`VOLUME`宣言)には`tmpfs`を当てて匿名ボリュームの量産を止めている。
+
+**リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
 
 このプロジェクトにアプリコードのテストスイート/テストコマンドは存在しない(唯一のテストは`scripts/bootstrap-sql_test.sh`で、Supabase向けの一括SQLがアプリの起動時の適用と同じスキーマを作るかを突き合わせるもの。`db/migrations/README.md`参照)。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
 

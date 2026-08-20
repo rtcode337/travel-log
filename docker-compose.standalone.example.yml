@@ -34,8 +34,11 @@ name: travel-log
 #   <置き場>/db      … Postgresの実データ(実体は db/18/docker)
 #   <置き場>/photos  … 訪問記録の写真。DBには相対パスだけが入るのでDBと一緒にバックアップする
 #   <置き場>/exports … エクスポートのZIP。作り直せるのでバックアップは要らない
-# 親ディレクトリだけは**あらかじめ作っておくこと**(bindマウント先を自動作成しない環境がある)。
-x-data-dir: &data-dir "/path/to/travel-log/data"
+# 無ければDockerが作る。それも効かない環境では、この親だけを先に作っておくこと
+# —— 下の3つは init が作るので、用意するのは常にこの1つで足りる。
+# 書式は「ホスト側の絶対パス:コンテナ側」。3つのサービスが同じ場所を同じ /data に
+# マウントするので、1本のアンカーを共有できる
+x-data-volume: &data-volume "/path/to/travel-log/data:/data"
 
 # ---- ここだけ編集: 実行ユーザー ----
 # 上のディレクトリをホスト側で読み書きするユーザーの `id -u`:`id -g`。
@@ -71,9 +74,7 @@ services:
     image: ghcr.io/rtcode337/travel-log:latest
     user: root
     volumes:
-      - type: bind
-        source: *data-dir
-        target: /data
+      - *data-volume
     entrypoint:
       - sh
       - -c
@@ -94,16 +95,18 @@ services:
       POSTGRES_DB: travel_log
       # 置き場を1つにまとめ、その下をdb/photos/exportsに切っている。既定
       # (/var/lib/postgresql/18/docker)のままだとマウント直下に18/が来て
-      # photos・exportsと同じ段に並ぶので、db/の下へ寄せる
-      PGDATA: /var/lib/postgresql/db/18/docker
+      # photos・exportsと同じ段に並ぶので、db/の下へ寄せる。他のサービスと
+      # 同じ /data にマウントするため、既定の位置からも移している
+      PGDATA: /data/db/18/docker
     volumes:
-      # db/init はマウントしない。スキーマ本体(01_schema.sql)は init サービスが流す。
-      # postgres:18 はVOLUME宣言が /var/lib/postgresql なので、そこをマウントしないと
-      # 匿名ボリュームが毎回作られる。置き場をそのままここへ当て、実データは上の
-      # PGDATAで <置き場>/db/18/docker に入れる
-      - type: bind
-        source: *data-dir
-        target: /var/lib/postgresql
+      # db/init はマウントしない。スキーマ本体(01_schema.sql)はappが起動時に流す
+      - *data-volume
+    # postgres:18 は VOLUME /var/lib/postgresql を宣言しており、そこに何も
+    # マウントしないと起動のたびに空の匿名ボリュームが作られて溜まっていく。
+    # 実データは上のPGDATA(=/data配下)に置くのでここは使わない —— 使い捨ての
+    # tmpfsを当てて抑止する
+    tmpfs:
+      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s
@@ -134,9 +137,7 @@ services:
     volumes:
       # 置き場ごとマウントして、中のどれを使うかは上のPHOTOS_DIR/EXPORTS_DIRで決める。
       # db/も見えるが、postgresがPGDATAを0700で作るのでappのユーザーからは読めない
-      - type: bind
-        source: *data-dir
-        target: /data
+      - *data-volume
     # 写真とエクスポートをホストのユーザー所有で書く。所有者合わせは init が済ませる
     user: *run-as
     ports:

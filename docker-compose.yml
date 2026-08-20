@@ -30,16 +30,19 @@ services:
       # データの置き場をdata/1つにまとめ、その下をdb/photos/exportsに切っている。
       # 既定(/var/lib/postgresql/18/docker)のままだとマウント直下に18/が来て
       # photos・exportsと同じ段に並ぶので、db/の下へ寄せる
-      PGDATA: /var/lib/postgresql/db/18/docker
+      # 他のサービスと同じ /data にマウントするため、既定の位置からも移している
+      PGDATA: /data/db/18/docker
     volumes:
       # db/initはマウントしない。スキーマ本体(01_schema.sql)はinitサービスが流す
       # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
       #  スキーマを更新したときにgit pullが失敗するようになるため)
-      # postgres:18のイメージはVOLUME宣言が /var/lib/postgresql なので、そこを
-      # マウントしないと匿名ボリュームが毎回作られる。データの置き場(data/)を
-      # そのままここへ当て、実データは上のPGDATAで data/db/18/docker に入れる。
       # 所有者はpostgresのエントリポイント(rootで起動して自分で揃える)が調整する
-      - ./data:/var/lib/postgresql
+      - ./data:/data
+    # postgres:18は VOLUME /var/lib/postgresql を宣言しており、そこに何もマウント
+    # しないと起動のたびに空の匿名ボリュームが作られて溜まっていく。実データは上の
+    # PGDATA(=/data配下)に置くのでここは使わない —— 使い捨てのtmpfsを当てて抑止する
+    tmpfs:
+      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
       interval: 5s
