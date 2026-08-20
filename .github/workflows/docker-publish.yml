@@ -1,8 +1,8 @@
 # mainへのpushで本番用Dockerイメージをビルドし、GHCRへ公開する。
 # 本番環境の更新はこれらをpullするだけでよい(README「本番運用」参照)。
-#   ghcr.io/rtcode337/travel-log          … アプリ本体(Dockerfileのprodステージ、appサービス)
-#   ghcr.io/rtcode337/travel-log-db-init  … スキーマ・マイグレーション適用
-#                                           (db/Dockerfile、initサービス。イメージ名は旧構成の名残)
+#   ghcr.io/rtcode337/travel-log … アプリ本体(Dockerfileのprodステージ、appサービス)。
+#                                   スキーマとマイグレーションSQLもこれに焼き込まれ、
+#                                   起動時に scripts/migrate.mjs が当てる
 #
 # アプリ本体は amd64/arm64 を「それぞれのアーキのネイティブランナー」で並列ビルドし、
 # ダイジェストで push したものを最後の merge ジョブでマニフェストにまとめる。
@@ -133,60 +133,21 @@ jobs:
       - name: Inspect
         run: docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
 
-  # DBの準備・マイグレーション適用用イメージ(db/Dockerfile)。マイグレーションSQLを
-  # 焼き込むため、db/migrations/ を足したときもこのイメージのpullだけで本番に反映される。
-  # 小さいイメージ(Alpine + SQLコピー)でハングの実績も無いため、こちらは従来どおり
-  # QEMUマルチアーキビルドのまま(アプリ本体とは独立して並列に走る)
-  build-and-push-db-init:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-qemu-action@v4
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository }}-db-init
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha
-
-      - uses: docker/build-push-action@v7
-        with:
-          # マイグレーションSQLとentrypoint.shだけを含む小さなコンテキスト
-          context: ./db
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=db-init
-          cache-to: type=gha,mode=max,scope=db-init
-
   # 古い版を消して直近 10 世代だけ残す。
   #
   # 公開パッケージなので GHCR の容量・転送は無料枠を消費しないが、版は放っておくと
   # 際限なく積み上がる(`latest` を付け替えても前の版は SHA タグ付きで残る)。
   # 一覧が読めなくなるのと、どれが生きているか分からなくなるのを防ぐための掃除。
   #
-  # **専用のジョブにして、両方の push が終わってから走らせる。** db-init のジョブは
-  # 本体のビルドと並行に走るので、そちらに相乗りさせると「新しい版が出来る前に掃除する」
-  # 順序になりうる。
+  # **専用のジョブにして、push が終わってから走らせる。** merge に相乗りさせると
+  # 「新しい版が出来る前に掃除する」順序になりうる。
   #
   # **actions/delete-package-versions は使わない。** このリポジトリはマルチアーキで、
   # 1 つのタグが manifest list ＋ アーキごとの子イメージで構成される。あちらは
   # 子イメージを「タグ無しの版」として消してしまい、残したはずのタグが壊れる。
   # この action は manifest list を理解して親子まとめて扱う。
   cleanup:
-    needs: [merge, build-and-push-db-init]
+    needs: [merge]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -194,7 +155,9 @@ jobs:
       - name: 古いイメージを削除して直近 10 世代だけ残す
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          packages: travel-log,travel-log-db-init
+          # travel-log-db-init は廃止(スキーマ適用をアプリへ寄せた)。GHCR に残っている
+          # 古いパッケージは手で削除する —— ここに残すと存在しない扱いでジョブが落ちる
+          packages: travel-log
           keep-n-tagged: 10
           delete-untagged: true
           token: ${{ secrets.GITHUB_TOKEN }}

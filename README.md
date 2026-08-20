@@ -66,7 +66,7 @@ docker compose -f docker-compose.dev.yml up --build
 ```
 
 Node や Postgres をローカルにインストールする必要はない。初回起動時、
-`init` コンテナが `01_schema.sql` を自動実行してテーブルと既定のスポット種別
+アプリが起動前に `01_schema.sql` を自動実行してテーブルと既定のスポット種別
 (`tourist`=観光地、データは空)を作成する。以降スキーマに変更が入った場合も、
 起動するたびに未適用のマイグレーションが自動で当たる。
 
@@ -163,15 +163,16 @@ docker compose pull && docker compose up -d
   docker compose -p travel-log-prod down          # 開発機では -p travel-log-dev -f docker-compose.dev.yml
   docker compose pull && docker compose up -d
   ```
-- 公開されるイメージは2つ。`ghcr.io/rtcode337/travel-log`(アプリ本体)と
-  `ghcr.io/rtcode337/travel-log-db-init`(スキーマ・マイグレーション適用。`init`サービスが使う)
+- 公開されるイメージは`ghcr.io/rtcode337/travel-log`の1つ。スキーマとマイグレーションSQLも
+  これに焼き込まれ、アプリが起動時に当てる(かつては`travel-log-db-init`という専用イメージが
+  あったが、同じDBへ繋いでいるアプリに寄せた)
 - **データの置き場は`data/`の1つだけ**(リポジトリ直下)。この下に`db/`(Postgresの実データ)・
-  `photos/`(添付写真)・`exports/`(エクスポートのZIP)を`data-init`サービスが起動時に作る。
+  `photos/`(添付写真)・`exports/`(エクスポートのZIP)を`init`サービスが起動時に作る。
   **バックアップは`data/`をコピーすればよい**(停止してからコピーすること)。
   standaloneでもホストに用意するのは親ディレクトリ1つで、YAML冒頭の`x-data-dir`に書く
 - **`app`は非rootで動く**。`data/`に書かれるファイルはホストのユーザー所有になり、
   既定は`1000:1000`。`id -u`が1000以外のホストでは`.env`に`TRAVEL_LOG_UID`/`TRAVEL_LOG_GID`を
-  設定する(standaloneはYAML冒頭の`x-run-as`)。所有者合わせは起動前に`data-init`が
+  設定する(standaloneはYAML冒頭の`x-run-as`)。所有者合わせは起動前に`init`が
   自動でやるので、`chown`を手で打つ必要はない
 - **置き場を`data/`にまとめる前から動かしているホストは、更新時に1回だけ移すこと。**
   `docker compose down`のあと:
@@ -190,11 +191,11 @@ docker compose pull && docker compose up -d
 - **PostgreSQL 16 時代のデータを持つ既存環境は、更新前に1回だけデータ移行が必要**
   ([docs/postgres-18-upgrade.md](docs/postgres-18-upgrade.md))。移行せずに起動すると
   dbコンテナが起動に失敗する(データは壊れない)
-- **DBスキーマの更新は自動**。`docker compose up`すると`init`サービスが未適用の
-  マイグレーションを順に当ててから`app`を起動する(失敗した場合は`app`も起動しないので
-  古いスキーマのまま動くことはない)。適用状況は
+- **DBスキーマの更新は自動**。`docker compose up`すると`app`が待ち受けを始める前に未適用の
+  マイグレーションを順に当てる(失敗した場合は待ち受けに進まないので、古いスキーマのまま
+  動くことはない)。適用状況は
   `docker compose exec db psql -U travel_log -d travel_log -c "select * from schema_migrations"`、
-  ログは`docker compose logs init`で確認できる
+  ログは`docker compose logs app`で確認できる(`migrate:`で始まる行)
 - GitHub Actions(`GITHUB_TOKEN`)から公開したパッケージはリポジトリに自動リンクされ、
   可視性もリポジトリと同じ(=public)になるため、追加設定なしで匿名pullできる。
   リポジトリをprivateにした場合は本番ホストで`docker login ghcr.io`

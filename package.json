@@ -9,7 +9,8 @@
     "dev": "next dev --webpack -p 7040",
     "prebuild": "npm run copy-maplibre-worker",
     "build": "next build --webpack",
-    "start": "next start -p 7040"
+    "start": "next start -p 7040",
+    "migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^6.3.0",

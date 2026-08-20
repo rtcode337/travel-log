@@ -10,12 +10,12 @@
 
 ## 適用は自動
 
-`docker compose up`すると`init`サービス(`db/Dockerfile`のイメージ)が
+`docker compose up`すると`app`が待ち受けを始める前に(`scripts/migrate.mjs`)、
 dbの起動を待って、スキーマ本体と未適用のスクリプトを連番順に当てる。手で流す必要はない。
 
 - 適用済みのリビジョンは`schema_migrations`テーブルに記録され、2回目以降はスキップされる
-- `app`サービスは`init`が**正常終了するまで起動しない**(古いスキーマのままアプリが
-  動くのを防ぐ)。マイグレーションが失敗したらアプリも上がらないので、失敗に気づける
+- 適用に失敗したら**待ち受けに進まない**(古いスキーマのままアプリが動くのを防ぐ)。
+  アプリが上がらないので失敗に気づける。理由は`docker compose logs app`の`migrate:`の行
 - 1本のスクリプトとその適用記録は1トランザクションにまとまっている。途中で失敗すれば
   記録も残らないため、スクリプトを直して`docker compose up`し直せばよい
 
@@ -23,8 +23,8 @@ dbの起動を待って、スキーマ本体と未適用のスクリプトを連
 # 適用状況を見る
 docker compose exec -T db psql -U travel_log -d travel_log -c "select version, applied_at from schema_migrations order by version"
 
-# ログを見る
-docker compose logs init
+# ログを見る(migrate: で始まる行)
+docker compose logs app
 ```
 
 ## 書き方のルール
@@ -32,9 +32,9 @@ docker compose logs init
 - `db/init/01_schema.sql`のテーブル定義を変更したら、必ず同じコミットでここにスクリプトを追加する
 - ファイル名は`<連番>_<内容>.sql`(例: `001_series_categories.sql`)。連番の小さい順に適用され、
   ファイル名(拡張子を除く)がそのまま`schema_migrations.version`になる
-- **`begin`/`commit`は書かない**。トランザクションは`db/entrypoint.sh`が`--single-transaction`で
+- **`begin`/`commit`は書かない**。トランザクションは`scripts/migrate.mjs`が1本ずつ
   張る(スクリプト内で`commit`すると外側のトランザクションが切れてしまう)
-- **`schema_migrations`へのinsertも書かない**。適用記録も`db/entrypoint.sh`が行う
+- **`schema_migrations`へのinsertも書かない**。適用記録も`scripts/migrate.mjs`が行う
 - 各スクリプトは冪等(idempotent)にする。`if not exists`・情報スキーマを見る`do $$ ... $$`ブロック等を使い、
   適用済みのDBに再度流しても害がないようにする。新規DB(最初から最新スキーマ)に対しても
   一度は実行されるため、そこで壊れないことが必要
@@ -59,17 +59,18 @@ docker compose logs init
 新しいスクリプトを書いたら、次の2つを確認する。
 
 **1. 新規DBに当たっても壊れないこと**(上記「新規DBでも必ず一度は流れる」)。
-使い捨てDBを作って `init` を流すだけで分かる。
+使い捨てDBを作って適用するだけで分かる。
 
 ```bash
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres \
   -c "drop database if exists init_check" -c "create database init_check"
-docker compose -f docker-compose.dev.yml build init   # 移行スクリプトはイメージに焼き込まれる
-docker compose -f docker-compose.dev.yml run --rm -e PGDATABASE=init_check init
+docker compose -f docker-compose.dev.yml run --rm --no-deps \
+  -e DATABASE_URL=postgres://travel_log:travel_log@db:5432/init_check \
+  app node scripts/migrate.mjs
 ```
 
 あわせて `sh scripts/bootstrap-sql_test.sh` を流す(Supabase の SQL Editor へ貼る用の
-一括SQLが、`init` と同じ状態を作るかの突き合わせ)。
+一括SQLが、起動時の適用と同じ状態を作るかの突き合わせ)。
 
 **2. 旧スキーマのダンプに当てた結果が新規作成したDBと一致すること。**使い捨てDBを2つ作って突き合わせるのが手軽。
 

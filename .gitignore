@@ -32,7 +32,7 @@ yarn-error.log*
 
 # データの置き場(composeのbindマウント先)。この下に db(Postgresの実データ)・
 # photos(訪問記録の写真)・exports(エクスポートのZIP)が入る。どれも個人情報を
-# 含むため絶対にコミットしない。ディレクトリ自体はdata-initサービスが起動時に
+# 含むため絶対にコミットしない。ディレクトリ自体はinitサービスが起動時に
 # 作るので.gitkeepは不要。中身ではなくディレクトリごと無視することで、
 # postgresユーザー所有で権限が絞られた中身をgitが読みに行かず
 # 「could not open directory」警告が出ないようにする

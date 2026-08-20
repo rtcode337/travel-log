@@ -48,7 +48,7 @@ erDiagram
 ```
 
 このほかに、どのテーブルとも関係を持たない `schema_migrations`(適用済み
-マイグレーションの記録。[`db/entrypoint.sh`](../db/entrypoint.sh) が作る)がある。
+マイグレーションの記録。[`scripts/migrate.mjs`](../scripts/migrate.mjs) が作る)がある。
 
 ## 横断的な決めごと
 
@@ -315,8 +315,8 @@ erDiagram
    追加分を別の初期化ファイルに切り出さない)
 2. **同じコミットで [`db/migrations/`](../db/migrations/) に移行スクリプトを足す**
    (`<連番>_<内容>.sql`。全文 idempotent にする。`begin`/`commit` と
-   `schema_migrations` への insert は書かない —— `db/entrypoint.sh` が受け持つ。
+   `schema_migrations` への insert は書かない —— `scripts/migrate.mjs` が受け持つ。
    詳細は [`db/migrations/README.md`](../db/migrations/README.md))
 3. **この文書も同じコミットで更新する**(テーブル・列・索引・制約・関係の変更)
-4. 適用は `docker compose up` で自動(`init` サービス)。現物を確かめるなら
+4. 適用は `docker compose up` で自動(`app` が待ち受け前に流す)。現物を確かめるなら
    `docker compose exec db psql -U travel_log -d travel_log -c '\d+ spots'`

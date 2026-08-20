@@ -9,11 +9,11 @@
 #
 # **schema_migrations への記録まで含める。** これが無いと、あとで
 # migrate-remote.sh を使ったときに全部を流し直そうとして壊れる。
-# 出力を当てたDBは、db/entrypoint.sh（composeの init サービス）が作るものと同じ状態になる
+# 出力を当てたDBは、scripts/migrate.mjs（アプリが起動時に通る経路）が作るものと同じ状態になる
 # （scripts/bootstrap-sql_test.sh がその一致を検証している）。
 #
 # 空でないDBには使わないこと。これは**初回投入用**で、途中から差分だけを当てる用途は
-# 想定していない（そちらは migrate-remote.sh か、composeの init が受け持つ）。
+# 想定していない（そちらは migrate-remote.sh か、アプリの起動時の適用が受け持つ）。
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -22,7 +22,7 @@ echo "-- travel-log スキーマ一括投入用SQL（scripts/bootstrap-sql.sh �
 echo "-- Supabase の SQL Editor に貼って実行する。空のDBに対して1回だけ使うこと。"
 echo
 
-# 適用済みリビジョンの記録表。entrypoint.sh と同じくスクリプト側で作る
+# 適用済みリビジョンの記録表。migrate.mjs と同じくスクリプト側で作る
 cat <<'SQL'
 create table if not exists schema_migrations (
     version    text primary key,

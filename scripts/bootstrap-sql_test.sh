@@ -1,6 +1,6 @@
 #!/bin/sh
-# scripts/bootstrap-sql.sh の出力を当てたDBが、composeの init サービス
-# （db/entrypoint.sh）が作るDBと同じ状態になることを確かめる。
+# scripts/bootstrap-sql.sh の出力を当てたDBが、アプリが起動時に通る適用経路
+# （scripts/migrate.mjs）が作るDBと同じ状態になることを確かめる。
 #
 # **この一致が崩れると気づけない**のが怖いところ ——「貼ったのにアプリが動かない」
 # 「あとで migrate-remote.sh が全部流し直そうとする」という形で後から出る。
@@ -24,8 +24,10 @@ $PSQL -d postgres -q \
 echo "2. bootstrap-sql.sh の出力を当てる"
 sh scripts/bootstrap-sql.sh | $PSQL -d bootstrap_check -q -v ON_ERROR_STOP=1
 
-echo "3. init サービスと同じ経路で当てる"
-$DC run --rm -e PGDATABASE=init_check init >/dev/null
+echo "3. アプリの起動時と同じ経路で当てる"
+$DC run --rm --no-deps \
+  -e DATABASE_URL=postgres://travel_log:travel_log@db:5432/init_check \
+  app node scripts/migrate.mjs >/dev/null
 
 echo "4. 突き合わせ"
 dump() {

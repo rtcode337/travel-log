@@ -60,18 +60,18 @@ sh scripts/bootstrap-sql.sh > /tmp/bootstrap.sql
 
 **`schema_migrations` への記録まで入っている**ので、あとから B を使っても
 「適用済み」と正しく判定される。この一致は `scripts/bootstrap-sql_test.sh` が
-検証している(列・索引・トリガー・適用記録を init サービスの結果と突き合わせる)。
+検証している(列・索引・トリガー・適用記録をアプリの起動時の適用の結果と突き合わせる)。
 
 **空のDBに1回だけ**使うこと。途中から差分だけを当てる用途は想定していない。
 
-### B. compose の init と同じイメージを走らせる
+### B. アプリと同じイメージで適用スクリプトを走らせる
 
 ```bash
 cp .env.remote.example .env.remote   # 値を入れる(Session pooler の情報)
 sh scripts/migrate-remote.sh
 ```
 
-`db-init: migrations done (applied=13, skipped=0)` のように出れば完了。
+`migrate: migrations done (applied=13, skipped=0)` のように出れば完了。
 **接続情報を書いた `.env.remote` がこの機械に残る**点に注意(gitignore 済みだが、
 共用の機械や、他人が触る環境では A のほうがよい)。
 
@@ -80,7 +80,7 @@ sh scripts/migrate-remote.sh
 
 ### スキーマを変えたとき
 
-**Vercel へデプロイする前にもう一度流すこと**(Docker運用と違い `init` が自動では走らない)。
+**Vercel へデプロイする前にもう一度流すこと**(Docker運用と違い、起動時の自動適用が走らない)。
 B ならそのまま再実行すればよい。A は初回投入用なので、差分を当てるなら B を使うか、
 追加したマイグレーションのSQLと `schema_migrations` への insert を手で貼る。
 
