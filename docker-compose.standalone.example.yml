@@ -5,22 +5,22 @@
 #   1. `${...}` を使わず、値をYAMLに直接書く(`.env`もシェルの環境変数も無い前提のため)
 #   2. bindマウントを相対パス(./data)ではなく絶対パスで書く
 #      (管理画面から登録する環境では相対パスの基準が分かりにくいため)
-# サービス構成・起動順(data-init → db → init → app)は本番用と同じ。
+# サービス構成・起動順(init → db → app)は本番用と同じ。
 #
 # 使い方:
 #   1. このファイルをコピーして docker-compose.standalone.yml を作る(コピー側は
 #      .gitignore 済み。値を直書きする形式なので、雛形を直接編集すると
 #      SESSION_SECRET 等の秘密がコミット対象に入ってしまう)
 #   2. データの置き場のディレクトリを1つホストに作り、コピーの「ここだけ編集」を
-#      その絶対パスに書き換える(この下のdb/photos/exportsはdata-initが作る)。
+#      その絶対パスに書き換える(この下のdb/photos/exportsはinitが作る)。
 #      あわせて、そのディレクトリを読み書きするユーザーの id -u:id -g を書く
 #   3. SESSION_SECRET に32バイト程度のランダム文字列を設定する(必須)
 #   4. その内容を管理画面に貼り付けて起動する
 #   5. http://<ホスト>:7040/ を開く(初回アクセス時のセットアップで管理者アカウントを作る)
 #
 # 更新は管理画面の「イメージを最新にして再作成」相当の操作(`docker compose pull` +
-# `up -d`)だけでよい。未適用のマイグレーションは init サービスが自動で当てる。
-# 特定時点に戻したいときは、下の2つの image のタグを `latest` から
+# `up -d`)だけでよい。未適用のマイグレーションは app が起動時に自動で当てる。
+# 特定時点に戻したいときは、下の image のタグを `latest` から
 # `sha-xxxxxxx`(Actionsが付けるコミットSHAタグ)に変える —— ただしマイグレーションは
 # 前進のみで巻き戻せないため、スキーマ変更を伴うリリースを戻すにはDBのリストアが要る。
 #
@@ -30,7 +30,7 @@
 name: travel-log
 
 # ---- ここだけ編集: データの置き場(ホストの絶対パス。1つだけ) ----
-# この下の3つは data-init サービスが起動時に作るので、用意するのはこの親だけでよい:
+# この下の3つは init サービスが起動時に作るので、用意するのはこの親だけでよい:
 #   <置き場>/db      … Postgresの実データ(実体は db/18/docker)
 #   <置き場>/photos  … 訪問記録の写真。DBには相対パスだけが入るのでDBと一緒にバックアップする
 #   <置き場>/exports … エクスポートのZIP。作り直せるのでバックアップは要らない
@@ -67,7 +67,7 @@ services:
   # pullは増えない。$$0 は sh に渡す位置パラメータ(composeが $ をエスケープする書き方)で、
   # chown先と app の user: が同じアンカーを参照できるようにしている。
   # db/ はchownしない —— postgresのエントリポイントがrootで起動して自分で揃える
-  data-init:
+  init:
     image: ghcr.io/rtcode337/travel-log:latest
     user: root
     volumes:
@@ -84,7 +84,7 @@ services:
   db:
     image: postgres:18-alpine
     depends_on:
-      data-init:
+      init:
         condition: service_completed_successfully
     environment:
       # ホストにポート公開しないコンテナ間だけの接続。変えるなら init の
@@ -111,33 +111,14 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # スキーマ本体(/init/01_schema.sql)と未適用のマイグレーション(/migrations/*.sql)を
-  # 順に適用するワンショット。適用済みリビジョンは schema_migrations テーブルに記録され、
-  # 2回目以降は何もせず終了する。app はこれが正常終了するまで起動しない
-  # (古いスキーマのままアプリが動くのを防ぐ)。
-  init:
-    image: ghcr.io/rtcode337/travel-log-db-init:latest
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      PGHOST: db
-      PGUSER: travel_log
-      PGPASSWORD: travel_log
-      PGDATABASE: travel_log
-    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
-    # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
-    # このサービスはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
-    # 使い捨てのtmpfsを当てて抑止する
-    tmpfs:
-      - /var/lib/postgresql
-    restart: "no"
-
+  # 起動時にまず未適用のマイグレーションを当て、失敗したら待ち受けに進まない
+  # (古いスキーマのままアプリが動くのを防ぐ)。適用済みリビジョンは
+  # schema_migrations テーブルに記録され、2回目以降は何もせず本体が上がる
   app:
     image: ghcr.io/rtcode337/travel-log:latest
     depends_on:
-      init:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
       # 値は冒頭の「ここだけ編集」にまとめてある
@@ -156,7 +137,7 @@ services:
       - type: bind
         source: *data-dir
         target: /data
-    # 写真とエクスポートをホストのユーザー所有で書く。所有者合わせは data-init が済ませる
+    # 写真とエクスポートをホストのユーザー所有で書く。所有者合わせは init が済ませる
     user: *run-as
     ports:
       # host:container。LAN内からのみ見える状態にしておくこと

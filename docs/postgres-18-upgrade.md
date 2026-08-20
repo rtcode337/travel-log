@@ -41,7 +41,7 @@ docker compose up -d db
 # 4. ダンプを流し込む(db が healthy になるのを待ってから)
 docker compose exec -T db psql -U travel_log -d travel_log -v ON_ERROR_STOP=1 < backup-pg16.sql
 
-# 5. 残りを起動する(init サービスは適用済み記録を見て何もせず終了する)
+# 5. 残りを起動する(アプリは適用済み記録を見て何もせず待ち受けに進む)
 docker compose up -d
 ```
 

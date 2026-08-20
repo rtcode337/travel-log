@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## コマンド
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:7040, next dev+ホットリロード)+Postgres。スキーマ作成・未適用マイグレーションはinitサービスが自動で行う
-docker compose pull && docker compose up -d            # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。未適用のマイグレーションはinitサービスが自動で当てる。SESSION_SECRET環境変数が必須(.env可)
+docker compose -f docker-compose.dev.yml up --build   # 開発用: アプリ(localhost:7040, next dev+ホットリロード)+Postgres。スキーマ作成・未適用マイグレーションはアプリが起動時に自動で行う
+docker compose pull && docker compose up -d            # 本番用: GHCRのビルド済みイメージ(mainへのpushでGitHub Actionsが自動ビルド)で起動。未適用のマイグレーションはアプリが起動時に自動で当てる。SESSION_SECRET環境変数が必須(.env可)
 npm run dev                                             # Next.js開発サーバー(ローカルPostgresを直接使う場合のみ)
 npm run build                                            # 本番ビルド(型チェック込み)
 ```
@@ -24,7 +24,7 @@ LAN内の別端末から開発サーバを開くときは`ALLOWED_DEV_ORIGINS`(`
 
 `docker-compose.standalone.example.yml`は、`.env`もリポジトリのクローンも置けない環境(NASのコンテナマネージャー等、管理画面にYAMLを貼り付けて起動するタイプ)向けの単体定義の雛形。`docker-compose.yml`との違いは「`${...}`を使わず値を直書きする」「bindマウントを絶対パスで書く」の2点だけで、サービス構成・起動順は同じ。**`docker-compose.yml`側のサービス・環境変数を変えたら、standalone側にも同じ変更を反映すること**(値の直書きぶん古くなりやすい)。**リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
 
-このプロジェクトにアプリコードのテストスイート/テストコマンドは存在しない(唯一のテストは`scripts/bootstrap-sql_test.sh`で、Supabase向けの一括SQLが`init`サービスと同じスキーマを作るかを突き合わせるもの。`db/migrations/README.md`参照)。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
+このプロジェクトにアプリコードのテストスイート/テストコマンドは存在しない(唯一のテストは`scripts/bootstrap-sql_test.sh`で、Supabase向けの一括SQLがアプリの起動時の適用と同じスキーマを作るかを突き合わせるもの。`db/migrations/README.md`参照)。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
 
 ### スキーマ変更のルール
 
@@ -32,7 +32,7 @@ DB定義は`db/init/01_schema.sql`の1ファイルにすべてまとまってい
 
 テーブル定義の読める形の一覧とER図は[docs/database.md](docs/database.md)にまとめてある。**DBに変更を入れたら、同じコミットでこの文書も更新すること**(README等と同じく実装に追従させる対象)。
 
-あわせて、**テーブルに変更を加えた場合は同じコミットで`db/migrations/`に移行スクリプトを追加し、本番DBを既存データを保持したまま移行可能にすること**(本番には利用者の訪問記録・写真が入るため、`data/`を捨てる運用はできない)。ファイル名は`<連番>_<内容>.sql`で、ファイル名がそのまま`schema_migrations.version`になる。**`begin`/`commit`と`schema_migrations`へのinsertはスクリプトに書かない**(どちらも`db/entrypoint.sh`が受け持つ)。全文idempotentにすること — 新規DBに対しても一度は実行される。詳細は`db/migrations/README.md`。
+あわせて、**テーブルに変更を加えた場合は同じコミットで`db/migrations/`に移行スクリプトを追加し、本番DBを既存データを保持したまま移行可能にすること**(本番には利用者の訪問記録・写真が入るため、`data/`を捨てる運用はできない)。ファイル名は`<連番>_<内容>.sql`で、ファイル名がそのまま`schema_migrations.version`になる。**`begin`/`commit`と`schema_migrations`へのinsertはスクリプトに書かない**(どちらも`scripts/migrate.mjs`が受け持つ)。全文idempotentにすること — 新規DBに対しても一度は実行される。詳細は`db/migrations/README.md`。
 
 適用は`docker compose up`で自動的に行われる(手で流す必要はない。下記「DBの初期化・マイグレーションの流れ」参照)。
 
@@ -40,20 +40,23 @@ DB定義は`db/init/01_schema.sql`の1ファイルにすべてまとまってい
 
 ### DBの初期化・マイグレーションの流れ
 
-composeは`db` → `init` → `app`の順に起動する。
+composeは`init` → `db` → `app`の順に起動する。スキーマの適用は`app`自身が起動時に行う。
 
 | サービス | 役割 | タイミング |
 |---|---|---|
-| `data-init` | `data/`の下に`db`・`photos`・`exports`を作り、`photos`・`exports`の所有者を実行ユーザーに合わせるワンショット(appと同じイメージをrootで起動) | 最初 |
-| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない)。実データは`PGDATA`で`data/db/18/docker`に置く。所有者はpostgresのエントリポイントが自分で揃える | `data-init`の正常終了後 |
-| `init` | スキーマ本体(`/init/01_schema.sql`)と`/migrations`の未適用SQLを適用し`schema_migrations`に記録するワンショット(`db/Dockerfile`、`db/entrypoint.sh`) | dbのhealthcheck通過**後** |
-| `app` | Next.js。`init`が正常終了するまで起動しない | 最後 |
+| `init` | `data/`の下に`db`・`photos`・`exports`を作り、`photos`・`exports`の所有者を実行ユーザーに合わせるワンショット(appと同じイメージをrootで起動) | 最初 |
+| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない)。実データは`PGDATA`で`data/db/18/docker`に置く。所有者はpostgresのエントリポイントが自分で揃える | `init`の正常終了後 |
+| `app` | 待ち受けの前にスキーマ本体(`db/init/01_schema.sql`)と`db/migrations`の未適用SQLを適用し`schema_migrations`に記録し(`scripts/migrate.mjs`)、そのあとNext.jsを起動する | dbのhealthcheck通過**後** |
 
-**`data-init`は一度廃止して、別の理由で戻したもの。** かつて同じ位置にいた`db-init`(prepareサブコマンド)は「ディレクトリの作成とchown」が仕事で、postgresのエントリポイントが同じことを自分でやるため不要になって消した。GHCRのイメージ名(`travel-log-db-init`)はその名残で、`init`サービスが使い続けている。
+**スキーマの適用に専用のイメージとサービスは持たない。** かつては`postgres`イメージにSQLとシェルスクリプトを焼いた`travel-log-db-init`を作り、**`init`という名前のワンショット**がdbとappの間で1回走っていた(**いまの`init`は名前が同じだけの別物** —— 下記)。**アプリが同じDBへ`pg`で繋いでいる以上、psqlを積んだイメージをもう1つ公開・pullする理由が無い**ので、`scripts/migrate.mjs`としてアプリ側へ寄せた(イメージ1つ・サービス1つ・Actionsのジョブ1つが減る)。**適用の中身は1か所**で、外部DBへ当てる`scripts/migrate-remote.sh`も同じスクリプトをアプリのイメージで走らせる —— Docker運用とホスティング先とで当たるSQLがずれないため。
 
-いま`data-init`が要るのは**`app`が非rootになったから** —— postgresが面倒を見てくれるのは`db/`だけで、`photos/`と`exports/`の所有者は誰も揃えない。bindマウント先がホストに無いとDockerがroot所有で作るので、何もしないと写真の保存で必ず落ちる。**当時の「自動作成に頼れない環境ほどそれが必要」という反省は今も有効**で、だから**ホストに用意してもらうのは親の`data/`1つだけ**にしてある(その下の3つは`data-init`が作る)。編集する場所も、standaloneのYAMLでパスを3つ書いていたのを`x-data-dir`1つに減らした。
+**引き換えに、失敗の見え方が変わった。** ワンショットの非ゼロ終了ではなく、`app`が起動途中で落ちて再起動を繰り返す形になる(理由は`docker compose logs app`の`migrate:`の行)。DBがまだ起きていないだけなら次の回で通るので、再試行になること自体は望ましい。
 
-スキーマ本体もマイグレーションSQLも`travel-log-db-init`イメージに焼き込まれるため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される。マイグレーションが失敗すると`init`が非ゼロ終了し、`app`も起動しないため、古いスキーマのままアプリが動くことはない。
+**いまの`init`の仕事はディレクトリの準備で、これも一度廃止して戻したもの。** 昔いた`db-init`(prepareサブコマンド)がまさにそれをやっていたが、postgresのエントリポイントが同じことを自分でやるため不要になって消した(GHCRのイメージ名`travel-log-db-init`もその名残だった)。**スキーマ適用の`init`が消えて名前が空いた**ので、そちらの名前を引き継いでいる。
+
+戻す理由は当時と違って**`app`が非rootになったから** —— postgresが面倒を見てくれるのは`db/`だけで、`photos/`と`exports/`の所有者は誰も揃えない。bindマウント先がホストに無いとDockerがroot所有で作るので、何もしないと写真の保存で必ず落ちる。**当時の「自動作成に頼れない環境ほどそれが必要」という反省は今も有効**で、だから**ホストに用意してもらうのは親の`data/`1つだけ**にしてある(その下の3つは`init`が作る)。編集する場所も、standaloneのYAMLでパスを3つ書いていたのを`x-data-dir`1つに減らした。
+
+スキーマ本体もマイグレーションSQLもアプリのイメージに焼き込まれる(`Dockerfile`のprodステージが`db/init`・`db/migrations`をコピーする)ため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される。マイグレーションが失敗すると待ち受けに進まないため、古いスキーマのままアプリが動くことはない。
 
 `01_schema.sql`は`schema_migrations`上では`000_init_schema`という名前の「一番先頭のマイグレーション」として扱う。空のDBには実行し、既にテーブルがあるDB(旧方式でinitdbが作ったもの)には実行せず適用済みとして記録するだけにするので、既存の本番DBをそのまま引き継げる。
 

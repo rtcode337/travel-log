@@ -6,7 +6,7 @@ services:
   # Dockerがそれをroot所有で作ってしまい、非rootで動くappが写真とエクスポートを
   # 書けずに落ちるため。appと同じイメージを使うのでpullは増えない。
   # db/ はchownしない —— postgresのエントリポイントがrootで起動して自分で揃える
-  data-init:
+  init:
     image: ghcr.io/rtcode337/travel-log:latest
     user: root
     volumes:
@@ -21,7 +21,7 @@ services:
   db:
     image: postgres:18-alpine
     depends_on:
-      data-init:
+      init:
         condition: service_completed_successfully
     environment:
       POSTGRES_USER: travel_log
@@ -47,37 +47,16 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # スキーマ本体(/init/01_schema.sql)と未適用のマイグレーション(/migrations/*.sql)を
-  # 順に自動適用するワンショット。イメージはappと同じくGitHub Actionsが
-  # ビルド・公開したものをpullして使う(名前が-db-initなのはdb/Dockerfile参照)。
-  # 適用済みリビジョンはschema_migrationsテーブルに記録され、2回目以降は何もせず終了する。
-  # appはこれが正常終了するまで起動しない(古いスキーマのままアプリが動くのを防ぐ)
-  init:
-    image: ghcr.io/rtcode337/travel-log-db-init:latest
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      PGHOST: db
-      PGUSER: travel_log
-      PGPASSWORD: travel_log
-      PGDATABASE: travel_log
-    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
-    # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
-    # このサービスはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
-    # 使い捨てのtmpfsを当てて抑止する
-    tmpfs:
-      - /var/lib/postgresql
-    restart: "no"
-
   app:
     # mainへのpushでGitHub Actions(.github/workflows/docker-publish.yml)がビルド・公開
     # するイメージ。本番ではビルドせず、更新は docker compose pull && docker compose up -d
-    # だけでよい(README「本番運用」参照)
+    # だけでよい(README「本番運用」参照)。
+    # 起動時にまず未適用のマイグレーションを当て、失敗したら待ち受けに進まない
+    # (scripts/migrate.mjs。かつては専用イメージのinitサービスが担っていた)
     image: ghcr.io/rtcode337/travel-log:latest
     depends_on:
-      init:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required (openssl rand -base64 32)}

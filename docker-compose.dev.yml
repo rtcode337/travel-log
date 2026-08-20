@@ -23,34 +23,15 @@ services:
       timeout: 5s
       retries: 10
 
-  # スキーマ本体と未適用のマイグレーションを順に自動適用するワンショット(本番と同じ仕組み)。
-  # 開発では公開イメージをpullせず、db/Dockerfileをその場でビルドして使う
-  init:
-    build:
-      context: ./db
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      PGHOST: db
-      PGUSER: travel_log
-      PGPASSWORD: travel_log
-      PGDATABASE: travel_log
-    # ベースのpostgresイメージが宣言する VOLUME /var/lib/postgresql に何も
-    # マウントしないと、起動のたびに空の匿名ボリュームが作られて溜まっていく。
-    # このサービスはPGDATAを使わない(psqlクライアントとしてしか動かない)ので、
-    # 使い捨てのtmpfsを当てて抑止する
-    tmpfs:
-      - /var/lib/postgresql
-    restart: "no"
-
+  # 起動時にまず未適用のマイグレーションを当ててから開発サーバを上げる
+  # (Dockerfileのdevステージのcmd。本番と同じ scripts/migrate.mjs を通る)
   app:
     build:
       context: .
       target: dev
     depends_on:
-      init:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://travel_log:travel_log@db:5432/travel_log
       SESSION_SECRET: ${SESSION_SECRET:-local-dev-secret-change-me}
