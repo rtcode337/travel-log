@@ -16,7 +16,7 @@ LAN内の別端末から開発サーバを開くときは`ALLOWED_DEV_ORIGINS`(`
 「書いたものだけ」が許可になり、**開発機自身のブラウザから開いても画面が真っ白になる**
 (HTMLは200で返るのに`/_next`配下が403で止まりJSが動かないため、原因が分かりにくい)。
 
-`npm run dev`/`npm run build`はどちらも`--webpack`を明示している(Next.js 16の既定バンドラーのTurbopackには、bindマウントされた`data`・`photos`をファイル監視から外す`watchOptions.ignored`相当の設定が無いため。`next.config.ts`のコメント参照)。
+`npm run dev`/`npm run build`はどちらも`--webpack`を明示している(Next.js 16の既定バンドラーのTurbopackには、bindマウントされた`data`をファイル監視から外す`watchOptions.ignored`相当の設定が無いため。`next.config.ts`のコメント参照)。
 
 どちらにも`predev`/`prebuild`で`npm run copy-maplibre-worker`(`scripts/copy-maplibre-worker.mjs`)が付いており、MapLibreのワーカースクリプトを`node_modules`から`public/maplibre-gl/`へコピーする(生成物のためgit管理外。理由は下記「MapLibreのワーカースクリプト」)。`next dev`/`next build`を直接叩くとこのコピーが走らないため、地図が真っ白になったらまず`npm run copy-maplibre-worker`を実行すること。
 
@@ -44,11 +44,14 @@ composeは`db` → `init` → `app`の順に起動する。
 
 | サービス | 役割 | タイミング |
 |---|---|---|
-| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない)。`data`が無ければDockerが作り、所有者はpostgresのエントリポイントが自分で揃える | — |
+| `data-init` | `data/`の下に`db`・`photos`・`exports`を作り、`photos`・`exports`の所有者を実行ユーザーに合わせるワンショット(appと同じイメージをrootで起動) | 最初 |
+| `db` | Postgres本体(空のDBができるだけ。スキーマは作らない)。実データは`PGDATA`で`data/db/18/docker`に置く。所有者はpostgresのエントリポイントが自分で揃える | `data-init`の正常終了後 |
 | `init` | スキーマ本体(`/init/01_schema.sql`)と`/migrations`の未適用SQLを適用し`schema_migrations`に記録するワンショット(`db/Dockerfile`、`db/entrypoint.sh`) | dbのhealthcheck通過**後** |
 | `app` | Next.js。`init`が正常終了するまで起動しない | 最後 |
 
-かつてはデータディレクトリの作成とchownを行う`db-init`サービス(prepareサブコマンド)がdbの起動前にあったが、postgresのエントリポイントが同じことを自分でやるため廃止した。「ホスト側にディレクトリが無くても起動できる」が狙いだったものの、それが必要なstandalone環境ほどbindマウント先の自動作成に頼れず、結局あらかじめ作っておく運用になっていた。GHCRのイメージ名(`travel-log-db-init`)はこの名残で、`init`サービスが使い続けている。
+**`data-init`は一度廃止して、別の理由で戻したもの。** かつて同じ位置にいた`db-init`(prepareサブコマンド)は「ディレクトリの作成とchown」が仕事で、postgresのエントリポイントが同じことを自分でやるため不要になって消した。GHCRのイメージ名(`travel-log-db-init`)はその名残で、`init`サービスが使い続けている。
+
+いま`data-init`が要るのは**`app`が非rootになったから** —— postgresが面倒を見てくれるのは`db/`だけで、`photos/`と`exports/`の所有者は誰も揃えない。bindマウント先がホストに無いとDockerがroot所有で作るので、何もしないと写真の保存で必ず落ちる。**当時の「自動作成に頼れない環境ほどそれが必要」という反省は今も有効**で、だから**ホストに用意してもらうのは親の`data/`1つだけ**にしてある(その下の3つは`data-init`が作る)。編集する場所も、standaloneのYAMLでパスを3つ書いていたのを`x-data-dir`1つに減らした。
 
 スキーマ本体もマイグレーションSQLも`travel-log-db-init`イメージに焼き込まれるため、本番ホストのリポジトリの新旧に関わらず、pullしたイメージの中身がそのまま適用される。マイグレーションが失敗すると`init`が非ゼロ終了し、`app`も起動しないため、古いスキーマのままアプリが動くことはない。
 
@@ -60,7 +63,7 @@ composeは`db` → `init` → `app`の順に起動する。
 
 ```bash
 docker compose -f docker-compose.dev.yml down
-rm -rf data/18     # 既存データを捨てる(訪問記録・アカウントも消える)
+rm -rf data/db/18  # 既存データを捨てる(訪問記録・アカウントも消える)
 docker compose -f docker-compose.dev.yml up --build
 ```
 
@@ -522,7 +525,7 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 `reviews`=公開・本文のみ・**掲示板方式**(1ユーザーが同じスポットに何件でも書ける。POSTは毎回insertで、ユニーク制約もupsertも無い)、シリーズの算出には一切使わない。`visits`=非公開・同一ユーザー×同一スポットで複数件可。`visit_plans`(訪問予定・行きたい場所のブックマーク)も非公開で、該当スポットの`visits`が作成されると自動的に削除される(**訪問予定リストの側は削除せず`visited_at`で訪問済みにする**。「訪問予定リスト(旅程)」参照)。`photos`(text[])にはBase64ではなく、保存先からの相対パス`<ユーザーID>/<年>/<月>/<uuid>.<ext>`を保存する(`lib/photos.ts`)。配信は認証付き`/api/photos/[...path]`のみ(先頭セグメント=本人チェック)。
 
-**写真の保存先は`PHOTO_STORAGE`環境変数で切り替えられる**(`lib/photoStorage.ts`の`PhotoStorage`インターフェース)。`fs`(既定)はローカルのファイルシステム(docker-composeが`./photos`を`/app/photos`にbindマウント。Docker運用はこちら。`PHOTOS_DIR`で変更可)、`supabase`はSupabase Storage(`SUPABASE_URL`/`SUPABASE_SECRET_KEY`/`SUPABASE_STORAGE_BUCKET`)。**キーは世代で渡し方が違う** —— 新しいSecret key(`sb_secret_...`)は`apikey`ヘッダだけに載せ、レガシーの`service_role`はJWTなので`Authorization: Bearer`にも載せる(新しいキーをBearerに載せるとJWTとしてパースされて`Invalid JWT`で弾かれる)。接頭辞`sb_`で判定して`supabaseConfig()`が組み立てる。環境変数は`SUPABASE_SECRET_KEY`が正で、`SUPABASE_SERVICE_ROLE_KEY`は既存デプロイのための読み替え(レガシーキーは2026年末に廃止予定で、新規プロジェクトでは発行されない)。**永続ディスクを持てないホスト(Vercel等のサーバーレスやボリューム無しのコンテナホスト)へ載せるための切り替え**で、DBが`DATABASE_URL`だけで差し替わるのと同じ考え方。Supabase StorageはRESTが素直なのでSDKを足さず素の`fetch`だけで実装している(依存を増やさない方針。S3/R2直はSigV4署名が要るため未対応 — 足すならこのインターフェースに実装を1つ追加するだけ)。どの保存先でも公開URLは使わず、必ず認証付き配信ルートから読み出して返す(写真は非公開のため)。**この切り替えを含め、Vercel等のサーバーレスに載せるときの設定は[docs/hosting-vercel-supabase.md](docs/hosting-vercel-supabase.md)にまとめてある**(`PG_POOL_MAX`・`NEXT_PUBLIC_MAX_UPLOAD_BYTES`と、`lib/features.ts`の機能フラグ。**どれも未設定なら従来どおりの挙動**なのでDocker運用には影響しない)。`lib/photos.ts`はパスの生成・検証とdata URLのデコードだけを持ち、保存先には依存しない(読み出しは`readVisitPhoto`に集約)。1件あたりの枚数上限(`MAX_PHOTOS_PER_VISIT`=10)は`lib/visitPhoto.ts`に置き、POST/PATCHの両ルートがそれを読む(**1枚あたりの書き出しサイズをこの枚数で割って決める**ため、片方だけ変えると上限の計算が合わなくなる)。**写真の添付自体を`NEXT_PUBLIC_PHOTOS_ENABLED=false`で畳める**(`lib/features.ts`の`photosEnabled`)。畳むと`VisitFields`は選択ボタンを出さず、POST `/api/visits`は写真つきを、PATCH `/api/visits/[id]`は**data URL(=新規追加)だけ**を503で拒む —— **既にある写真の閲覧・取り外しは止めない**(畳んだ理由は「これ以上増やさない」であって、記録済みのものを見せない理由は無い)。訪問記録はスポット詳細の訪問履歴から後から編集できる(`VisitFormModal`の編集モード=`visit` prop+PATCH `/api/visits/[id]`。写真は「既存の相対パス=残す」「data URL=新規追加」の混在で受け取り、相対パスはその訪問記録が現在持つものに限定して検証、外された写真のファイルはDB更新成功後に削除する。口コミは訪問記録と独立のデータのため編集モードでは入力欄を出さない)。
+**写真の保存先は`PHOTO_STORAGE`環境変数で切り替えられる**(`lib/photoStorage.ts`の`PhotoStorage`インターフェース)。`fs`(既定)はローカルのファイルシステム(docker-composeが`data/`を`/data`にbindマウントし、`PHOTOS_DIR=/data/photos`を渡す。Docker運用はこちら)、`supabase`はSupabase Storage(`SUPABASE_URL`/`SUPABASE_SECRET_KEY`/`SUPABASE_STORAGE_BUCKET`)。**キーは世代で渡し方が違う** —— 新しいSecret key(`sb_secret_...`)は`apikey`ヘッダだけに載せ、レガシーの`service_role`はJWTなので`Authorization: Bearer`にも載せる(新しいキーをBearerに載せるとJWTとしてパースされて`Invalid JWT`で弾かれる)。接頭辞`sb_`で判定して`supabaseConfig()`が組み立てる。環境変数は`SUPABASE_SECRET_KEY`が正で、`SUPABASE_SERVICE_ROLE_KEY`は既存デプロイのための読み替え(レガシーキーは2026年末に廃止予定で、新規プロジェクトでは発行されない)。**永続ディスクを持てないホスト(Vercel等のサーバーレスやボリューム無しのコンテナホスト)へ載せるための切り替え**で、DBが`DATABASE_URL`だけで差し替わるのと同じ考え方。Supabase StorageはRESTが素直なのでSDKを足さず素の`fetch`だけで実装している(依存を増やさない方針。S3/R2直はSigV4署名が要るため未対応 — 足すならこのインターフェースに実装を1つ追加するだけ)。どの保存先でも公開URLは使わず、必ず認証付き配信ルートから読み出して返す(写真は非公開のため)。**この切り替えを含め、Vercel等のサーバーレスに載せるときの設定は[docs/hosting-vercel-supabase.md](docs/hosting-vercel-supabase.md)にまとめてある**(`PG_POOL_MAX`・`NEXT_PUBLIC_MAX_UPLOAD_BYTES`と、`lib/features.ts`の機能フラグ。**どれも未設定なら従来どおりの挙動**なのでDocker運用には影響しない)。`lib/photos.ts`はパスの生成・検証とdata URLのデコードだけを持ち、保存先には依存しない(読み出しは`readVisitPhoto`に集約)。1件あたりの枚数上限(`MAX_PHOTOS_PER_VISIT`=10)は`lib/visitPhoto.ts`に置き、POST/PATCHの両ルートがそれを読む(**1枚あたりの書き出しサイズをこの枚数で割って決める**ため、片方だけ変えると上限の計算が合わなくなる)。**写真の添付自体を`NEXT_PUBLIC_PHOTOS_ENABLED=false`で畳める**(`lib/features.ts`の`photosEnabled`)。畳むと`VisitFields`は選択ボタンを出さず、POST `/api/visits`は写真つきを、PATCH `/api/visits/[id]`は**data URL(=新規追加)だけ**を503で拒む —— **既にある写真の閲覧・取り外しは止めない**(畳んだ理由は「これ以上増やさない」であって、記録済みのものを見せない理由は無い)。訪問記録はスポット詳細の訪問履歴から後から編集できる(`VisitFormModal`の編集モード=`visit` prop+PATCH `/api/visits/[id]`。写真は「既存の相対パス=残す」「data URL=新規追加」の混在で受け取り、相対パスはその訪問記録が現在持つものに限定して検証、外された写真のファイルはDB更新成功後に削除する。口コミは訪問記録と独立のデータのため編集モードでは入力欄を出さない)。
 
 **訪問記録には後から「追記」できる**(`visit_notes`。スポット詳細の訪問履歴の各記録の
 「+ 追記」→ `VisitNoteFormModal` → POST `/api/visit-notes`)。**訪問回数は増えない** ——
@@ -559,7 +562,7 @@ CSVインポートは差分更新で、`AdminView`側が事前読み込み済み
 
 - **実行できるのは管理者だけ**(`POST /api/exports`に`{ email }`)。他人の訪問記録と写真がまるごと入るため、spot_admin・moderatorには開けていない(あちらはスポットの管理権限であって記録を見る権限ではない)
 - **生成はリクエストの外で走らせ、すぐ`running`のジョブを返す**。写真ごとまとめるため件数によっては数十秒以上かかり、待たせるとブラウザ側が先にタイムアウトする。完了・失敗は`export_jobs.status`に書き戻し、画面は実行中だけ3秒ごとに一覧を取り直す
-- **ZIPはコンテナ内の`/app/exports`**(ホストの`./exports`をbindマウント)に`<ユーザーID>/<ジョブID>.zip`で置き、DBには相対パスだけを持つ(写真と同じ持ち方)。**`photos/`と分けてある**のは寿命が違うため —— 写真は消したら戻らない記録、ZIPはいつでも作り直せる使い捨て。混ぜると掃除のときに消してよいものと消してはいけないものが並ぶ
+- **ZIPはコンテナ内の`/data/exports`**(ホストの`data/exports`。`EXPORTS_DIR`で渡す)に`<ユーザーID>/<ジョブID>.zip`で置き、DBには相対パスだけを持つ(写真と同じ持ち方)。**`photos/`と分けてある**のは寿命が違うため —— 写真は消したら戻らない記録、ZIPはいつでも作り直せる使い捨て。混ぜると掃除のときに消してよいものと消してはいけないものが並ぶ
 - **同じユーザーのZIPは最新1件だけ残す**。古いものは**新しいものが`done`になった時点で**ファイルごと消す(途中で失敗しても前回のZIPは残る)。写真の二重保持でディスクが膨らみ続けないようにするため
 - **ダウンロードできるのは管理者と対象ユーザー本人だけ**(`GET /api/exports/[id]/download`)。権限が無い場合も404にして、他人のジョブの存在自体を伏せる。本人の入口はアカウント画面(`AccountView`。出来上がっているときだけ出る。**作成ボタンは置かない**)
 - **生成状況は「画面を開いたとき・生成中は3秒ごと・画面が表に戻ったとき」の3つの機会で取り直す**(`lib/useExportJobs.ts`。管理画面とアカウント画面で共用)。**`api.exports.list()`はタブ内のGETキャッシュを通さない**(`request`の`fresh`オプション+`Cache-Control: no-store`) —— `lib/api-client.ts`のキャッシュはpathをキーに最初の結果を持ち続け、書き込み系が成功するまで消えないので、**サーバー側で勝手に進む状態を載せると作成中のまま画面が固まる**(リロードするまで完了に変わらない)。状態が進む口を足すときは同じように`fresh`を付けること

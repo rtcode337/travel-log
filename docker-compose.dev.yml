@@ -7,9 +7,9 @@ services:
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
-      # postgres:18のPGDATA既定はマウント直下ではなく /var/lib/postgresql/18/docker。
-      # 16の頃に必要だったPGDATAの上書き(マウント直下だとドットファイルの存在で
-      # initdbが初期化を拒否する対策)は、既定がサブディレクトリになったので不要
+      # データの置き場をdata/1つにまとめ、その下をdb/photos/exportsに切っている
+      # (本番と同じ形。docker-compose.ymlのdbサービスのコメント参照)
+      PGDATA: /var/lib/postgresql/db/18/docker
     volumes:
       # db/initはマウントしない。スキーマ本体(01_schema.sql)はinitサービスが流す
       # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
@@ -66,6 +66,10 @@ services:
       # 許可されるので、開発機自身のブラウザから開いても真っ白になる)
       ALLOWED_DEV_ORIGINS: ${ALLOWED_DEV_ORIGINS:-}
       NODE_ENV: development
+      # 写真とエクスポートの置き場。本番と同じくdata/の下にそろえる
+      # (リポジトリを/appにマウントしているので、ホストからは data/photos・data/exports)
+      PHOTOS_DIR: /app/data/photos
+      EXPORTS_DIR: /app/data/exports
     ports:
       - "7040:7040"
     volumes:

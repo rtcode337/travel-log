@@ -3,16 +3,17 @@
 #
 # docker-compose.yml との違いは2点だけ:
 #   1. `${...}` を使わず、値をYAMLに直接書く(`.env`もシェルの環境変数も無い前提のため)
-#   2. bindマウントを相対パス(./db・./photos)ではなく絶対パスで書く
+#   2. bindマウントを相対パス(./data)ではなく絶対パスで書く
 #      (管理画面から登録する環境では相対パスの基準が分かりにくいため)
-# サービス構成・起動順(db → init → app)は本番用と同じ。
+# サービス構成・起動順(data-init → db → init → app)は本番用と同じ。
 #
 # 使い方:
 #   1. このファイルをコピーして docker-compose.standalone.yml を作る(コピー側は
 #      .gitignore 済み。値を直書きする形式なので、雛形を直接編集すると
 #      SESSION_SECRET 等の秘密がコミット対象に入ってしまう)
-#   2. データの置き場のディレクトリをホストに作り、コピーの「ここだけ編集」を
-#      その絶対パスに書き換える
+#   2. データの置き場のディレクトリを1つホストに作り、コピーの「ここだけ編集」を
+#      その絶対パスに書き換える(この下のdb/photos/exportsはdata-initが作る)。
+#      あわせて、そのディレクトリを読み書きするユーザーの id -u:id -g を書く
 #   3. SESSION_SECRET に32バイト程度のランダム文字列を設定する(必須)
 #   4. その内容を管理画面に貼り付けて起動する
 #   5. http://<ホスト>:7040/ を開く(初回アクセス時のセットアップで管理者アカウントを作る)
@@ -28,14 +29,19 @@
 
 name: travel-log
 
-# ---- ここだけ編集: データの置き場(すべてホストの絶対パス) ----
-# db-data… Postgresの実データ(所有者はpostgresのエントリポイントが自分で揃える)
-# photos … 訪問記録の写真。DBには相対パスだけが入るので、DBと一緒にバックアップする
-# exports … 訪問記録エクスポートのZIP。作り直せるのでバックアップは要らない
-# どちらも**あらかじめ作っておくこと**(bindマウント先を自動作成しない環境がある)。
-x-db-data-dir: &db-data-dir "/path/to/travel-log/data"
-x-photos-dir: &photos-dir "/path/to/travel-log/photos"
-x-exports-dir: &exports-dir "/path/to/travel-log/exports"
+# ---- ここだけ編集: データの置き場(ホストの絶対パス。1つだけ) ----
+# この下の3つは data-init サービスが起動時に作るので、用意するのはこの親だけでよい:
+#   <置き場>/db      … Postgresの実データ(実体は db/18/docker)
+#   <置き場>/photos  … 訪問記録の写真。DBには相対パスだけが入るのでDBと一緒にバックアップする
+#   <置き場>/exports … エクスポートのZIP。作り直せるのでバックアップは要らない
+# 親ディレクトリだけは**あらかじめ作っておくこと**(bindマウント先を自動作成しない環境がある)。
+x-data-dir: &data-dir "/path/to/travel-log/data"
+
+# ---- ここだけ編集: 実行ユーザー ----
+# 上のディレクトリをホスト側で読み書きするユーザーの `id -u`:`id -g`。
+# app はこのユーザーで動くので、ここが合っていないと写真の保存に失敗する。
+# db は関係ない(postgresのエントリポイントが自分で所有者を揃える)
+x-run-as: &run-as "1000:1000"
 
 # ---- ここだけ編集: アプリの設定(.env の代わり) ----
 # セッションCookieの署名鍵(必須)。32バイト程度のランダム文字列を入れる
@@ -55,22 +61,48 @@ x-google-client-secret: &google-client-secret ""
 x-public-base-url: &public-base-url ""
 
 services:
+  # 本体より先に、データの置き場の下へ必要なディレクトリを作り、所有者を実行ユーザーに
+  # 合わせるワンショット。bindマウント先がホストに無いとDockerがroot所有で作ってしまい、
+  # 非rootで動くappが写真とエクスポートを書けずに落ちるため。appと同じイメージを使うので
+  # pullは増えない。$$0 は sh に渡す位置パラメータ(composeが $ をエスケープする書き方)で、
+  # chown先と app の user: が同じアンカーを参照できるようにしている。
+  # db/ はchownしない —— postgresのエントリポイントがrootで起動して自分で揃える
+  data-init:
+    image: ghcr.io/rtcode337/travel-log:latest
+    user: root
+    volumes:
+      - type: bind
+        source: *data-dir
+        target: /data
+    entrypoint:
+      - sh
+      - -c
+      - mkdir -p /data/db /data/photos /data/exports && chown -R "$$0" /data/photos /data/exports
+      - *run-as
+    restart: "no"
+
   db:
     image: postgres:18-alpine
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
     environment:
       # ホストにポート公開しないコンテナ間だけの接続。変えるなら init の
       # PG* と app の DATABASE_URL も同じ値に揃えること
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
+      # 置き場を1つにまとめ、その下をdb/photos/exportsに切っている。既定
+      # (/var/lib/postgresql/18/docker)のままだとマウント直下に18/が来て
+      # photos・exportsと同じ段に並ぶので、db/の下へ寄せる
+      PGDATA: /var/lib/postgresql/db/18/docker
     volumes:
-      # db/init はマウントしない。スキーマ本体(01_schema.sql)は init サービスが流す
-      # postgres:18 はPGDATAが /var/lib/postgresql/18/docker で、VOLUME宣言も
-      # 1段上の /var/lib/postgresql に変わった。/var/lib/postgresql/data を
-      # マウントすると匿名ボリュームが毎回作られるため1段上をマウントする
-      # (実データはホストの <db-data-dir>/18/docker に入る)
+      # db/init はマウントしない。スキーマ本体(01_schema.sql)は init サービスが流す。
+      # postgres:18 はVOLUME宣言が /var/lib/postgresql なので、そこをマウントしないと
+      # 匿名ボリュームが毎回作られる。置き場をそのままここへ当て、実データは上の
+      # PGDATAで <置き場>/db/18/docker に入れる
       - type: bind
-        source: *db-data-dir
+        source: *data-dir
         target: /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
@@ -114,15 +146,18 @@ services:
       GOOGLE_CLIENT_SECRET: *google-client-secret
       PUBLIC_BASE_URL: *public-base-url
       NODE_ENV: production
+      # 訪問記録の写真置き場(lib/photoStorage.ts)。DBには相対パスのみ保存される
+      PHOTOS_DIR: /data/photos
+      # エクスポートのZIP置き場(lib/exportStorage.ts)。作り直せる使い捨て
+      EXPORTS_DIR: /data/exports
     volumes:
-      # 訪問記録の写真ファイル置き場(lib/photoStorage.ts)。DBには相対パスのみ保存される
+      # 置き場ごとマウントして、中のどれを使うかは上のPHOTOS_DIR/EXPORTS_DIRで決める。
+      # db/も見えるが、postgresがPGDATAを0700で作るのでappのユーザーからは読めない
       - type: bind
-        source: *photos-dir
-        target: /app/photos
-      # 訪問記録エクスポートのZIP置き場(lib/exportStorage.ts)。作り直せる使い捨て
-      - type: bind
-        source: *exports-dir
-        target: /app/exports
+        source: *data-dir
+        target: /data
+    # 写真とエクスポートをホストのユーザー所有で書く。所有者合わせは data-init が済ませる
+    user: *run-as
     ports:
       # host:container。LAN内からのみ見える状態にしておくこと
       - "7040:7040"

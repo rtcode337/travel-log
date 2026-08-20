@@ -17,6 +17,11 @@ dump → restore の移行を行う。新規に立てる環境ではこの手順
 それ以前から動かしているホストでは、更新時に `mv db/data data` で移してから起動する
 (移さずに起動すると空のクラスタが作られ、初期状態のアプリが立ち上がる)。
 
+**この文書は 16 → 18 の移行を書いた当時のもので、以降レイアウトが変わっている** ——
+いまは `data/` の下を `db/`・`photos/`・`exports/` に切り、Postgres の実データは
+`data/db/18/docker` に入る(この文書の手順を今から実行するなら、退避と作り直しの
+対象は `data/db`)。
+
 ## `docker compose` コマンドが使えるホスト
 
 ```bash
@@ -28,7 +33,7 @@ docker compose down
 mv data data.pg16
 
 # 3. 新しい定義とイメージに更新して DB だけ起動する
-#    (data は Docker が作り直し、18 の空クラスタが data/18/docker に初期化される)
+#    (data は Docker が作り直し、18 の空クラスタが data/db/18/docker に初期化される)
 git pull
 docker compose pull
 docker compose up -d db
@@ -55,7 +60,8 @@ docker exec -i <db> pg_dump -U travel_log --clean --if-exists travel_log > backu
 
 # 2. 管理画面でスタックを停止してから、旧データを退避する(消さずに残しておく)。
 #    対象は docker-compose.yml ならクローン直下の data、standalone なら
-#    YAML 冒頭の x-db-data-dir のパス。postgres ユーザー(uid 70)所有なので
+#    YAML 冒頭の x-data-dir のパス(当時は x-db-data-dir)。postgres ユーザー
+#    (uid 70)所有なので
 #    root 権限が要る。退避したら空のディレクトリを作り直しておく
 #    (bindマウント先を自動作成しない環境があるため)
 sudo mv <データディレクトリ> <同じパス>.pg16

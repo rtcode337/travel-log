@@ -30,8 +30,14 @@ COPY --from=builder /app/.next/static ./.next/static
 # publicにはPWAのアイコン(public/icons)と、MapLibreのワーカースクリプト
 # (public/maplibre-gl。builderのprebuildが生成する。lib/maplibre.ts参照)が入る
 COPY --from=builder /app/public ./public
+# 写真とエクスポートの置き場。実運用ではホストのディレクトリを bind マウントするが、
+# マウントせずに動かしたときも非 root で書けるように用意しておく
+RUN mkdir -p /app/photos /app/exports && chown -R node:node /app/photos /app/exports /app/.next
 # 待ち受けポート。standaloneのserver.jsはPORT環境変数を読む(next dev/start側は
 # package.jsonのscriptsで-p 7040を指定していて、ここと両方を揃えて変えること)
 ENV PORT=7040
 EXPOSE 7040
+# root で動かさない。node:24-alpine が持つ node ユーザーは uid/gid とも 1000 で、
+# compose の user: の既定 (1000:1000) と一致する
+USER node
 CMD ["node", "server.js"]
