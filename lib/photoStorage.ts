@@ -5,8 +5,8 @@ import path from "path";
  * 訪問記録の写真の保存先(サーバー専用モジュール)。
  *
  * 保存先は環境変数`PHOTO_STORAGE`で切り替える。
- *   - `fs`(既定) … ローカルのファイルシステム。docker-composeはリポジトリ直下の
- *     ./photos をコンテナの /app/photos にbindマウントする。Docker運用はこちら。
+ *   - `fs`(既定) … ローカルのファイルシステム。docker-composeはデータの置き場(data/)を
+ *     /data にbindマウントし、PHOTOS_DIR=/data/photos を渡す。Docker運用はこちら。
  *   - `supabase` … Supabase Storage。永続ディスクを持てない/持ちたくないホスト
  *     (Vercel等のサーバーレスや、ボリューム無しのコンテナホスト)向け。
  *

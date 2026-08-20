@@ -4,8 +4,8 @@ import path from "path";
 /**
  * 訪問記録エクスポートのZIPの置き場(サーバー専用モジュール)。
  *
- * docker-composeはリポジトリ直下の ./exports をコンテナの /app/exports に
- * bindマウントする。**写真(./photos)と分けてある**のは寿命が違うため ——
+ * docker-composeはデータの置き場(data/)を /data にbindマウントし、この置き場を
+ * EXPORTS_DIR=/data/exports で渡す。写真(data/photos)と分けてあるのは寿命が違うため ——
  * 写真は消したら戻らない記録、ZIPはいつでも作り直せる使い捨てで、
  * 同じユーザーのものは最新1件だけ残して消す。混ぜると、掃除のときに
  * 消してよいものと消してはいけないものが同じ場所に並ぶ。

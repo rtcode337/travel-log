@@ -30,22 +30,13 @@ yarn-error.log*
 # (.env.example と .env の関係と同じ)
 /docker-compose.standalone.yml
 
-# Postgresの実データ(docker-compose.yml/docker-compose.dev.ymlのbindマウント先)
-# 個人情報を含むため絶対にコミットしない。ディレクトリ自体はdb-initサービス
-# (docker-compose.yml)が起動時にmkdirするので.gitkeepは不要。中身ではなく
-# ディレクトリごと無視することで、postgresユーザー所有で権限が絞られた
-# 中身をgitが読みに行かず「could not open directory」警告が出ないようにする
+# データの置き場(composeのbindマウント先)。この下に db(Postgresの実データ)・
+# photos(訪問記録の写真)・exports(エクスポートのZIP)が入る。どれも個人情報を
+# 含むため絶対にコミットしない。ディレクトリ自体はdata-initサービスが起動時に
+# 作るので.gitkeepは不要。中身ではなくディレクトリごと無視することで、
+# postgresユーザー所有で権限が絞られた中身をgitが読みに行かず
+# 「could not open directory」警告が出ないようにする
 /data/
-
-# 訪問記録の写真ファイル(docker-compose.ymlのbindマウント先、lib/photos.ts参照)
-# data と同じ理由で、中身はコミットせずフォルダだけ .gitkeep で残す
-/photos/*
-!/photos/.gitkeep
-
-# 訪問記録エクスポートのZIP(docker-compose.ymlのbindマウント先、lib/exportStorage.ts)
-# 中身は個人情報そのもの。写真と同じくフォルダだけ .gitkeep で残す
-/exports/*
-!/exports/.gitkeep
 
 # MapLibre GL JSのワーカースクリプト(scripts/copy-maplibre-worker.mjsが
 # node_modulesからコピーする生成物。理由はlib/maplibre.tsのコメント参照)

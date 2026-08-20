@@ -165,10 +165,28 @@ docker compose pull && docker compose up -d
   ```
 - 公開されるイメージは2つ。`ghcr.io/rtcode337/travel-log`(アプリ本体)と
   `ghcr.io/rtcode337/travel-log-db-init`(スキーマ・マイグレーション適用。`init`サービスが使う)
-- **Postgresの実データの置き場は`data/`**(リポジトリ直下)。かつては`db/data/`だったので、
-  それ以前から動かしているホストでは更新時に1回だけ移すこと(`docker compose down`のあと
-  `mv db/data data`。standaloneはYAML冒頭の`x-db-data-dir`も新しいパスに書き換える)。
-  移さずに起動すると空のDBが作られ、初期状態のアプリが立ち上がる(旧データは消えない)
+- **データの置き場は`data/`の1つだけ**(リポジトリ直下)。この下に`db/`(Postgresの実データ)・
+  `photos/`(添付写真)・`exports/`(エクスポートのZIP)を`data-init`サービスが起動時に作る。
+  **バックアップは`data/`をコピーすればよい**(停止してからコピーすること)。
+  standaloneでもホストに用意するのは親ディレクトリ1つで、YAML冒頭の`x-data-dir`に書く
+- **`app`は非rootで動く**。`data/`に書かれるファイルはホストのユーザー所有になり、
+  既定は`1000:1000`。`id -u`が1000以外のホストでは`.env`に`TRAVEL_LOG_UID`/`TRAVEL_LOG_GID`を
+  設定する(standaloneはYAML冒頭の`x-run-as`)。所有者合わせは起動前に`data-init`が
+  自動でやるので、`chown`を手で打つ必要はない
+- **置き場を`data/`にまとめる前から動かしているホストは、更新時に1回だけ移すこと。**
+  `docker compose down`のあと:
+
+  ```bash
+  mkdir -p data/db
+  sudo mv data/18 data/db/          # Postgresの実データ
+  sudo mv photos/* data/photos/     # data/photos・data/exports が無ければ先に mkdir
+  sudo mv exports/* data/exports/
+  ```
+
+  standaloneは冒頭の`x-db-data-dir`/`x-photos-dir`/`x-exports-dir`が`x-data-dir`1つに
+  変わっているので、コピー側のYAMLも差し替える。移さずに起動すると空のDBが作られ、
+  初期状態のアプリが立ち上がる(旧データは消えない)。
+  さらに古い`db/data/`のままのホストは、先に`mv db/data data`を済ませてから上を実行する
 - **PostgreSQL 16 時代のデータを持つ既存環境は、更新前に1回だけデータ移行が必要**
   ([docs/postgres-18-upgrade.md](docs/postgres-18-upgrade.md))。移行せずに起動すると
   dbコンテナが起動に失敗する(データは壊れない)
@@ -253,13 +271,13 @@ docker compose pull && docker compose up -d
 - **非表示スポット**: 興味のない公開スポットを自分の地図・一覧から隠すユーザーごとの設定。
   解除は`/[type]/spots`の「非表示にしたスポット」から
 - **口コミ(公開)**: 星評価はなく本文のみ。投稿するたびに増える掲示板方式で、同じスポットに何件でも書ける
-- **写真(非公開)**: 自分の訪問記録にのみ添付。ブラウザ側で縮小・圧縮した上で`photos/`
+- **写真(非公開)**: 自分の訪問記録にのみ添付。ブラウザ側で縮小・圧縮した上で`data/photos/`
   フォルダ(Dockerではbindマウント)に保存され、`/api/photos/...`経由(本人のみ)で配信する
 - **訪問記録のエクスポート**: 管理者が`/[type]/admin`で対象ユーザーのメールアドレスを
   指定して実行すると、そのユーザーの訪問記録を全スポット種別ぶんまとめたZIPが
   バックグラウンドで作られる(`visits-<種別キー>.csv`=訪問のメモ+スポット情報、
   `photos/`=添付写真)。出来上がったZIPは管理画面と、対象ユーザー本人のアカウント画面から
-  ダウンロードできる。ZIPは`exports/`に置かれ、同じユーザーのものは最新1件だけ残る
+  ダウンロードできる。ZIPは`data/exports/`に置かれ、同じユーザーのものは最新1件だけ残る
 
 スポット詳細にはWikipedia検索による概要表示機能もある(種別ごとにON/OFF・参照言語版を設定可)。
 

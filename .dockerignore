@@ -4,6 +4,6 @@ node_modules
 .github
 .env
 .env.local
+# データの置き場(db・photos・exports)。イメージには要らず、本番ホストでビルド
+# すると実データがビルドコンテキストに乗る
 data
-photos
-exports

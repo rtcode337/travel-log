@@ -1,23 +1,44 @@
 name: travel-log
 
 services:
+  # 本体より先に、データの置き場(data/)の下へ必要なディレクトリを作り、
+  # 所有者を実行ユーザーに合わせるワンショット。bindマウント先がホストに無いと
+  # Dockerがそれをroot所有で作ってしまい、非rootで動くappが写真とエクスポートを
+  # 書けずに落ちるため。appと同じイメージを使うのでpullは増えない。
+  # db/ はchownしない —— postgresのエントリポイントがrootで起動して自分で揃える
+  data-init:
+    image: ghcr.io/rtcode337/travel-log:latest
+    user: root
+    volumes:
+      - ./data:/data
+    entrypoint:
+      - sh
+      - -c
+      - mkdir -p /data/db /data/photos /data/exports && chown -R "$$0" /data/photos /data/exports
+      - ${TRAVEL_LOG_UID:-1000}:${TRAVEL_LOG_GID:-1000}
+    restart: "no"
+
   db:
     image: postgres:18-alpine
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log
+      # データの置き場をdata/1つにまとめ、その下をdb/photos/exportsに切っている。
+      # 既定(/var/lib/postgresql/18/docker)のままだとマウント直下に18/が来て
+      # photos・exportsと同じ段に並ぶので、db/の下へ寄せる
+      PGDATA: /var/lib/postgresql/db/18/docker
     volumes:
       # db/initはマウントしない。スキーマ本体(01_schema.sql)はinitサービスが流す
       # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
       #  スキーマを更新したときにgit pullが失敗するようになるため)
-      # postgres:18のイメージはPGDATAが /var/lib/postgresql/18/docker で、
-      # VOLUME宣言も1段上の /var/lib/postgresql に変わった。マウント先を
-      # /var/lib/postgresql/data のままにすると匿名ボリュームが毎回作られるため
-      # 1段上をマウントする(実データはホストの data/18/docker に入る)。
-      # dataが無ければDockerが作り、所有者はpostgresのエントリポイント
-      # (rootで起動して自分で揃える)が調整する。bindマウント先を自動作成しない
-      # 環境(一部のNAS等)では、先にディレクトリを作っておくこと
+      # postgres:18のイメージはVOLUME宣言が /var/lib/postgresql なので、そこを
+      # マウントしないと匿名ボリュームが毎回作られる。データの置き場(data/)を
+      # そのままここへ当て、実データは上のPGDATAで data/db/18/docker に入れる。
+      # 所有者はpostgresのエントリポイント(rootで起動して自分で揃える)が調整する
       - ./data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U travel_log"]
@@ -67,12 +88,19 @@ services:
       # (lib/auth/request-url.ts)。例: https://travel.example.com
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       NODE_ENV: production
+      # 訪問記録の写真置き場(lib/photoStorage.ts)。DBには相対パスのみ保存される
+      PHOTOS_DIR: /data/photos
+      # エクスポートのZIP置き場(lib/exportStorage.ts)。写真と分けてあるのは寿命が
+      # 違うため —— こちらは作り直せる使い捨てで、同じユーザーの最新1件だけ残る
+      EXPORTS_DIR: /data/exports
     volumes:
-      # 訪問記録の写真ファイル置き場(lib/photos.ts)。DBには相対パスのみ保存される
-      - ./photos:/app/photos
-      # 訪問記録エクスポートのZIP置き場(lib/exportStorage.ts)。写真と分けてあるのは
-      # 寿命が違うため —— こちらは作り直せる使い捨てで、同じユーザーの最新1件だけ残る
-      - ./exports:/app/exports
+      # 置き場ごとマウントして、中のどれを使うかは上のPHOTOS_DIR/EXPORTS_DIRで決める。
+      # db/も見えるが、postgresがPGDATAを0700で作るのでappのユーザーからは読めない
+      - ./data:/data
+    # data/に書かれるファイルをホストのユーザー所有にする。イメージの既定は
+    # node(uid/gidとも1000)で、ホスト側の所有者と合わないとbindマウントに書けない。
+    # id -u が1000以外のホストでは.envのTRAVEL_LOG_UID/GIDで合わせる
+    user: "${TRAVEL_LOG_UID:-1000}:${TRAVEL_LOG_GID:-1000}"
     ports:
       - "7040:7040"
     restart: unless-stopped
