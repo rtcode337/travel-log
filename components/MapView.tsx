@@ -4551,6 +4551,9 @@ export default function MapView({
           const stackCategories = overlayTypeKey
             ? overlayCategoriesOf(overlayTypeKey)
             : categories;
+          const stackSeriesStyles = overlayTypeKey
+            ? overlaySeriesStylesOf(overlayTypeKey)
+            : seriesStyles;
           return (
             <div
               className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
@@ -4590,6 +4593,17 @@ export default function MapView({
                             else handleSpotSelect(id);
                           }}
                         >
+                          {/* 一覧・詳細と同じスポットの印。ランクは色と大きさで出る ——
+                              同じ地点に積まれたピンは地図側で区別が付かないので、
+                              ここで並べたときにどれが目立つスポットかを読めるようにする */}
+                          <SpotBadge
+                            rank={spot.rank}
+                            series={spot.series}
+                            seriesStyles={stackSeriesStyles}
+                            rankEnabled={stackRankEnabled}
+                            isPrivate={spot.status === "private"}
+                            size="sm"
+                          />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm">{spot.name}</span>
                             {/* 一覧・詳細と同じ1行(同じ地点なので地域は出さない) */}
