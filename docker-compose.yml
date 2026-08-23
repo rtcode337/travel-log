@@ -15,7 +15,7 @@ services:
       - sh
       - -c
       - mkdir -p /data/db /data/photos /data/exports && chown -R "$$0" /data/photos /data/exports
-      - ${TRAVEL_LOG_UID:-1000}:${TRAVEL_LOG_GID:-1000}
+      - ${TRAVEL_LOG_UID:-10001}:${TRAVEL_LOG_GID:-10001}
     restart: "no"
 
   db:
@@ -80,9 +80,11 @@ services:
       # db/も見えるが、postgresがPGDATAを0700で作るのでappのユーザーからは読めない
       - ./data:/data
     # data/に書かれるファイルをホストのユーザー所有にする。イメージの既定は
-    # node(uid/gidとも1000)で、ホスト側の所有者と合わないとbindマウントに書けない。
-    # id -u が1000以外のホストでは.envのTRAVEL_LOG_UID/GIDで合わせる
-    user: "${TRAVEL_LOG_UID:-1000}:${TRAVEL_LOG_GID:-1000}"
+    # 実行ユーザー。既定は 10001 = ホストに実在しない番号(抜け出されてもホストの
+    # ユーザーのファイルに届かない)。そのぶん data/ はホストから見て「知らない
+    # ユーザー」の持ち物になるので、手元で直接編集・書き戻ししたいホストでは
+    # .env の TRAVEL_LOG_UID/GID に `id -u`/`id -g` を入れる
+    user: "${TRAVEL_LOG_UID:-10001}:${TRAVEL_LOG_GID:-10001}"
     ports:
       - "7040:7040"
     restart: unless-stopped

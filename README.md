@@ -170,9 +170,12 @@ docker compose pull && docker compose up -d
   `photos/`(添付写真)・`exports/`(エクスポートのZIP)を`init`サービスが起動時に作る。
   **バックアップは`data/`をコピーすればよい**(停止してからコピーすること)。
   standaloneでもホストに用意するのは親ディレクトリ1つで、YAML冒頭の`x-data-dir`に書く
-- **`app`は非rootで動く**。`data/`に書かれるファイルはホストのユーザー所有になり、
-  既定は`1000:1000`。`id -u`が1000以外のホストでは`.env`に`TRAVEL_LOG_UID`/`TRAVEL_LOG_GID`を
-  設定する(standaloneはYAML冒頭の`x-run-as`)。所有者合わせは起動前に`init`が
+- **`app`は非rootで動く**。既定は`10001:10001`で、**ホストに実在しない番号**にしてある
+  (万一コンテナから抜け出されても、ホストのユーザーのファイルには届かない)。
+  そのぶん`data/`はホストから見て「知らないユーザー」の持ち物になるので、
+  **バックアップから書き戻すときやホストで直接編集したいときは**`.env`に
+  `TRAVEL_LOG_UID`/`TRAVEL_LOG_GID`で`id -u`/`id -g`を設定する
+  (standaloneはYAML冒頭の`x-run-as`)。所有者合わせは起動前に`init`が
   自動でやるので、`chown`を手で打つ必要はない
 - **置き場を`data/`にまとめる前から動かしているホストは、更新時に1回だけ移すこと。**
   `docker compose down`のあと:
