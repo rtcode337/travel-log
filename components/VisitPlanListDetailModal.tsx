@@ -9,6 +9,7 @@ import { formatSpotMeta } from "@/lib/spotMeta";
 import type { Spot, VisitPlanList } from "@/lib/types";
 import type { SeriesStyleDefinition } from "@/lib/seriesStyle";
 import SpotBadge from "@/components/SpotBadge";
+import LinkedText from "@/components/LinkedText";
 import HelpTip from "@/components/HelpTip";
 import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
 import WeatherAskLink from "@/components/WeatherAskLink";
@@ -231,7 +232,7 @@ export default function VisitPlanListDetailModal({
 
             {list.description && (
               <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">
-                {list.description}
+                <LinkedText text={list.description} />
               </p>
             )}
 
