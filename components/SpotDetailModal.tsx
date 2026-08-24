@@ -25,6 +25,7 @@ import { formatPlanDateRange } from "@/lib/planListDraft";
 import { buildGeminiAskUrl } from "@/lib/askAi";
 import SpotBadge from "@/components/SpotBadge";
 import MiniMap from "@/components/MiniMap";
+import LinkedText from "@/components/LinkedText";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import {
   resolveWikipediaLang,
@@ -562,7 +563,9 @@ export default function SpotDetailModal({
             </div>
 
             {spot.description && (
-              <p className="mb-3 text-sm text-gray-700">{spot.description}</p>
+              <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">
+                <LinkedText text={spot.description} />
+              </p>
             )}
 
             <div className="relative">

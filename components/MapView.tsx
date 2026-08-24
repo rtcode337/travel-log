@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PlanBuildPanel from "@/components/PlanBuildPanel";
 import HelpTip from "@/components/HelpTip";
+import LinkedText from "@/components/LinkedText";
 import WeatherAskLink from "@/components/WeatherAskLink";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 import { useNavVisibility } from "@/components/AppFrame";
@@ -4205,7 +4206,7 @@ export default function MapView({
                   </p>
                   {spot?.description && (
                     <p className="whitespace-pre-wrap text-sm text-gray-600">
-                      {spot.description}
+                      <LinkedText text={spot.description} />
                     </p>
                   )}
                   {/* 取り直しが済むまでは出さない(種別が分かるまで可否を
@@ -4381,7 +4382,7 @@ export default function MapView({
             </div>
             {routeDetailView.description && (
               <p className="whitespace-pre-wrap text-sm text-gray-700">
-                {routeDetailView.description}
+                <LinkedText text={routeDetailView.description} />
               </p>
             )}
             {routeDetailView.points.length > 0 && (
@@ -4464,7 +4465,7 @@ export default function MapView({
                           <span className="w-6 shrink-0 text-right">↓</span>
                           {point.legDescription && (
                             <span className="min-w-0 whitespace-pre-wrap">
-                              {point.legDescription}
+                              <LinkedText text={point.legDescription} />
                             </span>
                           )}
                         </div>
