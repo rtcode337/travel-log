@@ -13,7 +13,7 @@
     "migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
-    "maplibre-gl": "^6.3.0",
+    "maplibre-gl": "^6.4.1",
     "next": "^16.3.1",
     "pg": "^8.23.0",
     "react": "^19.2.0",
@@ -26,7 +26,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^24.0.0",
-    "@types/pg": "^8.21.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "tailwindcss": "^4.1.0",
