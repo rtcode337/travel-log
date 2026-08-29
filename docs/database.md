@@ -28,6 +28,7 @@ erDiagram
     users |o--o{ spots : "created_by"
     users |o--o{ spot_routes : "created_by"
     users |o--o{ spot_deletions : "deleted_by"
+    users |o--o{ spot_flags : "flagged_by"
     users ||--o{ visits : ""
     users ||--o{ spot_hides : ""
     users ||--o{ visit_plans : ""
@@ -38,6 +39,7 @@ erDiagram
     spots ||--o{ spot_route_points : ""
     spots ||--o{ visits : ""
     spots ||--o{ spot_hides : ""
+    spots ||--o{ spot_flags : "1件まで"
     spots ||--o{ visit_plans : ""
     spots ||--o{ visit_plan_list_items : ""
     spots ||--o{ reviews : ""
@@ -167,6 +169,12 @@ erDiagram
         text region
         uuid deleted_by FK
     }
+    spot_flags {
+        uuid id PK
+        uuid spot_id FK "スポットでユニーク(1件まで)"
+        text reason "どこが間違っているか(空でもよい)"
+        uuid flagged_by FK "報告した管理者"
+    }
     spot_routes {
         uuid id PK
         uuid spot_type_id FK
@@ -199,6 +207,11 @@ erDiagram
 - **`spot_deletions` は削除の墓標**。CSV 由来の公開スポットを画面から個別削除した
   ときだけ記録し、travel-log-data 側の `exclude.txt` へ追記する候補として
   還元用エクスポートに出す(行が消えるので値をコピーして残す)
+- **`spot_flags` は公開スポットへの「間違い報告」**(画面の表示名)。管理者
+  (spot_admin/admin)がスポット詳細から報告し、理由を添えられる(空でもよい)。
+  **1スポットに1つ**(`spot_id` がユニーク)で、スポット自体には何の影響も無い ——
+  管理画面の一覧に出て、まとめて AI へ渡すテキストにするか、まとめて取り消すかの
+  どちらかで片付ける
 
 ### ユーザーごとの記録
 
@@ -300,6 +313,7 @@ erDiagram
 | spots | `(spot_type_id, key)` ユニーク(key が null 以外) | CSV・ルートからの参照キー |
 | spots | `(spot_type_id, region, name, id)` | 公開スポットのダウンロード(`limit`/`offset` の分割取得)の並び |
 | spot_deletions | `spot_type_id` | 還元用エクスポートの抽出 |
+| spot_flags | `spot_id` | スポット詳細からの報告の有無の確認 |
 | spot_routes | `series` | シリーズ絞り込みとの連動 |
 | spot_route_points | `spot_id` | スポットからの逆引き |
 | visits / spot_hides / visit_plans | `user_id` / `spot_id` | ユーザーの記録の取得と逆引き |

@@ -507,6 +507,34 @@ Maps URLsの`waypoints`は9件までのため、それを超える経路は**並
 
 `/[type]/admin`のadmin専用セクション「GitHubリポジトリからスポット種別取り込み」(`AdminView`の`handleGithubOpen`/`handleGithubApply`)。リポジトリ(`owner/リポジトリ名`、既定`rtcode337/travel-log-data`)を入力して「開く」を押すと、`raw.githubusercontent.com`(mainブランチ固定、CORS可。**キャッシュを必ず外して取る** —— `Cache-Control: max-age=300`とCDNのキャッシュがあり、素の`fetch`ではpush直後の取り込みが古いファイルを読むうえ、差分インポートは「変更なし」で正常終了するので気づけない。`cache: "no-store"`に加え、共有キャッシュ向けにURLへ時刻を付ける)からブラウザが直接リポジトリ直下の`catalog.json`(`{ "spot_types": [ { "key", "label" }, ... ] }`形式のスポット種別カタログ)を取得して一覧表示する(既存種別かどうかを「上書き」「新規作成」バッジで示す)。一覧から種別を選んで「適用」すると、そのフォルダの `<キー>/settings.json`・`<キー>/spots.csv`・`<キー>/excluded_candidates/exclude.txt`・`<キー>/routes.csv` を取得し、この順に適用する。settings.jsonだけは必須(無ければ中止)で、他は無ければスキップ。種別が無ければ作成し、あればlabel・設定・シリーズ・カテゴリを上書きする(`applyTypeDefinition`。settings.jsonのkeyとフォルダ名の不一致は中止)。**settings.jsonを読む経路は3つある**(GitHub取り込みの`applyTypeDefinition`、JSONアップロードでの新規作成`handleCreateTypeFromJson`、既存種別への反映`handleApplyTypeFromJson`)ので、`parseSpotTypeDefinition`が返すフィールドを増やしたら3つとも`settingsToApply`へ積むこと。取り出し忘れても取り込みは成功扱いのまま進み、その設定だけが黙って落ちる(かつて`category_styles`を足したときに実際に踏んだ)。spots.csv・routes.csvは個別インポートと同じ差分更新ロジックを共通関数(`runSpotsCsvImport`/`runRouteCsvImport` — 個別インポートのハンドラもこれらの薄いラッパー)で対象種別に対して実行し、exclude.txtは「キー一覧を指定して削除」と同じAPIで削除件数の確認ダイアログにOKしたときだけ実行する(キャンセルしても後続のroutes.csvは続行)。routes.csvの検証用スポットはspots.csv適用後に取り直す。バックエンドに専用エンドポイントは無く、既存APIの組み合わせのみ。
 
+### 間違い報告(`spot_flags`)
+
+公開スポットの中身が怪しい(位置がずれている・説明が別物・そもそも場所ではない)と
+気づいたときに、**その場で印だけ付けておく**ための仕組み。直すのはtravel-log-data側の
+CSVなので、アプリ側は「気づいた」を貯めて渡すところまでを受け持つ。
+**表・APIの名前は`spot_flags`、画面の言葉は「間違い報告」**
+—— 「フラグ」だけでは何のための印か画面から読めないため。
+
+- **報告するのはスポット詳細(`SpotDetailModal`)の地図の右上「⚠ 間違い報告」**
+  (公開スポット・spot_admin/adminのみ。重ね表示=readOnlyでは出さない)。
+  押すと理由の入力欄が開き、**空のまま報告できる** —— 理由を書かせると、
+  「あとで書く」つもりで報告そのものをしないまま流れてしまう。
+  報告済みの間はボタンが「⚠ 報告を取り消す」になり、地図の下に理由が出る
+- **報告はスポットに何の影響も与えない。** 公開状態も地図の見え方も変わらない
+  (承認待ち・却下は別の流れ。報告は「直す候補のメモ」でしかない)
+- **1スポットに1つ**(`spot_flags.spot_id`がユニーク)。同じスポットに報告し直すと
+  理由が上書きされる。スポットが消えれば報告も消える(`on delete cascade`)
+- **一覧は`/[type]/admin`の「⚠ 間違い報告のあったスポット」**(spot_admin/admin)。
+  名前(地図へのリンク)・理由・報告した人・日時を報告された順に並べる
+- **「テキストで表示」はスポット名と理由だけを並べる。** そのままAIに貼って
+  「どう直すか」を相談するための形で、座標やキーは入れない
+  (判断の材料にならないうえ、行が長くなって読みにくい)。`CopyTextButton`で写せる。
+  **理由の無いものは名前だけの行にする** —— 「(理由なし)」と書くと、
+  AIがその文字列を理由として読んでしまう
+- **「報告を一括で取り消す」は種別ぶんをまとめて消す**(`DELETE /api/spot-flags?type=`)。
+  片付けは「AIに渡す→CSVを直す→まとめて取り消す」の流れを想定していて、
+  1件ずつ取り消す口はスポット詳細側にある
+
 ### 登録経路(`spots.origin`)とtravel-log-dataへの還元用エクスポート
 
 アプリ利用中に抜け漏れに気づいて画面から手動追加したスポットを、travel-log-data側のCSVへ還元(逆輸入)するための仕組み。`spots.origin`(`'csv'`/`'manual'`、既定`'manual'`)が登録経路を記録し、CSVインポート(`AdminView`)だけがPOST/PATCHで`'csv'`を明示する(APIは`'csv'`の指定をspot_admin/adminに限定)。`spots.key`の有無で代用しない — keyはルート参照用で、手動スポットにkeyを振る将来の機能と両立しないため。既存データはマイグレーション`003_spot_origin_and_deletions.sql`が「key有り=csv」で一度だけ近似した。

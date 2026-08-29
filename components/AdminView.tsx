@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import HelpTip from "@/components/HelpTip";
+import CopyTextButton from "@/components/CopyTextButton";
 import ExportJobsPanel from "@/components/ExportJobsPanel";
 import { api } from "@/lib/api-client";
 import { buildCsv, parseCsv } from "@/lib/csv";
@@ -31,6 +32,7 @@ import {
   resolveWikipediaTitleSource,
 } from "@/lib/region";
 import {
+  type FlaggedSpot,
   getSpotTypeSetting,
   parseSpotTypeDefinition,
   ROLE_LABELS,
@@ -118,6 +120,13 @@ export default function AdminView({
   // travel-log-dataへの還元用エクスポート(手動追加の公開スポット+削除の墓標)
   const [exportingManual, setExportingManual] = useState(false);
   const [manualExportMessage, setManualExportMessage] = useState<string | null>(null);
+
+  // 間違い報告(spot_flags)。報告するのは地図のスポット詳細で、
+  // ここは一覧・AIへ渡すテキスト・一括取り消しの3つだけを持つ
+  const [flaggedSpots, setFlaggedSpots] = useState<FlaggedSpot[]>([]);
+  const [flagTextOpen, setFlagTextOpen] = useState(false);
+  const [flagClearing, setFlagClearing] = useState(false);
+  const [flagMessage, setFlagMessage] = useState<string | null>(null);
 
   // ルート(スポットを巡った順に矢印で繋ぐ)の一覧とCSVインポート用
   const [routes, setRoutes] = useState<SpotRoute[]>([]);
@@ -265,6 +274,11 @@ export default function AdminView({
     setRoutes(data ?? []);
   }, [typeKey]);
 
+  const loadFlags = useCallback(async () => {
+    const { data } = await api.spotFlags.list(typeKey);
+    setFlaggedSpots(data ?? []);
+  }, [typeKey]);
+
   const loadUsers = useCallback(async () => {
     const { data } = await api.admin.users.list();
     setUsers(data ?? []);
@@ -284,7 +298,8 @@ export default function AdminView({
     load();
     loadRoutes();
     loadSpotTypes();
-  }, [hasPageAccess, load, loadRoutes, loadSpotTypes]);
+    loadFlags();
+  }, [hasPageAccess, load, loadRoutes, loadSpotTypes, loadFlags]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -1054,6 +1069,48 @@ export default function AdminView({
       // 途中まで追加された場合もあるため、成否によらず一覧を取り直す
       load();
     }
+  };
+
+  /**
+   * 間違い報告のあったスポットを、AIへ渡すための1つのテキストにまとめる。
+   * **スポット名と理由だけ**を並べる —— 渡す先で必要なのは「どれが」「なぜ」で、
+   * 座標やキーは判断の材料にならないため(必要なら一覧の行から辿れる)。
+   * **理由が無い行は名前だけ**にする(「(理由なし)」と書くと、AIがその文字列を
+   * 理由として読んでしまう)。理由の無い報告も落とさない —— 印だけ付けて
+   * 理由を書かない使い方を許しているため。
+   */
+  const flaggedSpotsText = useMemo(
+    () =>
+      [
+        `# 間違い報告のあったスポット(${currentTypeLabel}) ${flaggedSpots.length}件`,
+        ``,
+        ...flaggedSpots.map((f) => (f.reason ? `- ${f.name}: ${f.reason}` : `- ${f.name}`)),
+        ``,
+      ].join("\n"),
+    [flaggedSpots, currentTypeLabel]
+  );
+
+  /** 報告を種別ぶんまとめて取り消す(片付けたあとに押す) */
+  const handleClearFlags = async () => {
+    if (flaggedSpots.length === 0) return;
+    if (
+      !confirm(
+        `間違い報告${flaggedSpots.length}件をまとめて取り消しますか?(スポット自体は消えません)`
+      )
+    ) {
+      return;
+    }
+    setFlagClearing(true);
+    setFlagMessage(null);
+    const { data, error } = await api.spotFlags.clear(typeKey);
+    setFlagClearing(false);
+    if (error) {
+      setFlagMessage("報告を取り消せませんでした: " + error.message);
+      return;
+    }
+    setFlagTextOpen(false);
+    setFlagMessage(`間違い報告を${data?.deleted ?? 0}件取り消しました。`);
+    loadFlags();
   };
 
   /**
@@ -2171,6 +2228,104 @@ export default function AdminView({
               >
                 {exportingManual ? "エクスポート中…" : "還元用エクスポート"}
               </button>
+              </div>
+
+              <div className="mt-3 border-t border-gray-100 pt-3">
+              <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+                ⚠ 間違い報告のあったスポット
+                <HelpTip>
+                  地図のスポット詳細で「⚠ 間違い報告」を押して報告された
+                  スポットの一覧(公開スポットのみ・spot_admin/adminだけが報告できる)。
+                  中身がおかしいと気づいた場所に理由を添えて報告しておき、
+                  ここでまとめて片付ける。「テキストで表示」はスポット名と理由だけを
+                  並べたもので、そのままAIに渡してデータの直し方を相談するための形
+                  (理由の無いものは名前だけが並ぶ)。片付いたら
+                  「報告を一括で取り消す」で消す(スポット自体は消えない)。
+                </HelpTip>
+              </h3>
+
+              {flagMessage && (
+                <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                  {flagMessage}
+                </p>
+              )}
+
+              {flaggedSpots.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  間違い報告はありません。
+                </p>
+              ) : (
+                <>
+                  <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                    {flaggedSpots.map((f) => (
+                      <li key={f.id} className="px-3 py-2 text-sm">
+                        <div className="flex items-baseline gap-2">
+                          <Link
+                            href={`/${typeKey}/map?spot=${f.spot_id}`}
+                            className="font-medium text-blue-600 underline"
+                          >
+                            {f.name}
+                          </Link>
+                          <span className="text-xs text-gray-400">
+                            {f.region}
+                          </span>
+                        </div>
+                        {/* 理由が無ければ行ごと出さない(「(理由なし)」と書くより、
+                            名前と日時だけが並ぶほうが一覧として読みやすい) */}
+                        {f.reason && (
+                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-700">
+                            {f.reason}
+                          </p>
+                        )}
+                        <p className="mt-0.5 text-xs text-gray-400">
+                          {f.flagged_by_name ?? "不明"} /{" "}
+                          {new Date(f.created_at).toLocaleString("ja-JP")}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFlagTextOpen((v) => !v)}
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                    >
+                      {flagTextOpen ? "テキストを閉じる" : "テキストで表示"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearFlags}
+                      disabled={flagClearing}
+                      className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-50"
+                    >
+                      {flagClearing
+                        ? "取り消しています…"
+                        : `報告を一括で取り消す(${flaggedSpots.length}件)`}
+                    </button>
+                  </div>
+
+                  {flagTextOpen && (
+                    <div className="mt-2">
+                      <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-500">
+                        AIに渡すテキスト(スポット名と理由)
+                        <CopyTextButton
+                          text={flaggedSpotsText}
+                          label="間違い報告のあったスポットの一覧をコピー"
+                        />
+                      </div>
+                      {/* 読み取り専用。コピーはボタンからだが、長いときに
+                          一部だけ選んで持っていけるよう選択はできるままにする */}
+                      <textarea
+                        readOnly
+                        value={flaggedSpotsText}
+                        rows={Math.min(14, flaggedSpots.length + 3)}
+                        className="w-full rounded-lg border border-gray-300 bg-gray-50 p-2 font-mono text-xs"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
               </div>
 
           {isAdmin && (

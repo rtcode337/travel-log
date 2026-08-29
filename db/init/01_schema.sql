@@ -281,6 +281,26 @@ create table visit_notes (
 create index visit_notes_visit_id_idx on visit_notes (visit_id);
 
 -- =============================================================
+-- spot_flags: 公開スポットへの「間違い報告」(画面の表示名。中身がおかしいと
+-- 気づいた管理者(spot_admin/admin)が地図の詳細から報告し、理由を添えられる
+-- =空でもよい)。管理画面に一覧で出し、スポット名と理由をまとめてAIへ渡す・
+-- まとめて取り消す、の2つの操作で片付ける。報告は1スポットに1つ
+-- (誰が報告したかは flagged_by、報告日時は created_at)。
+-- スポット自体には触らないので、報告が付いていても地図の見え方は変わらない
+-- =============================================================
+create table spot_flags (
+  id         uuid primary key default gen_random_uuid(),
+  spot_id    uuid not null references spots (id) on delete cascade,
+  reason     text not null default '',
+  flagged_by uuid references users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (spot_id)
+);
+
+create index spot_flags_spot_id_idx on spot_flags (spot_id);
+
+-- =============================================================
 -- spot_hides: 非表示スポット。公開スポットのうち「自分は興味がない」ものを
 -- ユーザーごとに地図・一覧から隠すための設定(スポット自体には一切影響しない)。
 -- 同一ユーザー×同一スポットは1件まで(トグル管理。visit_plansと同じ構造)
@@ -433,6 +453,10 @@ create trigger spot_route_points_set_updated_at
 
 create trigger visits_set_updated_at
   before update on visits
+  for each row execute function set_updated_at();
+
+create trigger spot_flags_set_updated_at
+  before update on spot_flags
   for each row execute function set_updated_at();
 
 create trigger spot_hides_set_updated_at
