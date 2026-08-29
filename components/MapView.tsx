@@ -50,6 +50,7 @@ import { resolveCategories } from "@/lib/category";
 import { resolveSpotFace, resolveSpotMark, resolveSpotShape } from "@/lib/spotStyle";
 import { formatSpotMeta } from "@/lib/spotMeta";
 import { planWeatherDate } from "@/lib/weather";
+import { useSpotsWeather } from "@/lib/useSpotsWeather";
 import { ensurePinImage, pinIconId, PIN_ICON_PAD } from "@/lib/pinIcon";
 import {
   downloadSpotCacheFor,
@@ -2934,6 +2935,11 @@ export default function MapView({
               ...(buildDraft?.spotIds ?? []),
             ])
           : null;
+    // **訪問日の「これだけを表示」中は絞り込みを効かせない。** その日に訪問した
+    // スポットは必ず訪問済みで、訪問状況の既定(未訪問のみ)と必ずぶつかるため、
+    // 絞り込みを重ねると「その日の経路だけを見たい」のに線だけが残る。
+    // 対象は日付で決まっていて曖昧さが無いので、選んだ日の訪問を全部出す
+    const skipFiltersInIsolate = isolate === "visit";
     // **ピンの表示は絞り込み(シリーズ・カテゴリ・訪問状況)と非表示に全部従う。**
     // ルート・経路に含まれるスポットも例外にしない —— かつては「線が通っているのに
     // ピンが無い」のを避けるため経路・ルートの経由地を免除していたが、どのスポットが
@@ -2945,13 +2951,14 @@ export default function MapView({
       (spot) =>
         (!isolateIds || isolateIds.has(spot.id)) &&
         !hiddenIds.has(spot.id) &&
-        passesFilters(
-          filters,
-          spot.series,
-          spot.categories,
-          visitedIds.has(spot.id),
-          spot.rank
-        )
+        (skipFiltersInIsolate ||
+          passesFilters(
+            filters,
+            spot.series,
+            spot.categories,
+            visitedIds.has(spot.id),
+            spot.rank
+          ))
     );
 
     const renderSpots = async () => {
@@ -3113,6 +3120,8 @@ export default function MapView({
                 planLists.find((l) => l.id === filters.planListId)?.spot_ids ?? []
               )
             : null;
+      // 訪問日の「これだけを表示」中は絞り込みを効かせない(本体と同じ扱い)
+      const skipFiltersInIsolate = isolate === "visit";
       const active = overlayTypeKeys;
       // 選択が外れた(・注視で消した)種別は、作成済みレイヤーのデータを空にする
       // (レイヤー自体は残しても害がない。ensureOverlayLayers参照)
@@ -3172,13 +3181,14 @@ export default function MapView({
             (spot) =>
               (!isolateIds || isolateIds.has(spot.id)) &&
               !hiddenIds.has(spot.id) &&
-              passesFilters(
-                typeFilters,
-                spot.series,
-                spot.categories,
-                visitedIds.has(spot.id),
-                spot.rank
-              )
+              (skipFiltersInIsolate ||
+                passesFilters(
+                  typeFilters,
+                  spot.series,
+                  spot.categories,
+                  visitedIds.has(spot.id),
+                  spot.rank
+                ))
           );
 
           // クラスタは重ね先の種別の先頭シリーズの色で塗り、本体の青いクラスタや
@@ -3411,6 +3421,15 @@ export default function MapView({
             };
           })()
         : null;
+  // 経路詳細に並ぶ地点の、予定の日の予報。**リスト詳細と同じくまとめて1回で引く**
+  // (訪問予定リスト以外の経路には weatherSpot が無いので、対象は空になる)
+  const weatherBySpot = useSpotsWeather(
+    routeDetailView?.points.flatMap((p) =>
+      p.weatherSpot ? [{ id: p.weatherSpot.id, lat: p.lat, lng: p.lng }] : []
+    ) ?? [],
+    routeDetailView?.weatherDate ?? null
+  );
+
   // 訪問予定リストの経路詳細だけ、地点をつかんで回る順番を入れ替えられる
   // (ルートと訪問順は記録・取り込み済みの事実なので並べ替えない)。
   // ドラッグ中は手元のリストを差し替えて地図の紫の矢印もその場で追従させ、
@@ -4495,6 +4514,7 @@ export default function MapView({
                           <WeatherAskLink
                             spot={point.weatherSpot}
                             date={routeDetailView.weatherDate}
+                            weather={weatherBySpot.get(point.weatherSpot.id)}
                             className="-my-1"
                           />
                         )}

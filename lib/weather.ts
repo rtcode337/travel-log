@@ -70,3 +70,46 @@ function formatWeatherDateLong(date: string): string {
 export function weatherLinkLabel(spotName: string, date: string): string {
   return `${spotName}の${formatWeatherDate(date)}の天気をAIに聞く`;
 }
+
+/** その日その地点の予報(`/api/weather`。Open-Meteoのdailyを1日分に切り出したもの) */
+export interface DailyWeather {
+  /** WMOの天気コード(0=快晴 … 95=雷雨) */
+  code: number;
+  /** 最高・最低気温(℃)と降水確率(%)。欠けることがあるのでnullを許す */
+  tmax: number | null;
+  tmin: number | null;
+  pop: number | null;
+}
+
+/**
+ * WMOの天気コード → 絵文字と日本語。
+ * **コードは範囲で丸めて扱う**(0-3=晴れ〜くもり、5x=霧雨、6x=雨、7x/8x後半=雪、9x=雷雨)。
+ * 細かい区別(着氷性の霧雨など)は旅程の見出しには要らないので、近いものへ寄せる。
+ */
+export function weatherLook(code: number): { icon: string; text: string } {
+  if (code === 0) return { icon: "☀️", text: "快晴" };
+  if (code === 1) return { icon: "🌤️", text: "晴れ" };
+  if (code === 2) return { icon: "⛅", text: "晴れ時々くもり" };
+  if (code === 3) return { icon: "☁️", text: "くもり" };
+  if (code === 45 || code === 48) return { icon: "🌫️", text: "霧" };
+  if (code >= 51 && code <= 57) return { icon: "🌦️", text: "霧雨" };
+  if (code >= 61 && code <= 67) return { icon: "🌧️", text: "雨" };
+  if (code >= 71 && code <= 77) return { icon: "❄️", text: "雪" };
+  if (code >= 80 && code <= 82) return { icon: "🌦️", text: "にわか雨" };
+  if (code >= 85 && code <= 86) return { icon: "🌨️", text: "にわか雪" };
+  if (code >= 95) return { icon: "⛈️", text: "雷雨" };
+  // 未知のコードは晴れにも雨にも寄せない(判断できないことが伝わるようにする)
+  return { icon: "🌡️", text: "天気" };
+}
+
+/** 「くもり 26/21℃ 降水20%」。リンクの説明に添える1行 */
+export function weatherSummary(weather: DailyWeather): string {
+  const parts = [weatherLook(weather.code).text];
+  if (weather.tmax != null || weather.tmin != null) {
+    const max = weather.tmax != null ? Math.round(weather.tmax) : "－";
+    const min = weather.tmin != null ? Math.round(weather.tmin) : "－";
+    parts.push(`${max}/${min}℃`);
+  }
+  if (weather.pop != null) parts.push(`降水${weather.pop}%`);
+  return parts.join(" ");
+}
