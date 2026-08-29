@@ -245,8 +245,9 @@ export const api = {
       request<{ name: string; lat: number; lng: number }[]>(
         `/api/geocode?q=${encodeURIComponent(q)}&scope=${encodeURIComponent(scope)}`
       ),
+    // regionはスポット登録用、addressは画面に出す短い住所(都道府県+市区町村まで)
     reverse: (lat: number, lng: number, scope: string) =>
-      request<{ region: string | null }>(
+      request<{ region: string | null; address: string | null }>(
         `/api/geocode/reverse?lat=${lat}&lng=${lng}&scope=${encodeURIComponent(scope)}`
       ),
   },

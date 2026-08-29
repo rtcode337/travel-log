@@ -9,6 +9,11 @@ interface NominatimReverseResult {
     state?: string;
     province?: string;
     county?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    suburb?: string;
+    city_district?: string;
     "ISO3166-2-lvl4"?: string;
   };
 }
@@ -44,6 +49,33 @@ function resolveRegion(
   if (scope === "jp") return resolveJpPrefecture(address);
   if (scope === "world") return address?.country ?? null;
   return address?.state ?? address?.province ?? address?.county ?? null;
+}
+
+/**
+ * 画面に出す「簡単な住所」。都道府県(国外は国+州)と市区町村までで、番地は出さない ——
+ * **同じ地点に重なったスポットの一覧で「ここはどこか」を1行で言う**ためのもので、
+ * 建物名や番地まで出すと行が長くなるだけで用を成さない。
+ * zoom=14で引いているので、そもそも番地は返ってこない。
+ */
+function resolveShortAddress(
+  address: NominatimReverseResult["address"],
+  scope: string
+): string | null {
+  const muni =
+    address?.city ?? address?.town ?? address?.village ?? address?.county ?? null;
+  const ward = address?.city_district ?? null;
+  const parts =
+    scope === "jp"
+      ? [resolveJpPrefecture(address), muni, ward]
+      : [address?.country, address?.state ?? address?.province, muni];
+  // 「東京都東京都」のような重複を避けるため、前の部分に含まれる語は落とす
+  const out: string[] = [];
+  for (const part of parts) {
+    if (!part) continue;
+    if (out.some((p) => p.includes(part) || part.includes(p))) continue;
+    out.push(part);
+  }
+  return out.length > 0 ? out.join(scope === "jp" ? "" : ", ") : null;
 }
 
 export async function GET(request: Request) {
@@ -86,6 +118,10 @@ export async function GET(request: Request) {
   const address = result.address ?? {};
 
   return NextResponse.json({
-    data: { region: resolveRegion(address, scope) },
+    data: {
+      region: resolveRegion(address, scope),
+      // 画面に出す用の短い住所(スポットの登録には使わない)
+      address: resolveShortAddress(address, scope),
+    },
   });
 }

@@ -1645,6 +1645,16 @@ export default function MapView({
     ids: string[];
     overlayTypeKey: string | null;
   } | null>(null);
+  /** 一覧から詳細へ進んだときの戻り先。詳細を閉じると一覧に戻す ——
+   *  重なったピンは地図から開き直せないので、閉じたら選ぶところからやり直しになる */
+  const [stackReturn, setStackReturn] = useState<{
+    ids: string[];
+    overlayTypeKey: string | null;
+  } | null>(null);
+  /** 「この地点のスポット」に出す簡単な住所。座標をキーに覚えておき、
+   *  同じ地点を開き直したときにNominatimへ問い合わせ直さない(1秒1回の利用条件があるため) */
+  const [stackAddress, setStackAddress] = useState<string | null>(null);
+  const stackAddressCacheRef = useRef<Map<string, string>>(new Map());
   /** いま地図に出しているスポット(絞り込み後)。ピンのタップ処理は地図の
    *  レイヤー生成時に一度だけ束縛されるので、最新の一覧はrefで参照する */
   const displayedSpotsRef = useRef<Spot[]>([]);
@@ -3482,6 +3492,38 @@ export default function MapView({
       ? spotTypes.find((t) => t.key === returnTypeKey) ?? null
       : null;
 
+  // 「この地点のスポット」を開いたら、その座標の簡単な住所を1回だけ引く。
+  // **一覧の1件目の座標**で引く(同じ地点に積まれているのでどれでも同じ)。
+  // 失敗しても黙って出さない —— 住所は補助の情報で、無くても一覧は読める
+  useEffect(() => {
+    if (!stack) {
+      setStackAddress(null);
+      return;
+    }
+    const spot = (stack.overlayTypeKey ? overlaySpotById : spotById).get(stack.ids[0]);
+    if (!spot) return;
+    const key = `${spot.lat.toFixed(6)},${spot.lng.toFixed(6)}`;
+    const cached = stackAddressCacheRef.current.get(key);
+    if (cached !== undefined) {
+      setStackAddress(cached);
+      return;
+    }
+    let alive = true;
+    api.geocode
+      .reverse(spot.lat, spot.lng, regionScope ?? DEFAULT_REGION_SCOPE)
+      .then(({ data }) => {
+        const address = data?.address ?? null;
+        if (address) stackAddressCacheRef.current.set(key, address);
+        if (alive) setStackAddress(address);
+      })
+      .catch(() => {
+        // 通信に失敗しても一覧は読めるので黙って住所だけ出さない
+      });
+    return () => {
+      alive = false;
+    };
+  }, [stack, spotById, overlaySpotById, regionScope]);
+
   return (
     <div
       className={`relative ${
@@ -4527,7 +4569,14 @@ export default function MapView({
           readOnly
           allowVisitRecording
           allowPlanList
-          onClose={() => setOverlayDetailSpotId(null)}
+          onClose={() => {
+            setOverlayDetailSpotId(null);
+            // 一覧から開いていたら戻す
+            if (stackReturn) {
+              setStack(stackReturn);
+              setStackReturn(null);
+            }
+          }}
           onVisitChange={loadVisits}
           // 重ね表示スポットを現在の種別のリストへ追加したら、経路表示中のリストの
           // 線にも反映されるようリスト一覧を取り直す
@@ -4558,7 +4607,10 @@ export default function MapView({
           return (
             <div
               className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-              onClick={() => setStack(null)}
+              onClick={() => {
+                setStack(null);
+                setStackReturn(null);
+              }}
             >
               {/* 横幅は一覧に必要な分だけ。件数が多いと縦に伸びるので、画面の高さいっぱいまで
                   使い、はみ出す分だけ一覧側をスクロールさせる */}
@@ -4567,14 +4619,24 @@ export default function MapView({
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-                  <h2 className="text-sm font-semibold">
-                    この地点のスポット({stack.ids.length}件)
-                  </h2>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold">
+                      この地点のスポット({stack.ids.length}件)
+                    </h2>
+                    {/* 簡単な住所。同じ地点に積まれているので1つだけ出す
+                        (引けなかったときは行ごと出さない) */}
+                    {stackAddress && (
+                      <p className="truncate text-xs text-slate-500">{stackAddress}</p>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    className="text-slate-400 hover:text-slate-600"
+                    className="shrink-0 text-slate-400 hover:text-slate-600"
                     aria-label="閉じる"
-                    onClick={() => setStack(null)}
+                    onClick={() => {
+                      setStack(null);
+                      setStackReturn(null);
+                    }}
                   >
                     ✕
                   </button>
@@ -4589,6 +4651,8 @@ export default function MapView({
                           type="button"
                           className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50"
                           onClick={() => {
+                            // 詳細を閉じたらこの一覧へ戻す(地図からは開き直せない)
+                            setStackReturn(stack);
                             setStack(null);
                             if (overlayTypeKey) openOverlaySpot(id);
                             else handleSpotSelect(id);
@@ -4635,7 +4699,14 @@ export default function MapView({
         <SpotDetailModal
           spotId={detailSpotId}
           spots={spots}
-          onClose={() => setDetailSpotId(null)}
+          onClose={() => {
+            setDetailSpotId(null);
+            // 一覧から開いていたら戻す
+            if (stackReturn) {
+              setStack(stackReturn);
+              setStackReturn(null);
+            }
+          }}
           onVisitChange={loadVisits}
           // 既存の訪問予定リストへの追加をリスト一覧へ反映する(経路表示中の
           // リストに追加した場合、地図の紫の経路も引き直される)
