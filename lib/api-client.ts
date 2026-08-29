@@ -6,7 +6,9 @@ import type {
   Review,
   Role,
   Spot,
+  FlaggedSpot,
   SpotDeletion,
+  SpotFlag,
   SpotHide,
   SpotRoute,
   SpotType,
@@ -190,6 +192,29 @@ export const api = {
     // 削除の墓標(画面から個別削除されたCSV由来の公開スポット)。還元用エクスポートで使う
     list: (type: string) =>
       request<SpotDeletion[]>(`/api/spot-deletions?type=${encodeURIComponent(type)}`),
+  },
+  spotFlags: {
+    // 公開スポットへの間違い報告(spot_admin/admin専用)。
+    // 一覧は管理画面、報告と取り消しはスポット詳細から呼ぶ
+    list: (type: string) =>
+      request<FlaggedSpot[]>(`/api/spot-flags?type=${encodeURIComponent(type)}`),
+    // 1スポットぶん(スポット詳細が報告の有無を見る)。無ければ空配列
+    forSpot: (spotId: string) =>
+      request<FlaggedSpot[]>(`/api/spot-flags?spot_id=${encodeURIComponent(spotId)}`),
+    // 同じスポットに2度報告しても1件のまま(理由は上書き)
+    create: (spotId: string, reason: string) =>
+      request<SpotFlag>("/api/spot-flags", {
+        method: "POST",
+        body: JSON.stringify({ spot_id: spotId, reason }),
+      }),
+    delete: (spotId: string) =>
+      request<{ ok: true }>(`/api/spot-flags/${spotId}`, { method: "DELETE" }),
+    // 種別ぶんをまとめて取り消す(管理画面の一括取り消し)
+    clear: (type: string) =>
+      request<{ deleted: number }>(
+        `/api/spot-flags?type=${encodeURIComponent(type)}`,
+        { method: "DELETE" }
+      ),
   },
   routes: {
     list: (type: string) =>

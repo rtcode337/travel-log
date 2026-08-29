@@ -85,6 +85,30 @@ export interface SpotDeletion {
   created_at: string;
 }
 
+/**
+ * 公開スポットへの「間違い報告」。管理者(spot_admin/admin)がスポット詳細から
+ * 報告する。reasonは空でもよい —— 気づいた時点で印だけ付けられるようにするため
+ * (理由は後から管理画面の一覧でまとめてAIに投げる)
+ */
+export interface SpotFlag {
+  id: string;
+  spot_id: string;
+  reason: string;
+  flagged_by: string | null;
+  created_at: string;
+}
+
+/** 管理画面の間違い報告の一覧の1行(spot_flagsにスポットの表示用の項目をJOINしたもの) */
+export interface FlaggedSpot extends SpotFlag {
+  name: string;
+  key: string | null;
+  region: string;
+  lat: number;
+  lng: number;
+  /** 報告した人のニックネーム(未設定ならメールアドレス。消えたユーザーはnull) */
+  flagged_by_name: string | null;
+}
+
 /** ルートの経由地1点。seqの昇順が巡った順(lat/lng/spot_nameは表示用にJOINで付与) */
 export interface SpotRoutePoint {
   spot_id: string;

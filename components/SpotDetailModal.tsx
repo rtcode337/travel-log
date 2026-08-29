@@ -12,6 +12,7 @@ import {
   getSpotTypeSetting,
   REVIEWS_PAGE_SIZE,
   SPOT_ADMIN_ROLES,
+  type SpotFlag,
   visitPhotoSrc,
   type PublicReview,
   type Role,
@@ -178,6 +179,12 @@ export default function SpotDetailModal({
   const [showForm, setShowForm] = useState(false);
   // 非公開スポットの位置修正(ドラッグ)モーダルの表示
   const [showReposition, setShowReposition] = useState(false);
+  // 中身がおかしいと気づいたときに付ける「間違い報告」の印(spot_admin/adminのみ)。
+  // nullなら未報告。理由の入力欄はボタンを押したときだけ開く
+  const [flag, setFlag] = useState<SpotFlag | null>(null);
+  const [flagFormOpen, setFlagFormOpen] = useState(false);
+  const [flagReason, setFlagReason] = useState("");
+  const [flagSaving, setFlagSaving] = useState(false);
   // 編集対象の訪問記録(訪問履歴の「編集」から開く。VisitFormModalの編集モード)
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -303,6 +310,50 @@ export default function SpotDetailModal({
   }, [spots, spot]);
 
   const isSpotAdmin = !!myRole && SPOT_ADMIN_ROLES.includes(myRole);
+
+  // 間違い報告は公開スポットにだけ付く(承認待ち・却下・非公開は承認/却下の
+  // 流れで扱うため)。読み取り専用(重ね表示)では出さない
+  const canFlag =
+    !readOnly && !!spot && spot.status === "published" && isSpotAdmin;
+
+  // 報告の有無を読む。付ける権限が無い人には問い合わせない(403になるだけのため)
+  useEffect(() => {
+    if (!canFlag) {
+      setFlag(null);
+      return;
+    }
+    let alive = true;
+    api.spotFlags.forSpot(spotId).then(({ data }) => {
+      if (alive) setFlag(data?.[0] ?? null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [canFlag, spotId]);
+
+  const submitFlag = async () => {
+    setFlagSaving(true);
+    const { data, error } = await api.spotFlags.create(spotId, flagReason);
+    setFlagSaving(false);
+    if (error) {
+      setActionError("間違い報告を送れませんでした: " + error.message);
+      return;
+    }
+    setFlag(data ?? null);
+    setFlagFormOpen(false);
+  };
+
+  const removeFlag = async () => {
+    setFlagSaving(true);
+    const { error } = await api.spotFlags.delete(spotId);
+    setFlagSaving(false);
+    if (error) {
+      setActionError("間違い報告を取り消せませんでした: " + error.message);
+      return;
+    }
+    setFlag(null);
+    setFlagFormOpen(false);
+  };
 
   // 編集・削除できるのは、公開スポットはspot_admin/admin、それ以外(非公開・承認待ち・
   // 却下)は追加した本人のみ(APIのcanEditOrDeleteと同じルール)。読み取り専用時は常に不可
@@ -577,8 +628,9 @@ export default function SpotDetailModal({
                 seriesStyles={seriesStyles}
                 rankEnabled={rankEnabled}
               />
-              {canManage && (
+              {(canManage || canFlag) && (
                 <div className="absolute right-2 top-2 z-10 flex gap-2 rounded-lg bg-white/90 px-2 py-1 shadow">
+                  {canManage && (
                   <button
                     type="button"
                     onClick={() => setShowEditForm(true)}
@@ -586,6 +638,7 @@ export default function SpotDetailModal({
                   >
                     編集
                   </button>
+                  )}
                   {/* 非公開スポットはドラッグで位置を修正できる(座標だけを直せる) */}
                   {spot.status === "private" && (
                     <button
@@ -596,6 +649,28 @@ export default function SpotDetailModal({
                       位置を修正
                     </button>
                   )}
+                  {/* 間違い報告。理由は空でもよいので、押した時点で入力欄を開き、
+                      空のまま「報告する」を押せるようにしてある */}
+                  {canFlag && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (flag) {
+                          removeFlag();
+                          return;
+                        }
+                        setFlagReason("");
+                        setFlagFormOpen((v) => !v);
+                      }}
+                      disabled={flagSaving}
+                      className={`text-xs font-normal underline disabled:opacity-50 ${
+                        flag ? "text-amber-700" : "text-gray-600"
+                      }`}
+                    >
+                      {flag ? "⚠ 報告を取り消す" : "⚠ 間違い報告"}
+                    </button>
+                  )}
+                  {canManage && (
                   <button
                     type="button"
                     onClick={handleDeleteSpot}
@@ -603,9 +678,48 @@ export default function SpotDetailModal({
                   >
                     削除
                   </button>
+                  )}
                 </div>
               )}
             </div>
+
+            {canFlag && flagFormOpen && !flag && (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+                <label className="mb-1 block text-xs font-bold text-amber-800">
+                  どこが間違っているか(空でもよい)
+                </label>
+                <textarea
+                  value={flagReason}
+                  onChange={(e) => setFlagReason(e.target.value)}
+                  rows={2}
+                  placeholder="例: 位置が実際の場所とずれている"
+                  className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                />
+                <div className="mt-1 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={submitFlag}
+                    disabled={flagSaving}
+                    className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    {flagSaving ? "報告しています…" : "報告する"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFlagFormOpen(false)}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs"
+                  >
+                    やめる
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {canFlag && flag && (
+              <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+                ⚠ 間違いとして報告済み{flag.reason ? `: ${flag.reason}` : ""}
+              </p>
+            )}
 
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
               {readOnly ? (
