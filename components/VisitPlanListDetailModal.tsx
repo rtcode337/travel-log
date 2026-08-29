@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api-client";
 import { formatPlanDateRange } from "@/lib/planListDraft";
 import { planWeatherDate } from "@/lib/weather";
+import { useSpotsWeather } from "@/lib/useSpotsWeather";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import { formatSpotMeta } from "@/lib/spotMeta";
 import type { Spot, VisitPlanList } from "@/lib/types";
@@ -91,6 +92,12 @@ export default function VisitPlanListDetailModal({
   const visitedIds = new Set(list?.visited_spot_ids ?? []);
   // 天気を見る日(開始日→終了日→今日)。リストが読めるまでは今日として扱う
   const weatherDate = planWeatherDate(list ?? {});
+  // その日の予報を、並んでいるスポットぶんまとめて1回で引く
+  const weatherPoints = (list?.spot_ids ?? [])
+    .map((id) => spotsById.get(id) ?? extraSpots.get(id))
+    .filter((s): s is Spot => s != null)
+    .map((s) => ({ id: s.id, lat: s.lat, lng: s.lng }));
+  const weatherBySpot = useSpotsWeather(weatherPoints, weatherDate);
 
   // 経由スポットの並び替え。ドラッグ中は手元の並びだけを入れ替え(画面がその場で
   // 追従する)、指を離した時点で1回だけPATCHする —— 動かすたびに保存すると
@@ -314,7 +321,14 @@ export default function VisitPlanListDetailModal({
                       </div>
                     )}
                     {/* そのスポットの、予定の日の天気(地図の経路詳細にも同じものを出す) */}
-                    {spot && <WeatherAskLink spot={spot} date={weatherDate} className="mr-1" />}
+                    {spot && (
+                      <WeatherAskLink
+                        spot={spot}
+                        date={weatherDate}
+                        weather={weatherBySpot.get(spot.id)}
+                        className="mr-1"
+                      />
+                    )}
                     {/* 訪問済みの付け外し。訪問記録を付ければ自動で付くが、ここでも直せる
                         (訪問済みは経路から外れるだけで、リストからは消えない) */}
                     <button

@@ -18,6 +18,7 @@ import type {
   VisitPlan,
   VisitPlanList,
 } from "@/lib/types";
+import type { DailyWeather } from "@/lib/weather";
 
 interface Result<T> {
   data: T | null;
@@ -249,6 +250,20 @@ export const api = {
     reverse: (lat: number, lng: number, scope: string) =>
       request<{ region: string | null; address: string | null }>(
         `/api/geocode/reverse?lat=${lat}&lng=${lng}&scope=${encodeURIComponent(scope)}`
+      ),
+  },
+
+  weather: {
+    /**
+     * その日の予報を地点ぶんまとめて引く(順序は渡した`points`と同じ)。
+     * 予報が無い日・引けなかった地点はnullで返るので、呼び出し側で出し分ける
+     */
+    daily: (points: { lat: number; lng: number }[], date: string) =>
+      request<(DailyWeather | null)[]>(
+        `/api/weather?date=${encodeURIComponent(date)}&points=` +
+          encodeURIComponent(
+            points.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join(";")
+          )
       ),
   },
   spotTypes: {

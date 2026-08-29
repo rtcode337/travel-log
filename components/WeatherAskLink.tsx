@@ -3,24 +3,21 @@
 import {
   buildSpotWeatherAskUrl,
   weatherLinkLabel,
+  weatherLook,
+  weatherSummary,
 } from "@/lib/weather";
+import type { DailyWeather } from "@/lib/weather";
 import type { Spot } from "@/lib/types";
 
-/** 天気アイコン(太陽)。外部の天気ページへ開くリンクの印 */
-function SunIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M12 17a5 5 0 100-10 5 5 0 000 10z" />
-      <path d="M12 1.5a1 1 0 011 1V4a1 1 0 11-2 0V2.5a1 1 0 011-1zm0 17a1 1 0 011 1v1.5a1 1 0 11-2 0V19.5a1 1 0 011-1zM22.5 12a1 1 0 01-1 1H20a1 1 0 110-2h1.5a1 1 0 011 1zm-17 0a1 1 0 01-1 1H3a1 1 0 110-2h1.5a1 1 0 011 1zm13.6-6.6a1 1 0 010 1.42l-1.06 1.06a1 1 0 11-1.42-1.42l1.06-1.06a1 1 0 011.42 0zM7.38 16.62a1 1 0 010 1.41l-1.06 1.06a1 1 0 11-1.41-1.41l1.06-1.06a1 1 0 011.41 0zm11.24 2.47a1 1 0 01-1.42 0l-1.06-1.06a1 1 0 111.42-1.41l1.06 1.06a1 1 0 010 1.41zM7.38 7.38a1 1 0 01-1.41 0L4.91 6.32A1 1 0 016.32 4.9l1.06 1.06a1 1 0 010 1.42z" />
-    </svg>
-  );
-}
-
 /**
- * そのスポットの、予定の日の天気をAIに聞くリンク(太陽のアイコン)。
+ * そのスポットの、予定の日の天気。**予報が引けていればその天気のアイコン**、
+ * 引けていなければ「天気」のボタンになり、どちらも押すと日付を添えてAIに聞く。
  *
- * **天気サービスは日付を指定して開けない**ので、日付を添えてAIに聞く形にしてある
- * (理由は`lib/weather.ts`)。日は開始日→終了日→今日の順で呼び出し側が決める。
+ * **天気サービスは日付を指定して開けない**ので、リンク先はAIのまま
+ * (理由は`lib/weather.ts`)。アイコンだけを実際の予報(`/api/weather`=Open-Meteo)に
+ * 合わせている。**予報が無いのに晴れのアイコンを出さない** —— 以前は常に太陽で、
+ * 「その日は晴れる」と読めてしまっていた。予報が出るのは先15日ほどまでなので、
+ * それより先の予定では「天気」のボタンのまま置く(押せばAIが平年の傾向を答える)。
  *
  * **リスト詳細と地図の経路詳細で同じものを出す。** 旅程を見る場所は2つあり、
  * 片方だけに天気があると「地図から見たときだけ調べ直す」ことになる。
@@ -29,13 +26,18 @@ function SunIcon({ className }: { className?: string }) {
 export default function WeatherAskLink({
   spot,
   date,
+  weather,
   className = "",
 }: {
   spot: Spot;
   date: string;
+  /** その日の予報。無ければ「天気」のボタンになる */
+  weather?: DailyWeather | null;
   className?: string;
 }) {
-  const label = weatherLinkLabel(spot.name, date);
+  const ask = weatherLinkLabel(spot.name, date);
+  // 予報の出どころ(Open-Meteo)はCC-BYで出典表示が要る。押す前に読める場所に置く
+  const label = weather ? `${ask}(予報: ${weatherSummary(weather)} / Open-Meteo)` : ask;
   return (
     <a
       href={buildSpotWeatherAskUrl(spot, date)}
@@ -45,9 +47,17 @@ export default function WeatherAskLink({
       aria-label={label}
       // 行のタップ(スポットへ移動・詳細を開く)まで走らせない
       onClick={(e) => e.stopPropagation()}
-      className={`shrink-0 rounded-full p-1.5 text-amber-500 hover:bg-amber-50 ${className}`}
+      className={
+        weather
+          ? `shrink-0 rounded-full px-1 py-1 text-base leading-none hover:bg-gray-100 ${className}`
+          : `shrink-0 rounded-full border border-gray-300 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 ${className}`
+      }
     >
-      <SunIcon className="size-5" />
+      {weather ? (
+        <span aria-hidden="true">{weatherLook(weather.code).icon}</span>
+      ) : (
+        "天気"
+      )}
     </a>
   );
 }

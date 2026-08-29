@@ -57,6 +57,7 @@
 | フロントエンド | Next.js (App Router) + TypeScript |
 | UI | Tailwind CSS |
 | 地図 | MapLibre GL JS(OpenStreetMap タイル) |
+| 天気予報 | Open-Meteo(CC BY 4.0。旅程の各スポットの予報アイコン) |
 | バックエンド | Next.js Route Handlers + PostgreSQL(Docker上でローカル完結) |
 
 ## セットアップ
