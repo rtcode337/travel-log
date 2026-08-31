@@ -26,6 +26,7 @@ import { formatPlanDateRange } from "@/lib/planListDraft";
 import { buildGeminiAskUrl } from "@/lib/askAi";
 import SpotBadge from "@/components/SpotBadge";
 import MiniMap from "@/components/MiniMap";
+import PhotoLightbox from "@/components/PhotoLightbox";
 import LinkedText from "@/components/LinkedText";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import {
@@ -206,8 +207,12 @@ export default function SpotDetailModal({
   const [hideUpdating, setHideUpdating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [moderating, setModerating] = useState(false);
-  // 訪問履歴のサムネイルをタップしたときに拡大表示する写真のURL
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  // 訪問履歴のサムネイルをタップしたときの拡大表示。**その訪問記録の写真をまとめて渡す**
+  // ので、開いたあとスワイプで前後の写真へ移れる(下記 visitPhotoGroup)
+  const [photoPreview, setPhotoPreview] = useState<{
+    photos: string[];
+    index: number;
+  } | null>(null);
   // 「Google マップで経路を表示」のorigin(出発地)に使う現在地
   const routeOrigin = useRouteOrigin();
 
@@ -222,15 +227,22 @@ export default function SpotDetailModal({
     return map;
   }, [visitNotes]);
 
-  // 拡大表示中はEscキーでも閉じられるようにする
-  useEffect(() => {
-    if (!photoPreview) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPhotoPreview(null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [photoPreview]);
+  /**
+   * 訪問記録1件ぶんの写真(拡大表示でスワイプして回れる範囲)。
+   *
+   * **記録本体の写真のあとに追記の写真を書いた順で並べる** —— 画面もその順で
+   * 積んでいるので([追記の描画]、同じ並びのままスワイプできる。追記は訪問回数を
+   * 増やさない「同じ訪問記録への書き足し」なので、写真も1つながりとして扱う。
+   */
+  const visitPhotoGroup = useCallback(
+    (visit: Visit): string[] => [
+      ...visit.photos.map(visitPhotoSrc),
+      ...(notesByVisit.get(visit.id) ?? []).flatMap((n) =>
+        n.photos.map(visitPhotoSrc)
+      ),
+    ],
+    [notesByVisit]
+  );
 
   const load = useCallback(async () => {
     const [
@@ -867,7 +879,10 @@ export default function SpotDetailModal({
                                   key={i}
                                   type="button"
                                   onClick={() =>
-                                    setPhotoPreview(visitPhotoSrc(photo))
+                                    setPhotoPreview({
+                                      photos: visitPhotoGroup(visit),
+                                      index: i,
+                                    })
                                   }
                                   className="cursor-zoom-in"
                                   aria-label="写真を拡大表示"
@@ -885,7 +900,7 @@ export default function SpotDetailModal({
                           {/* 追記。**訪問回数は増やさず**、同じ訪問記録の下に
                               書いた順で積む(写真も元の記録の写真の後ろになる)。
                               左の縦線で「元の記録にぶら下がっている」ことを示す */}
-                          {(notesByVisit.get(visit.id) ?? []).map((note) => (
+                          {(notesByVisit.get(visit.id) ?? []).map((note, ni, notes) => (
                             <div
                               key={note.id}
                               className="mt-2 border-l-2 border-gray-200 pl-2.5"
@@ -923,7 +938,19 @@ export default function SpotDetailModal({
                                       key={i}
                                       type="button"
                                       onClick={() =>
-                                        setPhotoPreview(visitPhotoSrc(photo))
+                                        setPhotoPreview({
+                                          photos: visitPhotoGroup(visit),
+                                          // 記録本体 + それより前の追記のぶんだけ後ろにある
+                                          index:
+                                            visit.photos.length +
+                                            notes
+                                              .slice(0, ni)
+                                              .reduce(
+                                                (n, p) => n + p.photos.length,
+                                                0
+                                              ) +
+                                            i,
+                                        })
                                       }
                                       className="cursor-zoom-in"
                                       aria-label="写真を拡大表示"
@@ -1194,30 +1221,17 @@ export default function SpotDetailModal({
         />
       )}
 
-      {/* 写真の拡大表示(ライトボックス)。背景・画像どこをタップしても閉じる。
-          親のオーバーレイ(スポット詳細を閉じる)まで伝播させない */}
+      {/* 写真の拡大表示(ライトボックス)。ピンチで拡大縮小、スワイプで
+          同じ訪問記録の前後の写真へ移れる(PhotoLightbox) */}
       {photoPreview && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
-          onClick={(e) => {
-            e.stopPropagation();
-            setPhotoPreview(null);
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={photoPreview}
-            alt=""
-            className="max-h-full max-w-full rounded-lg object-contain"
-          />
-          <button
-            type="button"
-            className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-xl text-white"
-            aria-label="拡大表示を閉じる"
-          >
-            ×
-          </button>
-        </div>
+        <PhotoLightbox
+          photos={photoPreview.photos}
+          index={photoPreview.index}
+          onIndexChange={(index) =>
+            setPhotoPreview((prev) => (prev ? { ...prev, index } : prev))
+          }
+          onClose={() => setPhotoPreview(null)}
+        />
       )}
 
       {showEditForm && spot && (

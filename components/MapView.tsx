@@ -1221,6 +1221,19 @@ function todayKey(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/**
+ * 1年前の同じ日(`YYYY-MM-DD`)。「過去1年」の開始日に使う。
+ *
+ * **`Date`に任せて年だけ引く**ので、2月29日は3月1日に送られる(閏年でない年に
+ * 2月29日は無いため)。1日ずれるだけで、絞り込みの範囲としては困らない。
+ */
+function oneYearAgoKey(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 /** 訪問順の経路の対象日を既定(今日)にした絞り込み条件 */
 function defaultMapFilters(): SpotFilters {
   return { ...DEFAULT_FILTERS, visitedDate: todayKey() };
@@ -1547,7 +1560,10 @@ export default function MapView({
    * カレンダーとリセットが基準にする「今日」。マウント後に一度だけ決める
    * (レンダーのたびに`todayKey()`を呼ぶと日をまたいだ瞬間に値が変わりうるため)。
    */
-  const visitDateOptions = useMemo(() => ({ today: todayKey() }), []);
+  const visitDateOptions = useMemo(
+    () => ({ today: todayKey(), oneYearAgo: oneYearAgoKey() }),
+    []
+  );
   // 変更のたびにlocalStorageへも書き込む(次に地図を開いたときの復元用)
   const setFilters = useCallback(
     (next: SpotFilters) => {
@@ -3742,6 +3758,18 @@ export default function MapView({
               </button>
               <button
                 type="button"
+                onClick={() =>
+                  handleSelectVisitDate(
+                    visitDateOptions.oneYearAgo,
+                    visitDateOptions.today
+                  )
+                }
+                className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+              >
+                過去1年
+              </button>
+              <button
+                type="button"
                 onClick={() => handleSelectVisitDate(null, null)}
                 className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
               >
@@ -3873,6 +3901,21 @@ export default function MapView({
                     className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
                   >
                     今日
+                  </button>
+                  {/* よく使う期間はカレンダーを開かずに選べるようにする。
+                      1年ぶんを選ぶのに、カレンダーだと開始月まで12回さかのぼって
+                      2回タップすることになるため */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSelectVisitDate(
+                        visitDateOptions.oneYearAgo,
+                        visitDateOptions.today
+                      )
+                    }
+                    className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
+                  >
+                    過去1年
                   </button>
                   <button
                     type="button"

@@ -14,6 +14,7 @@ import LinkedText from "@/components/LinkedText";
 import HelpTip from "@/components/HelpTip";
 import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
 import WeatherAskLink from "@/components/WeatherAskLink";
+import PlanWeatherFinder from "@/components/PlanWeatherFinder";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { usePathname } from "next/navigation";
 
@@ -176,6 +177,31 @@ export default function VisitPlanListDetailModal({
     }
     if (data) setList(data);
     // 呼び出し元の一覧からは消える(または戻る)ので取り直してもらう
+    onChanged?.();
+  };
+
+  /**
+   * 予定日をずらす(「前後1週間で天気の良い日を探す」から選んだとき)。
+   * PATCHは経由スポットを丸ごと置き換えるので、並び替えと同じく基本情報も送り直す。
+   */
+  const [movingDate, setMovingDate] = useState(false);
+  const movePlanDate = async (start: string, end: string) => {
+    if (!list) return;
+    setMovingDate(true);
+    setError(null);
+    const { data, error } = await api.visitPlanLists.update(list.id, {
+      title: list.title,
+      description: list.description,
+      start_date: start,
+      end_date: end,
+      spot_ids: list.spot_ids,
+    });
+    setMovingDate(false);
+    if (error) {
+      setError("予定日の変更に失敗しました: " + error.message);
+      return;
+    }
+    if (data) setList(data);
     onChanged?.();
   };
 
@@ -380,6 +406,16 @@ export default function VisitPlanListDetailModal({
                 🗺️ このリストだけを地図で表示
               </a>
             )}
+
+            {/* 予定日の前後1週間の天気。予定を立てたあとに雨予報になったとき、
+                近い日にずらせるかをこの画面で確かめられるようにする */}
+            <PlanWeatherFinder
+              points={weatherPoints}
+              date={weatherDate}
+              endDate={list.end_date}
+              onPick={movePlanDate}
+              saving={movingDate}
+            />
 
             {/* 残りのスポットをGoogle マップの経路検索で開く(途中のスポットは経由地、
                 最後のスポットは目的地になる)。読み込めていないスポットは飛ばし、

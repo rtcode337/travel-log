@@ -265,6 +265,21 @@ export const api = {
             points.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join(";")
           )
       ),
+    /**
+     * 期間ぶんの予報を地点ぶんまとめて引く(`byPoint[地点][日]`。順序は渡した
+     * `points`と`dates`と同じ)。予報の無い日はnullで返るので、呼び出し側で出し分ける
+     */
+    range: (
+      points: { lat: number; lng: number }[],
+      start: string,
+      end: string
+    ) =>
+      request<{ dates: string[]; byPoint: (DailyWeather | null)[][] }>(
+        `/api/weather?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&points=` +
+          encodeURIComponent(
+            points.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join(";")
+          )
+      ),
   },
   spotTypes: {
     list: () => request<SpotType[]>("/api/spot-types"),
