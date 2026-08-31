@@ -102,6 +102,114 @@ export function weatherLook(code: number): { icon: string; text: string } {
   return { icon: "🌡️", text: "天気" };
 }
 
+/**
+ * 天気の良し悪しを3段階にする。**旅程で知りたいのは「傘が要るか」**なので、
+ * 降るかどうかを境目に置き、くもりは晴れと雨の間に独立して置く。
+ */
+export type WeatherGrade = "good" | "fair" | "bad";
+
+export function weatherGrade(weather: DailyWeather): WeatherGrade {
+  // 45/48=霧も含めて、降らないが視界・見晴らしが良くないものは fair に寄せる
+  if (weather.code >= 51) return "bad";
+  if (weather.code === 3 || weather.code === 45 || weather.code === 48) return "fair";
+  // 晴れていても降水確率が高い日は言い切らない(予報の幅を潰さないため)
+  if (weather.pop != null && weather.pop >= 50) return "fair";
+  return "good";
+}
+
+/** 1日ぶんの、旅程全体としての天気 */
+export interface DayOutlook {
+  date: string;
+  /** 予報が引けたスポットの数と、そのうち good / bad の数 */
+  known: number;
+  good: number;
+  bad: number;
+  /** その日いちばん悪い天気(旅程は1か所でも降れば雨具が要る) */
+  worst: DailyWeather | null;
+  /** 予報が出ているスポットでの最高降水確率 */
+  pop: number | null;
+  /** 最高気温の平均(予報が出ているぶん) */
+  tmax: number | null;
+}
+
+/**
+ * その日の旅程全体の見通しをまとめる。
+ *
+ * **いちばん悪い地点に合わせる。** 旅程は1か所でも降れば雨具が要るので、
+ * 平均で均すと「全体としては晴れ」に見えてしまう。
+ * **予報が無いスポットは数に入れない**(無いことと晴れを混ぜないため)。
+ */
+export function summarizeDay(
+  date: string,
+  weathers: (DailyWeather | null | undefined)[]
+): DayOutlook {
+  const known = weathers.filter((w): w is DailyWeather => w != null);
+  let worst: DailyWeather | null = null;
+  let good = 0;
+  let bad = 0;
+  let popMax: number | null = null;
+  let tmaxSum = 0;
+  let tmaxCount = 0;
+  for (const w of known) {
+    const grade = weatherGrade(w);
+    if (grade === "good") good++;
+    if (grade === "bad") bad++;
+    if (!worst || w.code > worst.code) worst = w;
+    if (w.pop != null) popMax = popMax == null ? w.pop : Math.max(popMax, w.pop);
+    if (w.tmax != null) {
+      tmaxSum += w.tmax;
+      tmaxCount++;
+    }
+  }
+  return {
+    date,
+    known: known.length,
+    good,
+    bad,
+    worst,
+    pop: popMax,
+    tmax: tmaxCount ? tmaxSum / tmaxCount : null,
+  };
+}
+
+/**
+ * 日の並び替えに使う点数(大きいほど良い)。**予報の無い日は候補にしない**ので、
+ * 呼び出し側で`known === 0`を先に外すこと。
+ */
+export function outlookScore(day: DayOutlook): number {
+  if (day.known === 0) return -Infinity;
+  // 降る地点を最も重く見て、次に晴れの多さ、最後に降水確率で差を付ける
+  return (
+    (-100 * day.bad) / day.known +
+    (10 * day.good) / day.known +
+    (day.pop == null ? 0 : -day.pop / 100)
+  );
+}
+
+/** 「1/23(金)」。日付の並びに出す短い表記 */
+export function formatWeatherDateWithDay(date: string): string {
+  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return date;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const day = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
+  return `${Number(m[2])}/${Number(m[3])}(${day})`;
+}
+
+/** 日付キーを日数ぶんずらす(`YYYY-MM-DD`のまま返す) */
+export function shiftDate(date: string, days: number): string {
+  const t = new Date(date + "T00:00:00Z").getTime();
+  if (Number.isNaN(t)) return date;
+  return new Date(t + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** 2つの日付キーの差(日数)。`to - from` */
+export function diffDays(from: string, to: string): number {
+  const a = new Date(from + "T00:00:00Z").getTime();
+  const b = new Date(to + "T00:00:00Z").getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return Math.round((b - a) / 86_400_000);
+}
+
 /** 「くもり 26/21℃ 降水20%」。リンクの説明に添える1行 */
 export function weatherSummary(weather: DailyWeather): string {
   const parts = [weatherLook(weather.code).text];
