@@ -1448,8 +1448,8 @@ export default function MapView({
   // 元の種別のキーがfromに入る。左下に「元の地図に戻る」リンクを出すのに使う
   // (戻り先の表示位置は種別ごとのlastViewsが復元するため、キーだけあればよい)
   const returnTypeKey = searchParams.get("from");
-  // /map?planList=<id> で開かれたら、そのリストを経路の対象に選び「これだけを表示」にする
-  // (スポット一覧の訪問予定リスト詳細「このリストだけを地図で表示」からの遷移)
+  // /map?planList=<id> で開かれたら、そのリストを経路の対象に選ぶ
+  // (スポット一覧の訪問予定リスト詳細「このリストを地図で表示」からの遷移)
   const focusPlanListId = searchParams.get("planList");
   // /map?filter=1 で開かれたら絞り込みモーダルを最初から開く(直リンク用に残す。
   // 重ね表示側の絞り込みは種別を切り替えず現在の地図の上のモーダルで編集するため、
@@ -2831,10 +2831,16 @@ export default function MapView({
     );
   }, [focusSpotId, spots, spotTypeKey, returnTypeKey, runWhenMapReady]);
 
-  // /map?planList= の処理。リストの読み込みを待ってから、そのリストを経路の対象に選び
-  // 「これだけを表示」にして経路全体が入るよう移動する。**一度だけ**実行する
+  // /map?planList= の処理。リストの読み込みを待ってから、そのリストを経路の対象に選び、
+  // 経路全体が入るよう移動する。**一度だけ**実行する
   // (以後は普通の絞り込みと同じで、利用者が変えたものを上書きしない)。
   // ?spot= と同様に、処理したらURLからパラメータを消す
+  //
+  // **「これだけを表示」にはしない。** 経路の周りに何があるかを見ながら旅程を
+  // 確かめたいので、他のスポットを消すと寄り道の候補を足せない。絞り込みモーダルの
+  // 訪問予定リストのセクションで切り替えられるので、必要な人はそこで入れる。
+  // 前回の絞り込みに残っていた「これだけを表示」も、リスト側のものは解除する
+  // (訪問日側の`"visit"`はこの遷移と関係が無いので触らない)
   const appliedPlanListRef = useRef<string | null>(null);
   useEffect(() => {
     if (!focusPlanListId || planLists.length === 0) return;
@@ -2845,7 +2851,7 @@ export default function MapView({
     const next: SpotFilters = {
       ...filters,
       planListId: list.id,
-      isolate: "plan",
+      isolate: filters.isolate === "plan" ? null : filters.isolate,
     };
     setFilters(next);
     runWhenMapReady(() =>
