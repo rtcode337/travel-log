@@ -393,9 +393,12 @@ export default function VisitPlanListDetailModal({
               </p>
             )}
 
-            {/* このリストだけを地図で見る。地図側は`?planList=`を受け取ると、そのリストを
-                経路の対象に選び「これだけを表示」にして全体が入るよう移動する
-                (MapView)。地図から開いたときは出さない —— 今いる画面へのリンクになるため */}
+            {/* このリストを地図で見る。地図側は`?planList=`を受け取ると、そのリストを
+                経路の対象に選び、経路全体が入るよう移動する(MapView)。
+                **「これだけを表示」にはしない** —— 経路の周りに何があるかを見ながら
+                旅程を確かめたいので、他のスポットを消してしまうと寄り道を足せない。
+                絞り込みたいときは地図側のセクションで切り替えられる。
+                地図から開いたときは出さない —— 今いる画面へのリンクになるため */}
             {/* アーカイブ済みは地図側の一覧(現役のリストだけを引く)に出てこないため、
                 リンクを押しても経路が選ばれない。出さずに、戻してから使ってもらう */}
             {!onMapPage && typeKey && !archived && (
@@ -403,7 +406,7 @@ export default function VisitPlanListDetailModal({
                 href={`/${typeKey}/map?planList=${encodeURIComponent(list.id)}`}
                 className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-600 py-2 text-sm font-medium text-blue-600"
               >
-                🗺️ このリストだけを地図で表示
+                🗺️ このリストを地図で表示
               </a>
             )}
 
