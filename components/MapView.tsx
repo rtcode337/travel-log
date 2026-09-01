@@ -1564,6 +1564,18 @@ export default function MapView({
     () => ({ today: todayKey(), oneYearAgo: oneYearAgoKey() }),
     []
   );
+  // 訪問日の「これだけを表示」中か。「これだけを表示」と「過去1年だけを表示」は
+  // 同じ絞り(isolate: "visit")の入り口が2つあるだけで、違うのは対象の期間。
+  // **isolateに値を増やしていない** —— 増やすと絞り込みを効かせるかの判定
+  // (skipFiltersInIsolate)や保存値の読み込みまで、期間の違いでしかないものを
+  // 各所で分岐させることになる。期間は visitedDate/visitedDateTo が既に持っている
+  const isolatingVisit = filters.isolate === "visit";
+  // 対象日がちょうど「1年前〜今日」か。押されているボタンをこれで見分ける
+  // (カレンダーで同じ期間を選んだときも「過去1年だけを表示」が点くが、
+  //  実際にその期間なので嘘にはならない)
+  const isPastYearRange =
+    filters.visitedDate === visitDateOptions.oneYearAgo &&
+    filters.visitedDateTo === visitDateOptions.today;
   // 変更のたびにlocalStorageへも書き込む(次に地図を開いたときの復元用)
   const setFilters = useCallback(
     (next: SpotFilters) => {
@@ -3764,18 +3776,6 @@ export default function MapView({
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  handleSelectVisitDate(
-                    visitDateOptions.oneYearAgo,
-                    visitDateOptions.today
-                  )
-                }
-                className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
-              >
-                過去1年
-              </button>
-              <button
-                type="button"
                 onClick={() => handleSelectVisitDate(null, null)}
                 className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
               >
@@ -3835,24 +3835,60 @@ export default function MapView({
                   </HelpTip>
                 </p>
                 <div className="flex shrink-0 items-center gap-1.5">
+                  {/* 「これだけを表示」と「過去1年だけを表示」は同じ絞り(isolate)の
+                      入り口が2つあるだけで、違うのは対象の期間。どちらか一方しか
+                      点かないので、押されている側を見れば期間が読める */}
                   {/* その日のスポットだけに絞る(他のスポット・ルート・訪問予定リストは隠す) */}
                   <button
                     type="button"
                     disabled={!filters.visitedDate}
-                    aria-pressed={filters.isolate === "visit"}
+                    aria-pressed={isolatingVisit && !isPastYearRange}
                     onClick={() =>
                       setFilters({
                         ...filters,
-                        isolate: filters.isolate === "visit" ? null : "visit",
+                        isolate: isolatingVisit ? null : "visit",
                       })
                     }
                     className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-40 ${
-                      filters.isolate === "visit"
+                      isolatingVisit && !isPastYearRange
                         ? "border-blue-600 bg-blue-600 text-white"
                         : "border-gray-300 bg-white text-gray-500"
                     }`}
                   >
                     これだけを表示
+                  </button>
+                  {/* 過去1年に訪問したスポットだけに絞る。対象日を1年前〜今日にしてから
+                      同じ絞りを掛けるので、押すだけで期間の選択が要らない
+                      (カレンダーだと開始月まで12回さかのぼることになる)。
+                      解除すると対象日も既定=今日へ戻す —— 期間だけが1年のまま残ると、
+                      1年ぶんの訪問が1本の経路として繋がって読めなくなる */}
+                  <button
+                    type="button"
+                    aria-pressed={isolatingVisit && isPastYearRange}
+                    onClick={() =>
+                      setFilters(
+                        isolatingVisit && isPastYearRange
+                          ? {
+                              ...filters,
+                              visitedDate: visitDateOptions.today,
+                              visitedDateTo: null,
+                              isolate: null,
+                            }
+                          : {
+                              ...filters,
+                              visitedDate: visitDateOptions.oneYearAgo,
+                              visitedDateTo: visitDateOptions.today,
+                              isolate: "visit",
+                            }
+                      )
+                    }
+                    className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                      isolatingVisit && isPastYearRange
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-gray-300 bg-white text-gray-500"
+                    }`}
+                  >
+                    過去1年だけを表示
                   </button>
                   {/* このセクションだけのリセット(対象日を既定=今日に戻し、
                       「これだけを表示」も解除する) */}
@@ -3907,21 +3943,6 @@ export default function MapView({
                     className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
                   >
                     今日
-                  </button>
-                  {/* よく使う期間はカレンダーを開かずに選べるようにする。
-                      1年ぶんを選ぶのに、カレンダーだと開始月まで12回さかのぼって
-                      2回タップすることになるため */}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSelectVisitDate(
-                        visitDateOptions.oneYearAgo,
-                        visitDateOptions.today
-                      )
-                    }
-                    className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
-                  >
-                    過去1年
                   </button>
                   <button
                     type="button"
