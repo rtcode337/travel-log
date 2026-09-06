@@ -179,7 +179,8 @@ export type SpotTypeSettingKey =
   | "public_visible"
   | "reviews_enabled"
   | "wikipedia_enabled"
-  | "rank_enabled";
+  | "rank_enabled"
+  | "ai_discovery_enabled";
 
 export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
   public_visible: false,
@@ -188,6 +189,9 @@ export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
   // ランクは「段階を付けたい種別」だけのものなので既定は使わない。
   // 使わない種別ではランクは常になし扱いで、色はシリーズが決める
   rank_enabled: false,
+  // 周辺を探す(地図の右クリック/長押しメニュー)。地図データ(OSM)とAIの2段で、
+  // 使う種別で明示的に開ける(サーバーに接続先が無ければ開けても出ない)
+  ai_discovery_enabled: false,
 };
 
 /** 管理画面のチェックボックス・メッセージに使う短い名前(名詞句。
@@ -197,6 +201,8 @@ export const SPOT_TYPE_SETTING_LABELS: Record<SpotTypeSettingKey, string> = {
   reviews_enabled: "口コミ",
   wikipedia_enabled: "Wikipediaリンク",
   rank_enabled: "ランク(A〜E。ピンの色と大きさを決める)",
+  ai_discovery_enabled:
+    "周辺を探す(管理者の地図メニューに出す。地図データとAIの2段。サーバーに接続先が要る)",
 };
 
 export const SPOT_TYPE_SETTING_KEYS = Object.keys(
