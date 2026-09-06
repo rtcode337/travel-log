@@ -28,14 +28,16 @@ import {
 import { useRegionScope } from "@/lib/useRegionScope";
 import {
   DEFAULT_REGION_SCOPE,
+  regionFieldLabel,
   resolveWikipediaLang,
   resolveWikipediaTitleSource,
 } from "@/lib/region";
-import { countedVisits, getSpotTypeSetting } from "@/lib/types";
+import { countedVisits, getSpotTypeSetting, SPOT_ADMIN_ROLES } from "@/lib/types";
 import type {
   Role,
   Spot,
   SpotRoute,
+  SpotStatus,
   SpotType,
   Visit,
   VisitPlanList,
@@ -74,6 +76,19 @@ import FilterBar, {
   type VisitedValue,
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
+import AiSpotDiscoverySearchModal from "@/components/AiSpotDiscoverySearchModal";
+import AiSpotDiscoveryPanel, {
+  type DiscoveryRow,
+} from "@/components/AiSpotDiscoveryPanel";
+import {
+  buildDiscoveredDescription,
+  distanceMeters,
+  normalizeSpotName,
+  type DiscoveryExchange,
+  type DiscoveryResult,
+  type DiscoverySource,
+} from "@/lib/spotDiscovery";
+import AiExchangeDialog from "@/components/AiExchangeDialog";
 import SpotDetailModal, { WikipediaIcon } from "@/components/SpotDetailModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import VisitDateCalendar from "@/components/VisitDateCalendar";
@@ -2329,6 +2344,52 @@ export default function MapView({
   const [addSpotAt, setAddSpotAt] = useState<{ lat: number; lng: number } | null>(
     null
   );
+  // 周辺のAI探索(spot_admin/admin専用)。使えるかはサーバーの設定(CHIEZO_BASE_URL)と
+  // 種別の設定(ai_discovery_enabled)で決まるので、ロールが分かってから問い合わせ、
+  // 使えないならメニューに出さない
+  const [discoveryEnabled, setDiscoveryEnabled] = useState(false);
+  // 検索モーダルを開いている中心座標(nullなら閉じている)
+  const [discoverySearchAt, setDiscoverySearchAt] = useState<{ lat: number; lng: number } | null>(
+    null
+  );
+  // 探索の結果。地図に番号つきの印で描き、右側のパネルで選ぶ。**保存しない**ので、
+  // 「終了」で消える。「もう一度探す」は同じ一覧に足す(1回の上限を超えて集めるため)
+  const [discoveryRows, setDiscoveryRows] = useState<DiscoveryRow[]>([]);
+  const [discoveryPanelOpen, setDiscoveryPanelOpen] = useState(false);
+  const [discoveryFocusedNo, setDiscoveryFocusedNo] = useState<number | null>(null);
+  const [discoveryStatus, setDiscoveryStatus] = useState<SpotStatus>("published");
+  const [discoverySeries, setDiscoverySeries] = useState("");
+  const [discoveryFallbackRegion, setDiscoveryFallbackRegion] = useState("");
+  const [discoveryAdding, setDiscoveryAdding] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+  // 「もう一度探す」の初期値(前回の検索語・半径・件数)
+  const [discoveryLastParams, setDiscoveryLastParams] = useState<{
+    query: string;
+    radius: number;
+    limit: number;
+    source: DiscoverySource;
+  } | null>(null);
+  // 直近のAIとのやり取り(投げた本文と返ってきた本文)。画面から見られるようにする
+  const [discoveryExchange, setDiscoveryExchange] = useState<{
+    exchange: DiscoveryExchange;
+    backend: string | null;
+    model: string | null;
+  } | null>(null);
+  const [showDiscoveryExchange, setShowDiscoveryExchange] = useState(false);
+  // 「位置を直す」を押した行(押している間はボタンを止める)
+  const [discoveryRelocatingNo, setDiscoveryRelocatingNo] = useState<number | null>(null);
+  const discoveryNextNoRef = useRef(1);
+  /**
+   * 直近の探索の中心。「位置を直す」で距離を測り直すのに使う。
+   * **探し始めるときに覚える** —— 結果を受け取る側(`appendDiscoveryResult`)は
+   * 依存を持たないコールバックなので、そこで状態を読むと初回の値を掴む
+   */
+  const discoverySearchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
+  const openDiscoverySearch = useCallback((center: { lat: number; lng: number }) => {
+    discoverySearchCenterRef.current = center;
+    setDiscoverySearchAt(center);
+  }, []);
+  const discoveryMarkersRef = useRef<maplibregl.Marker[]>([]);
   const [pendingSpots, setPendingSpots] = useState<
     { id: string; lat: number; lng: number; name: string; status: string }[]
   >([]);
@@ -2376,6 +2437,243 @@ export default function MapView({
   useEffect(() => {
     api.auth.me().then(({ data }) => setRole(data?.role ?? null));
   }, []);
+
+  useEffect(() => {
+    if (!role || !SPOT_ADMIN_ROLES.includes(role)) {
+      setDiscoveryEnabled(false);
+      return;
+    }
+    let cancelled = false;
+    api.spots.discoverOptions(spotTypeKey).then(({ data }) => {
+      if (!cancelled) setDiscoveryEnabled(!!data?.enabled);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [role, spotTypeKey]);
+
+  // 探索の結果を地図に描く(番号つきの紫の印。チェックを外したものは薄く、
+  // 登録済みは灰色)。押すとパネルの行が目立つ。パネルの行を押したときの
+  // 寄せは focusDiscoveryRow の側
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    discoveryMarkersRef.current.forEach((m) => m.remove());
+    discoveryMarkersRef.current = [];
+    if (!discoveryPanelOpen) return;
+    for (const row of discoveryRows) {
+      const c = row.candidate;
+      const focused = row.no === discoveryFocusedNo;
+      const color = c.existing ? "#6b7280" : "#7c3aed";
+      const el = document.createElement("button");
+      el.type = "button";
+      el.title = c.name;
+      el.textContent = String(row.no);
+      el.style.cssText = `
+        width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+        font: bold 12px/22px sans-serif; text-align: center; color: #fff;
+        background: ${color}; border: 2px ${c.location_verified ? "solid" : "dashed"} #fff;
+        box-shadow: 0 0 0 ${focused ? "4px rgba(37,99,235,.6)" : "1px rgba(0,0,0,.3)"};
+        opacity: ${row.checked && !c.existing ? 1 : 0.45};
+      `;
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setDiscoveryFocusedNo(row.no);
+      });
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([c.lng, c.lat])
+        .addTo(map);
+      discoveryMarkersRef.current.push(marker);
+    }
+  }, [discoveryRows, discoveryPanelOpen, discoveryFocusedNo]);
+
+  // 探索の結果を一覧に足す。同じ名前(正規化して比較)の候補は二度入れない
+  // (「もう一度探す」で同じ店が返ってくるため)
+  const appendDiscoveryResult = useCallback(
+    (
+      result: DiscoveryResult,
+      params: { query: string; radius: number; limit: number; source: DiscoverySource }
+    ) => {
+      setDiscoveryRows((prev) => {
+        const known = new Set(prev.map((r) => normalizeSpotName(r.candidate.name)));
+        const added: DiscoveryRow[] = [];
+        for (const c of result.candidates) {
+          const key = normalizeSpotName(c.name);
+          if (known.has(key)) continue;
+          known.add(key);
+          added.push({
+            no: discoveryNextNoRef.current++,
+            candidate: c,
+            // 地図データの候補は出どころが確かなので最初から選んでおく。
+            // AIの候補は**参照URLのあるものだけ**(根拠の無いものは選ばせない)
+            checked: !c.existing && (result.source === "osm" || !!c.url),
+            rank: c.rank ?? "",
+            searchedAt: result.searched_at,
+            source: result.source,
+          });
+        }
+        return [...prev, ...added];
+      });
+      // 地図データで探したときはやり取りが無いので、前回のAIのぶんを消す
+      setDiscoveryExchange(
+        result.exchange
+          ? { exchange: result.exchange, backend: result.backend, model: result.model }
+          : null
+      );
+      setDiscoveryFallbackRegion((prev) => prev || result.center_region || "");
+      setDiscoveryLastParams(params);
+      setDiscoveryPanelOpen(true);
+      setDiscoverySearchAt(null);
+      setDiscoveryError(null);
+    },
+    []
+  );
+
+  // パネルの行を押したときに、その候補へ地図を寄せる(訪問予定リストの作成パネルと同じ流儀)
+  const focusDiscoveryRow = useCallback(
+    (no: number) => {
+      setDiscoveryFocusedNo(no);
+      const map = mapRef.current;
+      const row = discoveryRows.find((r) => r.no === no);
+      if (!map || !row) return;
+      map.flyTo({
+        center: [row.candidate.lng, row.candidate.lat],
+        zoom: Math.max(map.getZoom(), 15),
+      });
+    },
+    [discoveryRows]
+  );
+
+  /**
+   * その候補の位置を住所から引き直す。**押した1件だけ**を地名検索(Nominatim)に投げる
+   * —— 候補すべてに掛けると1件1秒の間隔制限がそのまま待ちになるが、気づいた行だけなら
+   * 1秒で済む。当たらなければ座標はそのままで、そう伝える
+   */
+  const relocateDiscoveryRow = useCallback(
+    async (no: number) => {
+      const row = discoveryRows.find((r) => r.no === no);
+      const address = row?.candidate.address;
+      if (!row || !address) return;
+      setDiscoveryRelocatingNo(no);
+      setDiscoveryError(null);
+      // 店名を添えると「その名前の別の場所」に当たることがあるので、住所だけで引く
+      const { data } = await api.geocode.search(address, regionScope ?? DEFAULT_REGION_SCOPE);
+      setDiscoveryRelocatingNo(null);
+      const hit = data?.[0];
+      if (!hit) {
+        setDiscoveryError(`「${row.candidate.name}」の住所から位置を取れませんでした。`);
+        return;
+      }
+      setDiscoveryRows((prev) =>
+        prev.map((r) =>
+          r.no === no
+            ? {
+                ...r,
+                relocated: true,
+                candidate: {
+                  ...r.candidate,
+                  lat: hit.lat,
+                  lng: hit.lng,
+                  location_verified: true,
+                  distance_m: Math.round(
+                    distanceMeters(
+                      { lat: hit.lat, lng: hit.lng },
+                      // 中心は探索時の座標。無ければ元の候補の位置から測り直さない
+                      discoverySearchCenterRef.current ?? { lat: hit.lat, lng: hit.lng }
+                    )
+                  ),
+                },
+              }
+            : r
+        )
+      );
+      // 直した位置がすぐ見えるように、その行へ寄せる
+      setDiscoveryFocusedNo(no);
+      mapRef.current?.flyTo({ center: [hit.lng, hit.lat], zoom: Math.max(mapRef.current.getZoom(), 16) });
+    },
+    [discoveryRows, regionScope]
+  );
+
+  const closeDiscovery = useCallback(() => {
+    setDiscoveryPanelOpen(false);
+    setDiscoveryRows([]);
+    setDiscoveryFocusedNo(null);
+    setDiscoveryError(null);
+    setDiscoveryExchange(null);
+    setShowDiscoveryExchange(false);
+    discoveryNextNoRef.current = 1;
+  }, []);
+
+  // チェック済みの候補をまとめて登録する。登録できた行は一覧から外し、
+  // 残り(外したもの・登録済み)はそのまま残す
+  const addDiscoveryRows = useCallback(async () => {
+    const targets = discoveryRows.filter((r) => r.checked && !r.candidate.existing);
+    if (targets.length === 0) return;
+    const seriesRequired = seriesStyles.length > 0;
+    if (seriesRequired && !discoverySeries) {
+      setDiscoveryError("シリーズを選んでください。");
+      return;
+    }
+    const regionOf = (row: DiscoveryRow) =>
+      row.candidate.region ?? discoveryFallbackRegion.trim();
+    if (targets.some((r) => !regionOf(r))) {
+      setDiscoveryError(
+        `${regionFieldLabel(regionScope ?? DEFAULT_REGION_SCOPE)}を選んでください。`
+      );
+      return;
+    }
+    setDiscoveryAdding(true);
+    setDiscoveryError(null);
+    const records = targets.map((row) => ({
+      name: row.candidate.name,
+      name_kana: row.candidate.name_kana,
+      lat: row.candidate.lat,
+      lng: row.candidate.lng,
+      region: regionOf(row),
+      rank: rankEnabled ? row.rank || null : null,
+      series: seriesRequired ? discoverySeries : null,
+      categories: row.candidate.genre ? [row.candidate.genre] : [],
+      description: buildDiscoveredDescription(row.candidate, row.searchedAt, row.source),
+      status: discoveryStatus,
+    }));
+    const { data, error } = await api.spots.createMany(records, spotTypeKey);
+    setDiscoveryAdding(false);
+    if (error || !data) {
+      setDiscoveryError("追加に失敗しました: " + (error?.message ?? "unknown error"));
+      return;
+    }
+    for (const spot of data) {
+      if (spot.status === "published") {
+        // 公開で追加したものは、次の明示ダウンロードを待たずにキャッシュへ載せる
+        spotCache.applySpotChange(spot);
+      } else {
+        setPendingSpots((prev) => [
+          ...prev,
+          { id: spot.id, lat: spot.lat, lng: spot.lng, name: spot.name, status: spot.status },
+        ]);
+      }
+    }
+    const addedNos = new Set(targets.map((r) => r.no));
+    setDiscoveryRows((prev) => prev.filter((r) => !addedNos.has(r.no)));
+    setDiscoveryFocusedNo(null);
+  }, [
+    discoveryRows,
+    discoverySeries,
+    discoveryFallbackRegion,
+    discoveryStatus,
+    seriesStyles,
+    rankEnabled,
+    regionScope,
+    spotTypeKey,
+    spotCache,
+  ]);
+
+  // シリーズの既定は種別の定義順の先頭
+  useEffect(() => {
+    if (!discoverySeries && seriesStyles.length > 0) {
+      setDiscoverySeries(seriesStyles[0].series);
+    }
+  }, [seriesStyles, discoverySeries]);
 
   // 地図の初期化
   useEffect(() => {
@@ -4415,6 +4713,18 @@ export default function MapView({
             >
               ここにスポットを追加
             </button>
+            {/* 周辺のAI探索(管理者だけ。サーバーに接続先が設定されているときだけ出す) */}
+            {discoveryEnabled && (
+              <button
+                onClick={() => {
+                  openDiscoverySearch({ lat: contextMenu.lat, lng: contextMenu.lng });
+                  setContextMenu(null);
+                }}
+                className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
+              >
+                この周辺を探す
+              </button>
+            )}
           </div>
         </>
       )}
@@ -4448,6 +4758,70 @@ export default function MapView({
             if (visitRecorded) loadVisits();
             setAddSpotAt(null);
           }}
+        />
+      )}
+
+      {/* 周辺のAI探索(右クリック/長押しメニューの「この周辺をAIで探す」)。
+          検索モーダルで条件を決め、結果は地図の印と右側のパネルで選ぶ */}
+      {discoverySearchAt && (
+        <AiSpotDiscoverySearchModal
+          lat={discoverySearchAt.lat}
+          lng={discoverySearchAt.lng}
+          spotTypeKey={spotTypeKey}
+          initial={discoveryLastParams ?? undefined}
+          onClose={() => setDiscoverySearchAt(null)}
+          onResult={appendDiscoveryResult}
+        />
+      )}
+      {discoveryPanelOpen && (
+        <AiSpotDiscoveryPanel
+          rows={discoveryRows}
+          role={role}
+          regionScope={regionScope ?? DEFAULT_REGION_SCOPE}
+          rankEnabled={rankEnabled}
+          seriesOptions={seriesStyles.map((s) => s.series)}
+          status={discoveryStatus}
+          series={discoverySeries}
+          fallbackRegion={discoveryFallbackRegion}
+          focusedNo={discoveryFocusedNo}
+          adding={discoveryAdding}
+          error={discoveryError}
+          onStatusChange={setDiscoveryStatus}
+          onSeriesChange={setDiscoverySeries}
+          onFallbackRegionChange={setDiscoveryFallbackRegion}
+          onToggle={(no) =>
+            setDiscoveryRows((prev) =>
+              prev.map((r) => (r.no === no ? { ...r, checked: !r.checked } : r))
+            )
+          }
+          onRankChange={(no, rank) =>
+            setDiscoveryRows((prev) => prev.map((r) => (r.no === no ? { ...r, rank } : r)))
+          }
+          onRemove={(no) => {
+            setDiscoveryRows((prev) => prev.filter((r) => r.no !== no));
+            setDiscoveryFocusedNo((prev) => (prev === no ? null : prev));
+          }}
+          onFocus={focusDiscoveryRow}
+          onRelocate={relocateDiscoveryRow}
+          relocatingNo={discoveryRelocatingNo}
+          onShowExchange={
+            discoveryExchange ? () => setShowDiscoveryExchange(true) : undefined
+          }
+          onSearchAgain={() => {
+            // 探し直しはいま見えている場所から(地図を動かして別の場所を探せる)
+            const center = mapRef.current?.getCenter();
+            if (center) openDiscoverySearch({ lat: center.lat, lng: center.lng });
+          }}
+          onAdd={addDiscoveryRows}
+          onClose={closeDiscovery}
+        />
+      )}
+      {showDiscoveryExchange && discoveryExchange && (
+        <AiExchangeDialog
+          exchange={discoveryExchange.exchange}
+          backend={discoveryExchange.backend}
+          model={discoveryExchange.model}
+          onClose={() => setShowDiscoveryExchange(false)}
         />
       )}
 

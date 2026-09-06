@@ -69,6 +69,11 @@ services:
       # これを設定しないとGoogleログインのリダイレクトURIがhttp://で組まれる
       # (lib/auth/request-url.ts)。例: https://travel.example.com
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # 周辺のAI探索(任意)。知識サーバー chiezo の場所と、中継先で使う相手。
+      # 未設定なら機能そのものが出ない(.env.example の説明参照)
+      CHIEZO_BASE_URL: ${CHIEZO_BASE_URL:-}
+      CHIEZO_AI_BACKEND: ${CHIEZO_AI_BACKEND:-}
+      CHIEZO_AI_TIMEOUT_SECONDS: ${CHIEZO_AI_TIMEOUT_SECONDS:-}
       NODE_ENV: production
       # 訪問記録の写真置き場(lib/photoStorage.ts)。DBには相対パスのみ保存される
       PHOTOS_DIR: /data/photos

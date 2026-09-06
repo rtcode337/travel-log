@@ -19,6 +19,11 @@ import type {
   VisitPlanList,
 } from "@/lib/types";
 import type { DailyWeather } from "@/lib/weather";
+import type {
+  DiscoveryChoice,
+  DiscoveryOptions,
+  DiscoveryResult,
+} from "@/lib/spotDiscovery";
 
 interface Result<T> {
   data: T | null;
@@ -187,6 +192,46 @@ export const api = {
       request<{ deletedCount: number; notFoundKeys: string[] }>(
         `/api/spots/delete-by-keys?type=${encodeURIComponent(type)}`,
         { method: "POST", body: JSON.stringify({ keys }) }
+      ),
+    // 周辺のAI探索(spot_admin/admin専用)。「この種別・この環境で使えるか」に加えて、
+    // 探索の画面で選ぶための選択肢(いま話せる相手と、そのモデル・深さ)も返す。
+    // freshにするのは相手の生き死にが変わるため(キャッシュに残すと落ちた相手が並ぶ)
+    discoverOptions: (type: string) =>
+      request<DiscoveryOptions>(
+        `/api/spots/discover?type=${encodeURIComponent(type)}`,
+        { fresh: true }
+      ),
+    // 周辺を「地図データ(OSM)」から引く1段目。**1秒かからず**AIの枠も使わない。
+    // 足りなければ下のdiscover(AI)で同じ一覧に足す
+    nearby: (
+      type: string,
+      params: { lat: number; lng: number; radius: number; query: string; limit: number }
+    ) => {
+      const qs = new URLSearchParams({
+        type,
+        lat: String(params.lat),
+        lng: String(params.lng),
+        radius: String(params.radius),
+        limit: String(params.limit),
+      });
+      if (params.query) qs.set("q", params.query);
+      return request<DiscoveryResult>(`/api/spots/nearby?${qs}`, { fresh: true });
+    },
+    // 2段目。AIの答えを待つので30秒〜2分ほどかかる。結果は保存されず、選んで追加した
+    // ものだけがcreateManyで通常のスポットになる
+    discover: (
+      type: string,
+      params: {
+        lat: number;
+        lng: number;
+        radius: number;
+        query: string;
+        limit: number;
+      } & DiscoveryChoice
+    ) =>
+      request<DiscoveryResult>(
+        `/api/spots/discover?type=${encodeURIComponent(type)}`,
+        { method: "POST", body: JSON.stringify(params) }
       ),
   },
   spotDeletions: {
