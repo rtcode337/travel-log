@@ -81,9 +81,12 @@ import AiSpotDiscoveryPanel, {
   type DiscoveryRow,
 } from "@/components/AiSpotDiscoveryPanel";
 import {
+  DEFAULT_DISCOVERY_RADIUS,
   buildDiscoveredDescription,
   distanceMeters,
   normalizeSpotName,
+  type DiscoveryChoice,
+  type DiscoveryDepth,
   type DiscoveryExchange,
   type DiscoveryResult,
   type DiscoverySource,
@@ -114,6 +117,48 @@ const STACK_BADGE_LAYER_ID = "spots-stack-badge";
 // 吸われているときでも「どこを見ているか」が出る
 const FOCUS_SOURCE_ID = "spot-focus";
 const FOCUS_LAYER_ID = "spot-focus-halo";
+
+/**
+ * 周辺を探した候補の印の色。**探し方で分ける** —— 同じ一覧に地図データとAIの候補が
+ * 混ざるので、地図の側でも一目で見分けられないと「これはAIが言っているだけの店か」が
+ * 分からない。**パネルの出どころバッジと同じ色**にしてある(片方だけ変えると対応が切れる)
+ */
+const DISCOVERY_MAP_COLOR = "#0284c7"; // sky-600(バッジの bg-sky-100 / text-sky-800 と同系)
+const DISCOVERY_AI_COLOR = "#7c3aed"; // violet-600(バッジの bg-violet-100 / text-violet-800 と同系)
+/** 登録済み(もう足しようがない)は色を落とす */
+const DISCOVERY_EXISTING_COLOR = "#6b7280";
+
+/** 周辺を探す: 探す範囲の円と、候補の印 */
+const DISCOVERY_RANGE_SOURCE_ID = "discovery-range";
+const DISCOVERY_RANGE_FILL_LAYER_ID = "discovery-range-fill";
+const DISCOVERY_RANGE_LINE_LAYER_ID = "discovery-range-line";
+const DISCOVERY_SOURCE_ID = "discovery-candidates";
+const DISCOVERY_CIRCLE_LAYER_ID = "discovery-candidate-circle";
+const DISCOVERY_LABEL_LAYER_ID = "discovery-candidate-label";
+
+/**
+ * 中心と半径から円のポリゴンを作る(メートル指定の円をMapLibreは持たないため)。
+ *
+ * **`circle-radius`は画面のピクセルなので使えない** —— 拡大縮小しても大きさが
+ * 変わらず、「半径500m」を表せない。地面に貼り付いた円が要るのでポリゴンで描く。
+ */
+function circlePolygon(
+  center: { lat: number; lng: number },
+  radiusM: number,
+  steps = 96
+): GeoJSON.Feature<GeoJSON.Polygon> {
+  const latPerM = 1 / 111_320;
+  const lngPerM = 1 / (111_320 * Math.max(Math.cos((center.lat * Math.PI) / 180), 0.01));
+  const ring: [number, number][] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const t = (i / steps) * Math.PI * 2;
+    ring.push([
+      center.lng + Math.cos(t) * radiusM * lngPerM,
+      center.lat + Math.sin(t) * radiusM * latPerM,
+    ]);
+  }
+  return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
+}
 
 const PATH_PIN_SOURCE_ID = "spots-path";
 const PATH_PIN_LAYER_ID = "spots-path-point";
@@ -614,6 +659,11 @@ function moveOverlayLayersToTop(map: maplibregl.Map, typeKeys: string[]) {
   for (const id of ordered) {
     if (map.getLayer(id)) map.moveLayer(id);
   }
+  // **探索の候補は重ね表示より更に上へ。** 探している間はそれが主役で、
+  // 半透明の別種別に隠れると番号が読めなくなる
+  for (const id of [DISCOVERY_CIRCLE_LAYER_ID, DISCOVERY_LABEL_LAYER_ID]) {
+    if (map.getLayer(id)) map.moveLayer(id);
+  }
 }
 
 /** 重ねるのをやめた種別のレイヤーを空にする(レイヤー自体は残す。上記ensure参照) */
@@ -1048,7 +1098,9 @@ function ensureClusterLayers(
   map: maplibregl.Map,
   overlayKeysRef: OverlayKeysRef,
   /** 押されたピンのID(同じ地点に何件あるかは呼び出し側が解決する) */
-  onSelectSpot: (id: string) => void
+  onSelectSpot: (id: string) => void,
+  /** 押された探索の候補の通し番号(パネルの行を目立たせる) */
+  onSelectDiscovery: (no: number) => void
 ) {
   if (map.getSource(CLUSTER_SOURCE_ID)) return;
 
@@ -1071,6 +1123,24 @@ function ensureClusterLayers(
       "circle-stroke-color": "#2563eb",
       "circle-stroke-opacity": 0.9,
     },
+  });
+
+  // 周辺を探す範囲の薄い青円。**ピンより先に作る**ので下敷きになる
+  map.addSource(DISCOVERY_RANGE_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addLayer({
+    id: DISCOVERY_RANGE_FILL_LAYER_ID,
+    type: "fill",
+    source: DISCOVERY_RANGE_SOURCE_ID,
+    paint: { "fill-color": "#2563eb", "fill-opacity": 0.08 },
+  });
+  map.addLayer({
+    id: DISCOVERY_RANGE_LINE_LAYER_ID,
+    type: "line",
+    source: DISCOVERY_RANGE_SOURCE_ID,
+    paint: { "line-color": "#2563eb", "line-width": 1.5, "line-opacity": 0.5 },
   });
 
   map.addSource(CLUSTER_SOURCE_ID, {
@@ -1184,7 +1254,52 @@ function ensureClusterLayers(
     });
   }
 
-  for (const layerId of [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_ID]) {
+  // 周辺を探した候補の印。**DOMのマーカーではなく地図レイヤーで描く** ——
+  // 地図データ側は件数の上限を持たない(半径5kmで36,000件になりうる)ので、
+  // 1件1要素だと地図を動かすたびに全部を置き直すことになって固まる。
+  // ピンより後に足すので、常にその上に乗る
+  map.addSource(DISCOVERY_SOURCE_ID, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addLayer({
+    id: DISCOVERY_CIRCLE_LAYER_ID,
+    type: "circle",
+    source: DISCOVERY_SOURCE_ID,
+    paint: {
+      "circle-radius": 12,
+      // 登録済みは灰色、選んでいるものは紫。押している行だけ青く縁取る
+      "circle-color": ["get", "color"],
+      "circle-opacity": ["get", "opacity"],
+      "circle-stroke-width": ["case", ["get", "focused"], 4, 2],
+      "circle-stroke-color": ["case", ["get", "focused"], "#2563eb", "#ffffff"],
+    },
+  });
+  map.addLayer({
+    id: DISCOVERY_LABEL_LAYER_ID,
+    type: "symbol",
+    source: DISCOVERY_SOURCE_ID,
+    layout: {
+      "text-field": ["get", "no"],
+      "text-size": 12,
+      "text-font": ["Noto Sans Regular"],
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+    },
+    paint: { "text-color": "#ffffff", "text-opacity": ["get", "opacity"] },
+  });
+
+  map.on("click", DISCOVERY_CIRCLE_LAYER_ID, (e) => {
+    const no = Number(e.features?.[0]?.properties?.no);
+    if (Number.isInteger(no)) onSelectDiscovery(no);
+  });
+
+  for (const layerId of [
+    CLUSTER_LAYER_ID,
+    UNCLUSTERED_LAYER_ID,
+    PATH_PIN_LAYER_ID,
+    DISCOVERY_CIRCLE_LAYER_ID,
+  ]) {
     map.on("mouseenter", layerId, () => {
       map.getCanvas().style.cursor = "pointer";
     });
@@ -2356,6 +2471,11 @@ export default function MapView({
   // 「終了」で消える。「もう一度探す」は同じ一覧に足す(1回の上限を超えて集めるため)
   const [discoveryRows, setDiscoveryRows] = useState<DiscoveryRow[]>([]);
   const [discoveryPanelOpen, setDiscoveryPanelOpen] = useState(false);
+  // 地図のクリックハンドラは1度しか束縛されないので、いまの状態はrefから読む
+  const discoveryPanelOpenRef = useRef(false);
+  useEffect(() => {
+    discoveryPanelOpenRef.current = discoveryPanelOpen;
+  }, [discoveryPanelOpen]);
   const [discoveryFocusedNo, setDiscoveryFocusedNo] = useState<number | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = useState<SpotStatus>("published");
   const [discoverySeries, setDiscoverySeries] = useState("");
@@ -2367,7 +2487,7 @@ export default function MapView({
     query: string;
     radius: number;
     limit: number;
-    source: DiscoverySource;
+    aiAssist?: boolean;
   } | null>(null);
   // 直近のAIとのやり取り(投げた本文と返ってきた本文)。画面から見られるようにする
   const [discoveryExchange, setDiscoveryExchange] = useState<{
@@ -2378,7 +2498,12 @@ export default function MapView({
   const [showDiscoveryExchange, setShowDiscoveryExchange] = useState(false);
   // 「位置を直す」を押した行(押している間はボタンを止める)
   const [discoveryRelocatingNo, setDiscoveryRelocatingNo] = useState<number | null>(null);
-  const discoveryNextNoRef = useRef(1);
+  /**
+   * AIへの問い合わせが走っているか。**地図データの結果を出した後ろで動く**ので、
+   * パネルに出さないと「もう終わったのか、まだ来るのか」が分からない
+   */
+  const [discoveryAiPending, setDiscoveryAiPending] = useState(false);
+
   /**
    * 直近の探索の中心。「位置を直す」で距離を測り直すのに使う。
    * **探し始めるときに覚える** —— 結果を受け取る側(`appendDiscoveryResult`)は
@@ -2388,8 +2513,18 @@ export default function MapView({
   const openDiscoverySearch = useCallback((center: { lat: number; lng: number }) => {
     discoverySearchCenterRef.current = center;
     setDiscoverySearchAt(center);
+    // 円は探し方を決めている間から出す(半径は探索の画面が知らせてくる)
+    setDiscoveryRange((prev) => ({ ...center, radius: prev?.radius ?? DEFAULT_DISCOVERY_RADIUS }));
   }, []);
-  const discoveryMarkersRef = useRef<maplibregl.Marker[]>([]);
+  /**
+   * 探す範囲の円(中心と半径)。**探し方を選んでいる間から結果を見終わるまで出す**。
+   * 半径は探索の画面から知らせてもらう(選び直すたびに円が変わる)
+   */
+  const [discoveryRange, setDiscoveryRange] = useState<{
+    lat: number;
+    lng: number;
+    radius: number;
+  } | null>(null);
   const [pendingSpots, setPendingSpots] = useState<
     { id: string; lat: number; lng: number; name: string; status: string }[]
   >([]);
@@ -2454,62 +2589,95 @@ export default function MapView({
 
   // 探索の結果を地図に描く(番号つきの紫の印。チェックを外したものは薄く、
   // 登録済みは灰色)。押すとパネルの行が目立つ。パネルの行を押したときの
-  // 寄せは focusDiscoveryRow の側
+  // 寄せは focusDiscoveryRow の側。
+  // **地図レイヤーへ流し込むだけ**にしてある —— 地図データ側は件数の上限が無く、
+  // 半径5kmだと36,000件になりうるので、1件1要素のDOMマーカーでは地図が固まる
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    discoveryMarkersRef.current.forEach((m) => m.remove());
-    discoveryMarkersRef.current = [];
-    if (!discoveryPanelOpen) return;
-    for (const row of discoveryRows) {
-      const c = row.candidate;
-      const focused = row.no === discoveryFocusedNo;
-      const color = c.existing ? "#6b7280" : "#7c3aed";
-      const el = document.createElement("button");
-      el.type = "button";
-      el.title = c.name;
-      el.textContent = String(row.no);
-      el.style.cssText = `
-        width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
-        font: bold 12px/22px sans-serif; text-align: center; color: #fff;
-        background: ${color}; border: 2px ${c.location_verified ? "solid" : "dashed"} #fff;
-        box-shadow: 0 0 0 ${focused ? "4px rgba(37,99,235,.6)" : "1px rgba(0,0,0,.3)"};
-        opacity: ${row.checked && !c.existing ? 1 : 0.45};
-      `;
-      el.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setDiscoveryFocusedNo(row.no);
-      });
-      const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([c.lng, c.lat])
-        .addTo(map);
-      discoveryMarkersRef.current.push(marker);
-    }
+    const source = map.getSource(DISCOVERY_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (!source) return;
+    source.setData({
+      type: "FeatureCollection",
+      features: discoveryPanelOpen
+        ? discoveryRows.map((row) => ({
+            type: "Feature" as const,
+            properties: {
+              no: String(row.no),
+              color: row.candidate.existing
+                ? DISCOVERY_EXISTING_COLOR
+                : row.source === "ai"
+                  ? DISCOVERY_AI_COLOR
+                  : DISCOVERY_MAP_COLOR,
+              opacity: row.checked && !row.candidate.existing ? 1 : 0.45,
+              focused: row.no === discoveryFocusedNo,
+            },
+            geometry: {
+              type: "Point" as const,
+              coordinates: [row.candidate.lng, row.candidate.lat],
+            },
+          }))
+        : [],
+    });
   }, [discoveryRows, discoveryPanelOpen, discoveryFocusedNo]);
+
+  // 探す範囲の薄い青円。**探し方を選んでいる間から出す**(半径を選び直すと即座に
+  // 変わるので、どこまで探すのかを決める手掛かりになる)。結果を見ている間も出したまま
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const source = map.getSource(DISCOVERY_RANGE_SOURCE_ID) as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    if (!source) return;
+    source.setData({
+      type: "FeatureCollection",
+      features: discoveryRange
+        ? [circlePolygon({ lat: discoveryRange.lat, lng: discoveryRange.lng }, discoveryRange.radius)]
+        : [],
+    });
+  }, [discoveryRange]);
 
   // 探索の結果を一覧に足す。同じ名前(正規化して比較)の候補は二度入れない
   // (「もう一度探す」で同じ店が返ってくるため)
   const appendDiscoveryResult = useCallback(
     (
       result: DiscoveryResult,
-      params: { query: string; radius: number; limit: number; source: DiscoverySource }
+      params: {
+        query: string;
+        radius: number;
+        limit: number;
+        source: DiscoverySource;
+        aiAssist?: boolean;
+      }
     ) => {
       setDiscoveryRows((prev) => {
         const known = new Set(prev.map((r) => normalizeSpotName(r.candidate.name)));
+        // **通し番号は`prev`から決める(カウンタを持たない)。**
+        // かつては`useRef`を`++`していたが、**それは更新関数の中の副作用**で、
+        // StrictModeが更新関数を2回呼ぶ開発時には番号が2倍消費されていた ——
+        // 1回目で1〜Nを配って捨てられ、残る2回目がN+1から始まるので、
+        // **1件目の番号が件数ぶんずれる**(地図データが数千件返すようになって表面化した)。
+        // max+1なら何度呼ばれても同じ結果になる
+        const start = prev.reduce((max, r) => Math.max(max, r.no), 0) + 1;
         const added: DiscoveryRow[] = [];
         for (const c of result.candidates) {
           const key = normalizeSpotName(c.name);
           if (known.has(key)) continue;
           known.add(key);
           added.push({
-            no: discoveryNextNoRef.current++,
+            no: start + added.length,
             candidate: c,
             // 地図データの候補は出どころが確かなので最初から選んでおく。
-            // AIの候補は**参照URLのあるものだけ**(根拠の無いものは選ばせない)
-            checked: !c.existing && (result.source === "osm" || !!c.url),
+            // **AIの候補は「地図データで実在を確かめられたもの」だけ**。
+            // かつては参照URLの有無で決めていたが、URLはAIが書いた文字列でしかなく
+            // 確かめる相手がいない。地図に在るかどうかのほうが強い根拠で、しかも
+            // `quick`のAIはURLをまず返さないので、判定として働いていなかった
+            checked: !c.existing && (result.source === "map" || c.location_verified),
             rank: c.rank ?? "",
             searchedAt: result.searched_at,
             source: result.source,
+            radius: params.radius,
           });
         }
         return [...prev, ...added];
@@ -2521,7 +2689,14 @@ export default function MapView({
           : null
       );
       setDiscoveryFallbackRegion((prev) => prev || result.center_region || "");
-      setDiscoveryLastParams(params);
+      // **「もう一度探す」の初期値。** AIの後段からも呼ばれるが、そちらは
+      // `aiAssist`を持たない —— 上書きすると、次に開いたときチェックが外れている
+      setDiscoveryLastParams((prev) => ({
+        query: params.query,
+        radius: params.radius,
+        limit: params.limit,
+        aiAssist: params.aiAssist ?? prev?.aiAssist,
+      }));
       setDiscoveryPanelOpen(true);
       setDiscoverySearchAt(null);
       setDiscoveryError(null);
@@ -2594,6 +2769,48 @@ export default function MapView({
     [discoveryRows, regionScope]
   );
 
+  /**
+   * 地図データを出したあとで、AIにも聞いて同じ一覧に足す。
+   *
+   * **探索の画面ではなくここで走らせる。** あちらは結果を出した時点で閉じるので、
+   * 中で待つと結果を見られないまま数十秒止まる。こちらなら地図とパネルを見ながら待てる
+   */
+  const runAiFollowUp = useCallback(
+    async (req: {
+      query: string;
+      radius: number;
+      limit: number;
+      depth: DiscoveryDepth;
+      choice: DiscoveryChoice;
+    }) => {
+      const center = discoverySearchCenterRef.current;
+      if (!center) return;
+      setDiscoveryAiPending(true);
+      setDiscoveryError(null);
+      const { data, error } = await api.spots.discover(spotTypeKey, {
+        lat: center.lat,
+        lng: center.lng,
+        radius: req.radius,
+        query: req.query,
+        limit: req.limit,
+        depth: req.depth,
+        ...req.choice,
+      });
+      setDiscoveryAiPending(false);
+      if (error || !data) {
+        setDiscoveryError(error?.message ?? "AIへの問い合わせに失敗しました。");
+        return;
+      }
+      appendDiscoveryResult(data, {
+        query: req.query,
+        radius: req.radius,
+        limit: req.limit,
+        source: "ai",
+      });
+    },
+    [appendDiscoveryResult, spotTypeKey]
+  );
+
   const closeDiscovery = useCallback(() => {
     setDiscoveryPanelOpen(false);
     setDiscoveryRows([]);
@@ -2601,7 +2818,8 @@ export default function MapView({
     setDiscoveryError(null);
     setDiscoveryExchange(null);
     setShowDiscoveryExchange(false);
-    discoveryNextNoRef.current = 1;
+    setDiscoveryRange(null);
+    setDiscoveryAiPending(false);
   }, []);
 
   // チェック済みの候補をまとめて登録する。登録できた行は一覧から外し、
@@ -2909,6 +3127,25 @@ export default function MapView({
     };
     map.on("contextmenu", handleContextMenu);
 
+    // **周辺を探している間は左クリックでもメニューを出す。**
+    // 探した後に「やっぱり隣の区画も見たい」が続けて起きるので、そのたびに
+    // 右クリック(スマホなら長押し)を強いるのは重い。メニューの中身は
+    // 「もう一度探す」だけにする(下のJSX側で出し分ける)。
+    // **ピン・候補の印・線を押したときは出さない** —— そちらの操作が先
+    const handleDiscoveryClick = (e: maplibregl.MapMouseEvent) => {
+      if (!discoveryPanelOpenRef.current) return;
+      if (
+        hasFeatureAt(map, e.point, [
+          DISCOVERY_CIRCLE_LAYER_ID,
+          ...MAIN_PIN_LAYERS,
+          ...overlayPinLayerIds(overlayKeysRef.current),
+        ])
+      )
+        return;
+      setContextMenu({ x: e.point.x, y: e.point.y, lat: e.lngLat.lat, lng: e.lngLat.lng });
+    };
+    map.on("click", handleDiscoveryClick);
+
     // 長押し(モバイル)でも同じメニューを出す
     let longPressTimer: number | null = null;
     let touchStart: { x: number; y: number } | null = null;
@@ -2956,6 +3193,7 @@ export default function MapView({
       saveView();
       container.removeEventListener("wheel", handleWheel);
       map.off("contextmenu", handleContextMenu);
+      map.off("click", handleDiscoveryClick);
       map.off("moveend", saveView);
       geolocate.off("trackuserlocationstart", handleTrackingStart);
       geolocate.off("trackuserlocationend", handleTrackingEnd);
@@ -3292,7 +3530,9 @@ export default function MapView({
     );
 
     const renderSpots = async () => {
-      ensureClusterLayers(map, overlayKeysRef, handleMapSpotSelect);
+      ensureClusterLayers(map, overlayKeysRef, handleMapSpotSelect, (no) =>
+        setDiscoveryFocusedNo(no)
+      );
       showClusterLayers(map);
       // 使われるピン画像(シリーズ×訪問済み×非公開×形)を先に登録してからデータを流し込む
       // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
@@ -4704,17 +4944,9 @@ export default function MapView({
             className="absolute z-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            <button
-              onClick={() => {
-                setAddSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
-                setContextMenu(null);
-              }}
-              className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
-            >
-              ここにスポットを追加
-            </button>
-            {/* 周辺のAI探索(管理者だけ。サーバーに接続先が設定されているときだけ出す) */}
-            {discoveryEnabled && (
+            {/* **探している間は「もう一度探す」だけにする。** 候補を見比べている
+                最中に押したいのはこれで、スポットの追加はパネルの「追加」で行う */}
+            {discoveryPanelOpen ? (
               <button
                 onClick={() => {
                   openDiscoverySearch({ lat: contextMenu.lat, lng: contextMenu.lng });
@@ -4722,8 +4954,32 @@ export default function MapView({
                 }}
                 className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
               >
-                この周辺を探す
+                ここでもう一度探す
               </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    setAddSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
+                    setContextMenu(null);
+                  }}
+                  className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
+                >
+                  ここにスポットを追加
+                </button>
+                {/* 周辺のAI探索(管理者だけ。サーバーに接続先が設定されているときだけ出す) */}
+                {discoveryEnabled && (
+                  <button
+                    onClick={() => {
+                      openDiscoverySearch({ lat: contextMenu.lat, lng: contextMenu.lng });
+                      setContextMenu(null);
+                    }}
+                    className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
+                  >
+                    この周辺を探す
+                  </button>
+                )}
+              </>
             )}
           </div>
         </>
@@ -4769,13 +5025,22 @@ export default function MapView({
           lng={discoverySearchAt.lng}
           spotTypeKey={spotTypeKey}
           initial={discoveryLastParams ?? undefined}
-          onClose={() => setDiscoverySearchAt(null)}
+          onClose={() => {
+            setDiscoverySearchAt(null);
+            // 探さずに閉じたら円も消す(結果を見ている間は出したまま)
+            if (!discoveryPanelOpen) setDiscoveryRange(null);
+          }}
           onResult={appendDiscoveryResult}
+          onAiFollowUp={runAiFollowUp}
+          onRadiusChange={(radius) =>
+            setDiscoveryRange((prev) => (prev ? { ...prev, radius } : prev))
+          }
         />
       )}
       {discoveryPanelOpen && (
         <AiSpotDiscoveryPanel
           rows={discoveryRows}
+          aiPending={discoveryAiPending}
           role={role}
           regionScope={regionScope ?? DEFAULT_REGION_SCOPE}
           rankEnabled={rankEnabled}

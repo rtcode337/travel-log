@@ -79,31 +79,60 @@ export default function AiSpotDiscoverySearchModal({
   initial,
   onClose,
   onResult,
+  onAiFollowUp,
+  onRadiusChange,
 }: {
   /** 探索の中心座標(右クリック/長押しした地点) */
   lat: number;
   lng: number;
   spotTypeKey: string;
   /** 前回の入力(「もう一度探す」のとき) */
-  initial?: { query: string; radius: number; limit: number; source?: DiscoverySource };
+  initial?: { query: string; radius: number; limit: number; aiAssist?: boolean };
   onClose: () => void;
   onResult: (
     result: DiscoveryResult,
-    params: { query: string; radius: number; limit: number; source: DiscoverySource }
+    params: {
+      query: string;
+      radius: number;
+      limit: number;
+      source: DiscoverySource;
+      aiAssist?: boolean;
+    }
   ) => void;
+  /**
+   * 「AIに足りないぶんを補わせる」が入っていたときに、**この画面を閉じたあとで**
+   * 呼び出し側にAIへ聞かせる。ここで待たないのは、地図データの結果を見ながら
+   * 待てるようにするため(AIは15秒〜2分かかる)
+   */
+  onAiFollowUp?: (req: {
+    query: string;
+    radius: number;
+    limit: number;
+    depth: DiscoveryDepth;
+    choice: DiscoveryChoice;
+  }) => void;
+  /** 半径が決まる・変わるたびに知らせる(地図に探す範囲の円を出すため) */
+  onRadiusChange?: (radius: number) => void;
 }) {
   const [query, setQuery] = useState(initial?.query ?? "");
   const [radius, setRadius] = useState<number>(initial?.radius ?? DEFAULT_DISCOVERY_RADIUS);
   const [limit, setLimit] = useState<number>(initial?.limit ?? DEFAULT_DISCOVERY_LIMIT);
-  // 2回目は前回と違う探し方をしたいことが多い(地図で集めた後にAIで足す)ので、
-  // 前回がAIだったときだけAIを初期値にする
-  const [source, setSource] = useState<DiscoverySource>(initial?.source ?? "osm");
+  // **AIは「足りないぶんを補う」後段**なので、探し方の選択ではなくチェックボックス。
+  // 前回入れていたら次も入れておく(補完したい場面は続けて起きる)
+  const [aiAssist, setAiAssist] = useState(initial?.aiAssist ?? false);
   // AIで探すときの念の入れ方。**既定はさっくり** —— 待てるのはせいぜい数十秒なので、
   // 裏取りまで頼むのは「しっかり」を選んだときだけにする
   const [depth, setDepth] = useState<DiscoveryDepth>(DEFAULT_DISCOVERY_DEPTH);
   const [searching, setSearching] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // 待ち時間を秒で見せる。**地図データも数秒かかる**(半径の中を全部引くので、
+  // 実測で300m=2.2秒・1km=6.6秒)ので、止まって見えないように出す
+  const [elapsed, setElapsed] = useState(0);
+
+  // 開いた時点と選び直した時点で、地図に出す円の半径を知らせる
+  useEffect(() => {
+    onRadiusChange?.(radius);
+  }, [radius, onRadiusChange]);
 
   // AIの設定(相手・モデル・深さ)。空文字=「既定に任せる」
   const [options, setOptions] = useState<DiscoveryOptions | null>(null);
@@ -156,21 +185,35 @@ export default function AiSpotDiscoverySearchModal({
   const search = async (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    // 地図データは検索語なしでも「周辺の何か」を並べられる(AIは何を探すか要る)
-    if (source === "ai" && !q) return;
+    // 検索語なしでも「周辺の何か」を並べられる(必須にしない)
     setSearching(true);
     setError(null);
-    const params = { lat, lng, radius, query: q, limit };
-    const { data, error } =
-      source === "osm"
-        ? await api.spots.nearby(spotTypeKey, params)
-        : await api.spots.discover(spotTypeKey, { ...params, ...choice, depth });
+    // 地図データは上限を渡さない(半径の中を全部返す)
+    const { data, error } = await api.spots.nearby(spotTypeKey, {
+      lat,
+      lng,
+      radius,
+      query: q,
+      limit: 0,
+    });
     setSearching(false);
     if (error || !data) {
-      setError(error?.message ?? "探索に失敗しました。");
-      return;
+      // **AIで補うつもりなら、地図データが引けなくても止めない** ——
+      // 日本以外の種別では地図データそのものが使えないので、そこで止めると
+      // AIにも聞けなくなる
+      if (!aiAssist) {
+        setError(error?.message ?? "探索に失敗しました。");
+        return;
+      }
+    } else {
+      onResult(data, { query: q, radius, limit, source: "map", aiAssist });
     }
-    onResult(data, { query: q, radius, limit, source });
+    if (aiAssist) {
+      // **AIは呼び出し側に投げて、この画面は閉じる。** 地図データの結果を見ながら
+      // 待てるようにするため(ここで待つと、出ている結果が見えないまま数十秒止まる)
+      onAiFollowUp?.({ query: q, radius, limit, depth, choice });
+    }
+    onClose();
   };
 
   return (
@@ -188,40 +231,33 @@ export default function AiSpotDiscoverySearchModal({
           緯度 {lat.toFixed(5)} ・ 経度 {lng.toFixed(5)} を中心に、見つかった候補を地図に出します。
         </p>
 
-        {/* 探し方。**既定は速いほう** —— ちょっと見たいだけのときにAIを待たせない */}
-        <div className="grid grid-cols-2 gap-2">
-          {(
-            [
-              { value: "osm", label: "地図データ", note: "すぐ出る" },
-              { value: "ai", label: "AIでweb検索", note: "15秒〜2分" },
-            ] as const
-          ).map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setSource(opt.value)}
-              disabled={searching}
-              aria-pressed={source === opt.value}
-              className={`rounded-lg border px-2 py-2 text-left text-sm disabled:opacity-50 ${
-                source === opt.value
-                  ? "border-blue-500 bg-blue-50 font-medium text-blue-800"
-                  : "border-gray-300 text-gray-600"
-              }`}
-            >
-              {opt.label}
-              <span className="block text-xs font-normal text-gray-500">{opt.note}</span>
-            </button>
-          ))}
-        </div>
+        {/* **探し方は選ばせない。** まず地図データを引き、AIは「足りないぶんを補う」
+            後段として任意で足す —— AIは単品で使うものではなく、地図に無い店と
+            一言の説明を埋めるためのもの、というのが実際の使われ方 */}
         <p className="text-xs text-gray-500">
-          {source === "osm"
-            ? "地図データ(OpenStreetMap)から引きます。座標は正確ですが、新しい店は載っていないことが多く、説明文は付きません。"
-            : "AIがwebを調べます。地図に無い新しい店や、一言の説明が付きます。"}
+          地図データ(Overture MapsとOpenStreetMap)から引きます。座標は正確ですが、
+          開いたばかりの店は載っていないことがあり、説明文は付きません。
         </p>
+        <label className="flex items-start gap-2 rounded-lg border border-gray-300 p-2.5 text-sm">
+          <input
+            type="checkbox"
+            checked={aiAssist}
+            disabled={searching}
+            onChange={(e) => setAiAssist(e.target.checked)}
+            className="mt-0.5 size-4"
+          />
+          <span className="min-w-0">
+            AIに足りないぶんを補わせる
+            <span className="block text-xs font-normal text-gray-500">
+              地図データを出したあとで、AIにもweb検索で探させて同じ一覧に足します
+              (15秒〜2分かかりますが、地図データの結果は先に出ます)
+            </span>
+          </span>
+        </label>
 
         {/* 念の入れ方。**遅さの一番の原因は裏取りの検索回数**なので、
             件数や相手より先にここを選ばせる */}
-        {source === "ai" && (
+        {aiAssist && (
           <div className="grid grid-cols-2 gap-2">
             {DISCOVERY_DEPTHS.map((d) => (
               <button
@@ -247,7 +283,7 @@ export default function AiSpotDiscoverySearchModal({
             ))}
           </div>
         )}
-        {source === "ai" && (
+        {aiAssist && (
           <p className="text-xs text-gray-500">
             {depth === "quick"
               ? "webの検索を2回までに抑えて手早く挙げてもらいます。裏取りをしないので、参照URLが付かない候補が増えます。"
@@ -257,17 +293,14 @@ export default function AiSpotDiscoverySearchModal({
 
         <div>
           <label className="mb-1 block text-sm font-medium">
-            探すもの {source === "ai" && "*"}
+            探すもの
           </label>
           <input
             autoFocus
-            required={source === "ai"}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             maxLength={MAX_DISCOVERY_QUERY_LENGTH}
-            placeholder={
-              source === "osm" ? "例: ランチ、ラーメン、カフェ(空でも可)" : "例: ランチ、ラーメン、カフェ"
-            }
+            placeholder="例: ランチ、ラーメン、カフェ(空でも可)"
             disabled={searching}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
@@ -288,27 +321,39 @@ export default function AiSpotDiscoverySearchModal({
               ))}
             </select>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">件数(上限)</label>
-            <select
-              value={limit}
-              onChange={(e) => setLimit(Number(e.target.value))}
-              disabled={searching}
-              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-            >
-              {DISCOVERY_LIMIT_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}件
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* **件数はAIに聞くときだけ選ばせる。** 返させる件数がそのまま待ち時間に
+              なるのはAIの側の事情で、地図データはローカルを引くだけなので上限を持たない
+              (半径の中にあるものを全部並べる)。半径がそのまま件数を決める */}
+          {aiAssist ? (
+            <div>
+              <label className="mb-1 block text-sm font-medium">件数(上限)</label>
+              <select
+                value={limit}
+                onChange={(e) => setLimit(Number(e.target.value))}
+                disabled={searching}
+                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+              >
+                {DISCOVERY_LIMIT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}件
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div>
+              <span className="mb-1 block text-sm font-medium">件数</span>
+              <p className="rounded-lg border border-dashed border-gray-300 px-2 py-2 text-sm text-gray-600">
+                半径の中を全部
+              </p>
+            </div>
+          )}
         </div>
 
         {/* AIの設定。**ふだんは触らないので畳んでおく**が、畳んだままでも
             いまの選択が見えるようにする(何で探すのかが分からないまま待たせない)。
-            地図データで探すときは効かないので出さない */}
-        {source === "ai" && (
+            AIに聞かないときは効かないので出さない */}
+        {aiAssist && (
         <div className="rounded-lg border border-gray-200">
           <button
             type="button"
@@ -394,14 +439,15 @@ export default function AiSpotDiscoverySearchModal({
         )}
 
         <p className="text-xs text-gray-500">
-          足りなければ、結果のパネルから「もう一度探す」で探し方を変えて同じ一覧に足せます。
-          AIで探した後は、同じパネルから「AIとのやり取りを見る」で頼んだ本文と返答を確かめられます。
+          足りなければ、結果のパネルから「もう一度探す」で条件を変えて同じ一覧に足せます。
+          AIに聞いた後は、同じパネルから「AIとのやり取りを見る」で頼んだ本文と返答を確かめられます。
         </p>
         {searching && (
           <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
-            {source === "osm" ? "地図データを引いています…" : `AIがwebで調べています… ${elapsed}秒`}
-            {source === "ai" && (
+            地図データを引いています… {elapsed}秒
+            {aiAssist && (
               <span className="mt-0.5 block text-xs text-blue-700/80">
+                このあとAIにも聞きます{" "}
                 {depth === "quick"
                   ? "ふだんは15〜30秒ほどです。遅いときは件数を減らしてください。"
                   : "裏取りをするので40秒〜2分ほどかかります。急ぐときは「さっくり」に変えてください。"}
@@ -421,7 +467,7 @@ export default function AiSpotDiscoverySearchModal({
           </button>
           <button
             type="submit"
-            disabled={searching || (source === "ai" && !query.trim())}
+            disabled={searching}
             className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {searching ? "調べています…" : "探す"}

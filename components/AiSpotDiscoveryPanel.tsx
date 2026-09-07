@@ -11,6 +11,7 @@ import {
 import { regionFieldLabel } from "@/lib/region";
 import { RANKS, type Rank } from "@/lib/rank";
 import type { DiscoveryCandidate, DiscoverySource } from "@/lib/spotDiscovery";
+import { buildGoogleMapsCompareUrl } from "@/lib/googleMaps";
 
 /**
  * 周辺のAI探索の結果を並べる、地図の右側のパネル(`PlanBuildPanel`と同じ置き方)。
@@ -40,6 +41,9 @@ export interface DiscoveryRow {
   source: DiscoverySource;
   /** 「位置を直す」で住所から引き直したか(印を分けるため) */
   relocated?: boolean;
+  /** この候補を頼んだときの半径(m)。**行ごとに持つ** —— 「もう一度探す」で
+      別の半径の結果が同じ一覧に混ざるため、画面側の今の値では判定できない */
+  radius: number;
 }
 
 export default function AiSpotDiscoveryPanel({
@@ -65,6 +69,7 @@ export default function AiSpotDiscoveryPanel({
   onFocus,
   onSearchAgain,
   onShowExchange,
+  aiPending,
   onAdd,
   onClose,
 }: {
@@ -93,8 +98,10 @@ export default function AiSpotDiscoveryPanel({
   relocatingNo: number | null;
   onFocus: (no: number) => void;
   onSearchAgain: () => void;
-  /** 直近のAIとのやり取りを見る(AIで探していなければ渡さない) */
+  /** 直近のAIとのやり取りを見る(AIに聞いていなければ渡さない) */
   onShowExchange?: () => void;
+  /** AIへの問い合わせが走っている(地図データの結果を出した後ろで動いている) */
+  aiPending?: boolean;
   onAdd: () => void;
   onClose: () => void;
 }) {
@@ -121,25 +128,38 @@ export default function AiSpotDiscoveryPanel({
         <p className="mt-0.5 text-xs text-gray-500">
           行を押すと地図がそこへ寄ります。候補は保存されず、追加したものだけがスポットになります。
         </p>
+        {/* **AIは地図データの結果を出した後ろで動く**ので、待っていることを出さないと
+            「もう終わったのか、まだ来るのか」が分からない */}
+        {aiPending && (
+          <p className="mt-1.5 rounded bg-violet-50 px-2 py-1 text-xs text-violet-800">
+            AIにも聞いています… 見つかったぶんはこの一覧に足されます
+          </p>
+        )}
       </div>
 
       <ul ref={listRef} className="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto">
         {rows.length === 0 && (
           <li className="p-3 text-xs text-gray-500">
-            候補がありません。「もう一度探す」から検索語・半径・探し方を変えて探せます。
+            候補がありません。「もう一度探す」から検索語・半径を変えて探せます。
           </li>
         )}
         {rows.map((row) => {
           const c = row.candidate;
           const disabled = !!c.existing;
           const focused = row.no === focusedNo;
+          // **薄くするのは「登録済み」と「地図データで実在を確かめられなかった」の2つだけ。**
+          // かつては参照URLの無い行を薄くしていたが、URLはAIが書いた文字列でしかなく
+          // 確かめる相手がいない。しかも地図データ側の候補はURLを持たないものが多く
+          // (OSMは実測で200件中51件)、**意味の無い理由で行の大半が薄くなっていた**。
+          // 印の色分け・最初から選んでおくかの判定と同じ根拠にそろえる
+          const dubious = row.source === "ai" && !c.location_verified;
           return (
             <li
               key={row.no}
               data-no={row.no}
               className={`flex items-start gap-2 py-2 pl-2 pr-2 ${
                 focused ? "bg-blue-50 ring-1 ring-inset ring-blue-400" : ""
-              } ${!c.url || disabled ? "opacity-60" : ""}`}
+              } ${disabled || dubious ? "opacity-60" : ""}`}
             >
               <input
                 type="checkbox"
@@ -172,12 +192,12 @@ export default function AiSpotDiscoveryPanel({
                   {/* 出どころ。同じ一覧に地図データとAIの候補が混ざるので必ず出す */}
                   <span
                     className={`rounded px-1 py-0.5 ${
-                      row.source === "osm"
+                      row.source === "map"
                         ? "bg-sky-100 text-sky-800"
                         : "bg-violet-100 text-violet-800"
                     }`}
                   >
-                    {row.source === "osm" ? "地図データ" : "AI"}
+                    {row.source === "map" ? "地図データ" : "AI"}
                   </span>
                   {c.existing ? (
                     <span className="rounded bg-gray-200 px-1 py-0.5 text-gray-700">
@@ -185,19 +205,51 @@ export default function AiSpotDiscoveryPanel({
                     </span>
                   ) : row.relocated ? (
                     <span className="rounded bg-green-100 px-1 py-0.5 text-green-800">住所から取得</span>
-                  ) : row.source === "ai" && !c.location_verified ? (
-                    <span className="rounded bg-amber-100 px-1 py-0.5 text-amber-800">位置未確認</span>
+                  ) : row.source === "ai" ? (
+                    /* **実在を確かめられたかどうかを言い切る。** AIの候補で
+                       いちばん危ないのは「その場所に無い店」なので、位置の話ではなく
+                       地図データに在ったかどうかとして出す */
+                    c.location_verified ? (
+                      <span className="rounded bg-green-100 px-1 py-0.5 text-green-800">
+                        地図データで確認
+                      </span>
+                    ) : (
+                      <span className="rounded bg-amber-100 px-1 py-0.5 text-amber-800">
+                        地図データに無い
+                      </span>
+                    )
                   ) : null}
                   <span className="rounded bg-gray-100 px-1 py-0.5 text-gray-600">
                     {c.distance_m >= 1000 ? `${(c.distance_m / 1000).toFixed(1)} km` : `${c.distance_m} m`}
                   </span>
-                  {/* 参照URLはAIの候補の根拠。地図データには元から無いので責めない */}
-                  {row.source === "ai" && !c.url && (
-                    <span className="rounded bg-red-50 px-1 py-0.5 text-red-700">参照URLなし</span>
+                  {/* **半径の外に出た候補は必ず言う。** 頼んだ範囲を無視して数を
+                      合わせにくることがあり(実測)、地図で見るまで気づけない */}
+                  {c.distance_m > row.radius && (
+                    <span className="rounded bg-red-50 px-1 py-0.5 text-red-700">半径の外</span>
                   )}
                 </div>
                 {c.summary && <p className="text-xs leading-snug text-gray-700">{c.summary}</p>}
               </button>
+              {/* **候補の座標と、店名で引いた本物の場所を1枚の地図に並べる。**
+                  経路検索の出発地に座標・目的地に店名を入れる形(検索は問い合わせを
+                  1つしか受け取れないので、2地点を同時に出すにはこれになる)。
+                  **ずれが距離として出る**ので、目で見比べるより判断が速い。
+                  行の本体はボタンなので、リンクはその外に置く(入れ子にできない) */}
+              <div className="flex flex-wrap gap-2 pl-6 text-[11px]">
+                <a
+                  href={buildGoogleMapsCompareUrl(
+                    { lat: c.lat, lng: c.lng },
+                    c.name,
+                    c.address ?? c.region
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="この候補の座標から店名で引いた場所までをGoogle マップで出す(離れていれば座標が違う)"
+                  className="text-blue-600 underline underline-offset-2 hover:text-blue-800"
+                >
+                  座標と店名を見比べる
+                </a>
+              </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <button
                   type="button"

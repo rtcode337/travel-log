@@ -57,3 +57,34 @@ export function buildGoogleMapsRouteUrl(
     omittedCount: middle.length - waypoints.length,
   };
 }
+
+/**
+ * **候補の座標と、店名で引いた本物の場所を1枚の地図に並べて見比べるURL。**
+ *
+ * 経路検索(`dir`)の**出発地に座標・目的地に店名**を入れる。検索(`search`)は
+ * 問い合わせを1つしか受け取れないので、2つの地点を同時に出すにはこの形になる。
+ * 副産物として**ずれが距離として読める** —— 同じ場所なら数十m以内、違う場所を
+ * 指していれば数百m〜数kmと出るので、目で見比べるより判断が速い。
+ *
+ * `travelmode=walking`にしてあるのは、短い距離を分単位・メートル単位で出すため
+ * (車だと一方通行で遠回りの数字になり、ずれの大きさとして読めない)。
+ *
+ * **店名の側に座標を足さない。** 足すとGoogle側がその座標に寄せて解決するので、
+ * 座標が間違っていても「合っている」ように見えて確かめる意味が無くなる
+ * (手掛かりとして渡すのは住所か地域名までにとどめる)。
+ */
+export function buildGoogleMapsCompareUrl(
+  point: { lat: number; lng: number },
+  name: string,
+  near?: string | null
+): string {
+  const origin = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
+  const destination = [name, near].filter((v): v is string => !!v && v.trim() !== "").join(" ");
+  const params = new URLSearchParams({
+    api: "1",
+    origin,
+    destination,
+    travelmode: "walking",
+  });
+  return `https://www.google.com/maps/dir/?${params}`;
+}
