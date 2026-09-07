@@ -189,7 +189,7 @@ export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
   // ランクは「段階を付けたい種別」だけのものなので既定は使わない。
   // 使わない種別ではランクは常になし扱いで、色はシリーズが決める
   rank_enabled: false,
-  // 周辺を探す(地図の右クリック/長押しメニュー)。地図データ(OSM)とAIの2段で、
+  // 周辺を探す(地図の右クリック/長押しメニュー)。地図データ(Overture / OSM)とAIの2段で、
   // 使う種別で明示的に開ける(サーバーに接続先が無ければ開けても出ない)
   ai_discovery_enabled: false,
 };

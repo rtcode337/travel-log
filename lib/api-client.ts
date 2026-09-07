@@ -201,7 +201,7 @@ export const api = {
         `/api/spots/discover?type=${encodeURIComponent(type)}`,
         { fresh: true }
       ),
-    // 周辺を「地図データ(OSM)」から引く1段目。**1秒かからず**AIの枠も使わない。
+    // 周辺を「地図データ(Overture / OSM)」から引く1段目。**1秒かからず**AIの枠も使わない。
     // 足りなければ下のdiscover(AI)で同じ一覧に足す
     nearby: (
       type: string,

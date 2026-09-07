@@ -18,6 +18,8 @@ import {
   DISCOVERY_DEPTHS,
   MAX_DISCOVERY_QUERY_LENGTH,
   distanceMeters,
+  looksLikeSameSpot,
+  mapLookupQueries,
   normalizeSpotName,
   type DiscoveryBackend,
   type DiscoveryCandidate,
@@ -39,7 +41,7 @@ import { bboxAround } from "@/lib/osmNearby";
  *
  * **なぜAIに調べさせるか。** 飲食店のような「新しい店がよく入れ替わる」種別は、
  * 商用のAPI(グルメサイト・地図サービス)が自前DBへの保存と再配布を禁じているため
- * 出どころにできず、OSMは地方だと10年前で止まっている地物が多くて新店が載らない。
+ * 出どころにできず、地図データは開いたばかりの店が載らない。
  * そこでweb検索を持つAIに周辺を調べさせ、機械的に決めにくいランク付けまで任せる。
  *
  * **AIへの中継は知識サーバー(chiezo)の`/v1/ai/complete`。** 鍵はあちらが握っていて
@@ -58,9 +60,9 @@ import { bboxAround } from "@/lib/osmNearby";
  * **候補ごとにNominatimを叩かない**(1秒1回の間隔制限があり、10件で10秒以上かかっていた)。
  *
  * **AIの答えは信用せず、こちらで確かめてから出す。**
- * - 位置: chiezoのOSM辞典(`osm_japan`。ローカルで数ms、レート制限が無いので**並列に**引く)を
+ * - 位置: chiezoの地図辞典(`overture_japan`→`osm_japan`の順。ローカルで数ms、レート制限が無いので**並列に**引く)を
  *   店名+半径のbboxで引き、当たればその座標に置き換えて「位置確認済み」。
- *   当たらなければAIの座標のまま「未確認」の印(新しい店はOSMに無いのが普通なので、
+ *   当たらなければAIの座標のまま「未確認」の印(開いたばかりの店は地図データに無いのが普通なので、
  *   未確認は珍しくない。地図で見て違えば追加後に「位置を修正」で直す)
  * - 重複: 同じ種別の公開・承認待ちスポットと名前一致か50m以内なら「登録済み」の印
  * - 出どころ: 参照URLの無い候補はそのまま返す(画面が薄く出す)。口コミ本文や点数の
@@ -146,7 +148,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ data: options });
 }
 
-// ---- 位置の確認(chiezoのOSM辞典だけ。並列に引く) ----
+// ---- 位置の確認(chiezoの地図辞典。並列に引く) ----
 
 interface Point {
   lat: number;
@@ -159,7 +161,26 @@ interface ChiezoSearchResponse {
 
 interface ChiezoDocResponse {
   title?: unknown;
-  extra?: { lat?: unknown; lon?: unknown; area?: unknown };
+  extra?: {
+    lat?: unknown;
+    lon?: unknown;
+    area?: unknown;
+    /** Overture側にはURL・電話・住所が入っている(OSMは tags 側なのでここでは見ない) */
+    website?: unknown;
+    address?: unknown;
+    locality?: unknown;
+  };
+}
+
+/** 地図辞典で見つかった1件。位置だけでなく**確かめられた事実**を持ち帰る */
+interface MapMatch {
+  point: Point;
+  /** 地図側の見出し(画面には出さない。突き合わせの確認用) */
+  title: string;
+  /** 公式サイト。AIが答えたURLより優先する(出どころが辿れるため) */
+  website: string | null;
+  /** 地図側の住所。日本語のときだけ使う(Overtureはローマ字表記が混ざる) */
+  address: string | null;
 }
 
 interface ChiezoFilterResponse {
@@ -182,36 +203,68 @@ async function chiezoGet<T>(baseUrl: string, path: string, params: URLSearchPara
 }
 
 /**
- * chiezoのOSM辞典で店名を半径内から探し、当たった地物の正確な座標を返す。
+ * chiezoの地図辞典で店名を半径内から探し、当たった地物の正確な座標を返す。
  * 検索の応答には座標が載らない(snippetに4桁までの文字があるだけ)ので、
- * 当たった題名で`doc`を引き直す。どちらもローカルで数msなので2往復してよい
+ * 当たった題名で`doc`を引き直す。どちらもローカルで数msなので2往復してよい。
+ *
+ * **Overtureを先に見る**。AIが挙げるのは新しい店・話題の店が多く、そこがいちばん
+ * OSMの穴と重なる(実測: AIが挙げた有名店4件のうちOSMで引けたのは1件)。
+ * Overtureは日本で301万件あってOSMの倍近い。当たらなければOSMへ落ちる ——
+ * 寺社や公園のように、Overture側の分類が薄いものはOSMのほうが確実。
  */
 async function verifyWithChiezo(
   baseUrl: string,
   name: string,
   center: Point,
   radiusM: number
-): Promise<Point | null> {
-  const found = await chiezoGet<ChiezoSearchResponse>(
-    baseUrl,
-    "/v1/osm_japan/search",
-    new URLSearchParams({ q: name, limit: "3", bbox: bboxAround(center, radiusM * VERIFY_RADIUS_FACTOR) })
-  );
-  for (const hit of found?.results ?? []) {
-    if (typeof hit.title !== "string") continue;
-    const doc = await chiezoGet<ChiezoDocResponse>(
-      baseUrl,
-      "/v1/osm_japan/doc",
-      new URLSearchParams({ title: hit.title, fields: "title,extra" })
+): Promise<MapMatch | null> {
+  const bbox = bboxAround(center, radiusM * VERIFY_RADIUS_FACTOR);
+  const sources = ["overture_japan", "osm_japan"] as const;
+  // **問い合わせ語を段階的に緩める**(`mapLookupQueries`)。生の名前だけで引くと、
+  // 実在する店を「確認できなかった」と扱ってしまう。緩めるぶんは`looksLikeSameSpot`で
+  // 別の店を掴まないよう歯止めをかける
+  for (const q of mapLookupQueries(name)) {
+    const founds = await Promise.all(
+      sources.map((source) =>
+        chiezoGet<ChiezoSearchResponse>(
+          baseUrl,
+          `/v1/${source}/search`,
+          new URLSearchParams({ q, limit: "5", bbox })
+        )
+      )
     );
-    const lat = Number(doc?.extra?.lat);
-    const lng = Number(doc?.extra?.lon);
-    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    for (const [i, source] of sources.entries()) {
+      for (const hit of founds[i]?.results ?? []) {
+        if (typeof hit.title !== "string") continue;
+        if (!looksLikeSameSpot(name, hit.title)) continue;
+        const doc = await chiezoGet<ChiezoDocResponse>(
+          baseUrl,
+          `/v1/${source}/doc`,
+          new URLSearchParams({ title: hit.title, fields: "title,extra" })
+        );
+        const lat = Number(doc?.extra?.lat);
+        const lng = Number(doc?.extra?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const text = (v: unknown) =>
+          typeof v === "string" && v.trim() ? v.trim() : null;
+        const address = text(doc?.extra?.address);
+        return {
+          point: { lat, lng },
+          title: hit.title,
+          website: text(doc?.extra?.website),
+          // ローマ字の住所(`1 Chome-6-3 Kabukicho`)はAIの日本語の答えより読みにくい
+          address: address && /[぀-ヿ一-鿿]/.test(address) ? address : null,
+        };
+      }
+    }
   }
   return null;
 }
 
-/** 中心座標の都道府県をchiezoのOSM辞典から引く(近くの地物の`area`)。無ければnull */
+/**
+ * 中心座標の都道府県をchiezoのOSM辞典から引く(近くの地物の`area`)。無ければnull。
+ * **ここだけはOSM** —— Overtureの`area`はJISのコードで、しかも日本ではほぼ空
+ */
 async function regionWithChiezo(baseUrl: string, center: Point): Promise<string | null> {
   // 中心のすぐ近くに地物が無いこともあるので、狭い枠から広げて2回まで見る
   for (const radius of [100, 1000]) {
@@ -290,7 +343,7 @@ async function regionWithNominatim(center: Point, scope: string): Promise<string
 }
 
 /**
- * 候補の位置を確かめる。**chiezoのOSM辞典だけ**を引く(ローカルで数ms、
+ * 候補の位置を確かめる。**chiezoの地図辞典だけ**を引く(ローカルで数ms、
  * レート制限が無いので候補ぶんを並列に投げられる)。当たらなければnull =
  * AIの座標のまま「未確認」。
  * かつてはここでNominatimにも聞いていたが、1秒1回の間隔制限がそのまま待ちになり、
@@ -303,7 +356,7 @@ async function verifyLocation(
   center: Point,
   radiusM: number,
   scope: string
-): Promise<Point | null> {
+): Promise<MapMatch | null> {
   if (scope !== "jp") return null;
   return verifyWithChiezo(baseUrl, candidate.name, center, radiusM);
 }
@@ -319,7 +372,8 @@ function buildSystemPrompt(depth: DiscoveryDepth): string {
   if (depth === "quick") {
     return [
       "周辺の店を手早く挙げる。**webの検索は多くても2回**。1回の検索で分かる範囲で答え、裏取りに時間をかけない。",
-      "知っている店をそのまま挙げてよい。閉店が明らかなものだけ外す。",
+      "**実在すると確信できる店だけ**を挙げる。名前・場所があやふやなものは数合わせに入れず、件数が足りなくてもそのまま返す。",
+      "**指定された半径の外は入れない。**",
       "口コミの本文・点数・順位は書き写さない。",
       "出力はJSONの配列だけ。前置き・説明・コードブロックの記号は付けない。",
     ].join("\n");
@@ -674,13 +728,13 @@ export async function POST(request: Request) {
 
   // 位置の確認は**並列**に投げる(chiezoはローカルでレート制限が無い)。
   // 直列に1件ずつ待っていた頃は、件数がそのまま待ち時間に乗っていた
-  const verifiedPoints = await Promise.all(
+  const matches = await Promise.all(
     raws.map((raw) => verifyLocation(baseUrl, raw, center, radius, scope))
   );
 
   const candidates: DiscoveryCandidate[] = raws.map((raw, i) => {
-    const verified = verifiedPoints[i];
-    const position = verified ?? { lat: raw.lat, lng: raw.lng };
+    const verified = matches[i];
+    const position = verified?.point ?? { lat: raw.lat, lng: raw.lng };
     const existing =
       existingByName.get(normalizeSpotName(raw.name)) ??
       existingSpots.find(
@@ -691,7 +745,9 @@ export async function POST(request: Request) {
       name: raw.name,
       // よみがなとランクの根拠はAIに聞かない(項目を増やすと待ちが延びる)
       name_kana: null,
-      address: raw.address,
+      // **確かめられた住所があればそちらを使う**(AIの住所は確かめる相手がいない)。
+      // 地図側がローマ字表記のときはnullで返るので、その場合はAIの答えを残す
+      address: verified?.address ?? raw.address,
       // 地域はAIに聞かず、中心座標から引いたものを全候補に使う
       // (半径は数kmまでなので、中心の県で足りる)
       region: centerRegion,
@@ -701,9 +757,15 @@ export async function POST(request: Request) {
       summary: raw.summary,
       rank: raw.rank,
       rank_reason: null,
-      url: raw.url,
+      // **地図データの公式サイトを優先する**。AIが答えたURLは確かめる相手がいないが、
+      // こちらは実在を確かめた地物に紐づいている。実測では`quick`のAIは
+      // URLを1件も返さない一方、地図側は10件中9件で持っていた ——
+      // 根拠が無いように見えていた候補のほとんどに、実は出どころがあった
+      url: verified?.website ?? raw.url,
       location_verified: verified !== null,
       distance_m: Math.round(distanceMeters(center, position)),
+      // 地図データではないので辞典は無い(説明文は「AIがwebから収集」になる)
+      dataset: null,
       existing: existing ? { id: existing.id, name: existing.name } : null,
     };
   });

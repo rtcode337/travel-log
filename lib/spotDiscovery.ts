@@ -14,7 +14,13 @@ import type { Rank } from "./rank";
 
 /** 探索の半径(m)として選べる値。狭すぎると何も出ず、広すぎると中心と関係ない店が混ざる */
 export const DISCOVERY_RADIUS_OPTIONS = [300, 500, 1000, 2000, 5000] as const;
-export const DEFAULT_DISCOVERY_RADIUS = 1000;
+/**
+ * 既定は**いちばん狭い300m**。地図データ側は件数の上限を持たないので、
+ * **半径がそのまま件数になる**(300mで約1,800件、1kmで約5,300件。実測)。
+ * 広い側を既定にすると、開いた瞬間に読み切れない一覧が出る。足りなければ
+ * 「もう一度探す」で広げるほうが、多すぎる中から絞るより早い
+ */
+export const DEFAULT_DISCOVERY_RADIUS = 300;
 
 /** 検索語の長さの上限。プロンプトに埋めるので、長文を丸ごと渡させない */
 export const MAX_DISCOVERY_QUERY_LENGTH = 100;
@@ -28,6 +34,21 @@ export const MAX_DISCOVERY_QUERY_LENGTH = 100;
 export const DISCOVERY_LIMIT_OPTIONS = [10, 20, 30] as const;
 export const DEFAULT_DISCOVERY_LIMIT = 10;
 export const MAX_DISCOVERY_CANDIDATES = 30;
+
+/**
+ * 件数の上限(`limit`)は**AIで探すときだけの都合**。返させる件数がそのまま
+ * 待ち時間になるので選ばせている。
+ *
+ * **地図データはローカルのSQLiteを引くだけなので上限を持たない** —— 半径の中に
+ * あるものは全部返す。件数を絞る意味は無く、絞ると「この辺に何があるか」を
+ * 見るという地図データ側の使い方ができない。
+ *
+ * 代わりに**半径がそのまま件数を決める**。実測(新宿・既定のカテゴリ、2つの辞典の合計):
+ * 300m=1,791件 / 500m=3,299件 / 1km=5,224件 / 2km=7,957件 / 5km=36,580件。
+ * 印は地図レイヤーで描くので件数が増えても地図は動くが、**右のパネルの行は
+ * 件数ぶん並ぶ**ので、広く取るほど一覧としては読みにくくなる。
+ */
+export const UNLIMITED_DISCOVERY_LIMIT = 0;
 
 /**
  * 既存スポットと「同じもの」とみなす距離(m)。名前が一致しなくても、
@@ -74,17 +95,30 @@ export interface DiscoveryChoice {
 
 /**
  * 候補の出どころ。**探し方は2段**で、既定は速いほう:
- * - `osm`: 地図データ(chiezoのOSM辞典)。**1秒かからず**、AIの枠も使わない。
- *   座標は地図データそのものなので正確。反面、新しい店は載っていないことが多く、
- *   説明文も持たない(実測: 新宿1kmに飲食店882件あるのに、AIが挙げた有名店4件のうち
- *   OSMで引けたのは1件だけ)
- * - `ai`: web検索を持つAIに調べさせる。30秒〜2分かかるが、**OSMに無い新しい店**や
+ * - `map`: 地図データ(chiezoのOverture Places辞典とOSM辞典)。**1秒かからず**、
+ *   AIの枠も使わない。座標は地図データそのものなので正確。反面、説明文は持たない
+ * - `ai`: web検索を持つAIに調べさせる。30秒〜2分かかるが、**地図データに無い新しい店**や
  *   一言の説明・参照URLが付く
  *
  * 「まず地図データで雑に集め、足りなければAIで探し足す」が想定の流れで、
  * 同じ一覧に混ぜて並ぶ(行に出どころの印が付く)
  */
-export type DiscoverySource = "osm" | "ai";
+export type DiscoverySource = "map" | "ai";
+
+/**
+ * 地図データの候補が**どの辞典から来たか**。
+ *
+ * **ライセンスが違うので候補ごとに持つ** —— OSMはODbL、OvertureはCDLA Permissive 2.0 で、
+ * 説明文に書く出どころも変わる。1回の探索で両方の辞典を引いて混ぜるため、
+ * 結果全体に1つ持たせる形では足りない。
+ */
+export type DiscoveryDataset = "osm" | "overture";
+
+/** 説明文と画面に出す辞典の名前 */
+export const DISCOVERY_DATASET_LABELS: Record<DiscoveryDataset, string> = {
+  osm: "OpenStreetMap",
+  overture: "Overture Maps",
+};
 
 /**
  * AIで探すときの念の入れ方。**既定は`quick`**。
@@ -133,6 +167,11 @@ export interface DiscoveryCandidate {
   location_verified: boolean;
   /** 中心からの距離(m)。半径の外に出た候補に気づけるように出す */
   distance_m: number;
+  /**
+   * どの地図データから来たか(`source: "map"`のときだけ。AIの候補はnull)。
+   * **ライセンスが辞典ごとに違う**ので、説明文の出どころはこれで決める
+   */
+  dataset: DiscoveryDataset | null;
   /** 既存スポット(公開・承認待ち)と名前一致か近接していればその1件 */
   existing: { id: string; name: string } | null;
 }
@@ -181,17 +220,20 @@ export function formatJstDate(iso: string): string {
  * 口コミ本文や点数はプロンプトで転記を禁じているので、ここには入らない
  */
 export function buildDiscoveredDescription(
-  candidate: Pick<DiscoveryCandidate, "summary" | "url" | "location_verified">,
+  candidate: Pick<DiscoveryCandidate, "summary" | "url" | "location_verified" | "dataset">,
   searchedAt: string,
   source: DiscoverySource
 ): string {
   const lines: string[] = [];
   if (candidate.summary?.trim()) lines.push(candidate.summary.trim());
   // **出どころは必ず添える** —— 手で書いた説明と見分けるため。
-  // OSM由来のときはODbLのデータであることが分かる書き方にする
+  // 地図データ由来のときは**どの辞典か**まで書く(ライセンスが辞典ごとに違うので、
+  // 後から条件を確かめるには名前が要る)
   const provenance =
-    source === "osm"
-      ? [`OpenStreetMapから取得(${formatJstDate(searchedAt)})`]
+    source === "map"
+      ? [
+          `${DISCOVERY_DATASET_LABELS[candidate.dataset ?? "osm"]}から取得(${formatJstDate(searchedAt)})`,
+        ]
       : [`AIがwebから収集(${formatJstDate(searchedAt)})`];
   if (candidate.url) provenance.push(`参照: ${candidate.url}`);
   if (source === "ai" && !candidate.location_verified) provenance.push("位置は未確認");
@@ -215,6 +257,66 @@ export function distanceMeters(
 }
 
 /** 名前の突き合わせ用に正規化する(全角半角・空白・記号の違いで別物にしない) */
+/** 「〜本店」「〜新宿店」のような支店の名乗り(末尾のみ) */
+const BRANCH_SUFFIX = /[^\s]{0,8}(本店|総本店|支店|店)$/;
+
+/**
+ * AIが答えた店名から、地図辞典を引くための問い合わせ語を**絞り込み順に**作る。
+ *
+ * **AIの店名は地図の見出しと一字一句は合わない。** 生の名前だけで引くと、
+ * 実在する店を「確認できなかった」と扱ってしまう(実測: 10件中2件がこれで外れ、
+ * `アカシア 新宿本店`が地図の`アカシア本店`に当たらなかった)。位置を確かめられないと
+ * AIの座標がそのまま残るが、**当たった店ですら4〜70mずれていた**ので、
+ * 外した候補は地図上の別の建物に立つ。
+ *
+ * 前のもので当たったら後ろは引かない(1つ緩めるごとに別の店を掴む危険が上がるため)。
+ */
+export function mapLookupQueries(name: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string) => {
+    const v = value.trim();
+    if (v.length >= 2 && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  };
+  add(name);
+  // 括弧の中(英字の別名・読み)を落とす: `ベルク (BERG)` → `ベルク`
+  const bare = name.replace(/[((][^))]*[))]/g, " ").trim();
+  add(bare);
+  // 支店の名乗りを落とす: `アカシア 新宿本店` → `アカシア`
+  add(bare.replace(BRANCH_SUFFIX, "").trim());
+  // 空白で切ったうちいちばん長い語(`ハンバーグ ウィル` → `ハンバーグ`)
+  const parts = bare.split(/\s+/).filter((p) => p.length >= 2);
+  if (parts.length > 1) add(parts.reduce((a, b) => (b.length > a.length ? b : a)));
+  return out.slice(0, 4);
+}
+
+/**
+ * 地図辞典の見出しが、AIの答えた店名と**同じ店を指していると見てよいか**。
+ *
+ * 問い合わせ語を緩めるほど別の店を掴みやすくなるので歯止めが要る
+ * (`中村屋`で引くと`中村屋サロン美術館`も当たる)。正規化した名前が
+ * どちらかを含んでいることを条件にする —— 地図側は`天ぷら新宿つな八総本店`のように
+ * 業種や地名を前に付けることがあるので、**完全一致では狭すぎる**。
+ */
+export function looksLikeSameSpot(aiName: string, mapTitle: string): boolean {
+  const key = normalizeSpotName(
+    aiName.replace(/[((][^))]*[))]/g, " ").trim().replace(BRANCH_SUFFIX, "").trim()
+  ) || normalizeSpotName(aiName);
+  // 地図側の `名前 (連番)` `名前 (node:123)` は弁別のための後付けなので外す
+  // 地図側の弁別のための後付け(`名前 (node:123)` `名前 (2077482)`)を外す
+  const title = normalizeSpotName(
+    mapTitle.replace(/\s*\((?:node|way|relation):\d+\)$/, "").replace(/\s*\(\d+\)$/, "")
+  );
+  if (!key || !title) return false;
+  // **含み合うことしか認めない。** ここを緩めると、緩めた問い合わせ語で引いた
+  // 別の店(`ハンバーグ ウィル`で`レジデンスホテルウィル新宿`)を掴む。
+  // 掴んだら座標もURLも黙って別の店のものに置き換わるので、**取りこぼすより悪い**
+  return title.includes(key) || key.includes(title);
+}
+
 export function normalizeSpotName(name: string): string {
   return name
     .normalize("NFKC")
