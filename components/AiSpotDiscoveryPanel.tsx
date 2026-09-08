@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import {
   ALLOWED_STATUS_BY_ROLE,
   PREFECTURES,
@@ -22,7 +22,8 @@ import { buildGoogleMapsCompareUrl } from "@/lib/googleMaps";
  * (選ばれなかった行はチェックが外れて薄くなるが、消えはしない —— AIも見落とすので、
  * 選び直せる形で残す)。ジャンル・ランク・一言もそこで付く。
  *
- * できることは5つ: チェックで「追加するもの」を選ぶ、×で候補から外す、
+ * できることは6つ: チェック(と見出しの「すべて選ぶ」)で「追加するもの」を選ぶ、
+ * ×で候補から外す、
  * **「位置を直す」でその1件だけ住所から座標を引き直す**、「もう一度探す」で別の検索語・
  * 別の探し方の候補を**同じ一覧に足す**、「追加」でチェック済みをまとめて登録する。
  *
@@ -31,7 +32,11 @@ import { buildGoogleMapsCompareUrl } from "@/lib/googleMaps";
  * (AIの座標は当てにならないことがあり、地図で見て初めて分かる)。
  *
  * 状態・シリーズは全行共通(追加後に個別に編集できるので、ここでは行ごとに分けない)。
- * ランクだけはAIの提案値を行ごとに直せる。
+ * ランクとカテゴリはAI・地図データの値を行ごとに直せる。
+ *
+ * **カテゴリは一括と行ごとの両方から付く。** 行ごとの値は候補のジャンルが初期値で、
+ * 一括の欄はそれに**足す**(置き換えない) —— 分類の粒度が食い違うことがあり
+ * (麺類の店が「和食」で入ってくる)、まとめの札と個別の直しは別の用途になる。
  */
 export interface DiscoveryRow {
   /** 一覧・地図の印で共有する通し番号(1始まり。外しても振り直さない) */
@@ -54,9 +59,21 @@ export interface DiscoveryRow {
   /** この候補を頼んだときの半径(m)。**行ごとに持つ** —— 「もう一度探す」で
       別の半径の結果が同じ一覧に混ざるため、画面側の今の値では判定できない */
   radius: number;
+  /**
+   * 追加するときに付けるカテゴリ。**未設定(`undefined`)なら候補のジャンルを使う** ——
+   * 手で直したときだけ値を持つので、AIの精査でジャンルが付け直されても
+   * 直した内容が消えない(逆に、直していない行はAIの結果に追従する)
+   */
+  category?: string;
+}
+
+/** その行が追加時に持つカテゴリ(手で直していなければ候補のジャンル) */
+export function discoveryRowCategory(row: DiscoveryRow): string {
+  return row.category ?? row.candidate.genre ?? "";
 }
 
 export default function AiSpotDiscoveryPanel({
+  ref,
   rows,
   role,
   regionScope,
@@ -64,15 +81,20 @@ export default function AiSpotDiscoveryPanel({
   seriesOptions,
   status,
   series,
+  category,
+  categoryOptions,
   fallbackRegion,
   focusedNo,
   adding,
   error,
   onStatusChange,
   onSeriesChange,
+  onCategoryChange,
   onFallbackRegionChange,
   onToggle,
+  onToggleAll,
   onRankChange,
+  onRowCategoryChange,
   onRemove,
   onRelocate,
   relocatingNo,
@@ -91,6 +113,10 @@ export default function AiSpotDiscoveryPanel({
   seriesOptions: string[];
   status: SpotStatus;
   series: string;
+  /** 追加する全件に足すカテゴリ(空なら足さない)。行ごとのジャンルとは**併せて**付く */
+  category: string;
+  /** カテゴリ欄の候補(種別の設定+いま並んでいる候補のジャンル) */
+  categoryOptions: string[];
   /** 地域が解けなかった候補に使う既定 */
   fallbackRegion: string;
   focusedNo: number | null;
@@ -98,9 +124,14 @@ export default function AiSpotDiscoveryPanel({
   error: string | null;
   onStatusChange: (status: SpotStatus) => void;
   onSeriesChange: (series: string) => void;
+  onCategoryChange: (category: string) => void;
   onFallbackRegionChange: (region: string) => void;
   onToggle: (no: number) => void;
+  /** 追加できる行をまとめて選ぶ・まとめて外す(登録済みの行は対象外) */
+  onToggleAll: (checked: boolean) => void;
   onRankChange: (no: number, rank: Rank | "") => void;
+  /** その行だけカテゴリを直す(地図データのジャンルが実態と合わないことがあるため) */
+  onRowCategoryChange: (no: number, category: string) => void;
   onRemove: (no: number) => void;
   /** その候補の位置を住所から引き直す(1件だけなので待ちは1秒ほど) */
   onRelocate: (no: number) => void;
@@ -114,12 +145,19 @@ export default function AiSpotDiscoveryPanel({
   aiPending?: boolean;
   onAdd: () => void;
   onClose: () => void;
+  /** 地図の寄せ先を「パネルに隠れていない側の中心」にするため、外から実寸を測る */
+  ref?: React.Ref<HTMLDivElement>;
 }) {
   const listRef = useRef<HTMLUListElement | null>(null);
+  // カテゴリ欄の候補は一括・行ごとで共有する(同じ`datalist`を全部の欄が参照する)
+  const categoryListId = useId();
   const allowedStatuses = (role ? ALLOWED_STATUS_BY_ROLE[role] : ["private"]).filter(
     (s) => s !== "private"
   ) as SpotStatus[];
   const checkedRows = rows.filter((r) => r.checked && !r.candidate.existing);
+  // 登録済みの行はチェックできないので、「すべて」の対象から外す
+  const selectableRows = rows.filter((r) => !r.candidate.existing);
+  const allSelected = selectableRows.length > 0 && checkedRows.length === selectableRows.length;
   const needsFallbackRegion = rows.some((r) => !r.candidate.region);
   const seriesRequired = seriesOptions.length > 0;
 
@@ -133,12 +171,43 @@ export default function AiSpotDiscoveryPanel({
   // **狭い画面では下から敷く帯にする。** 右の帯(w-2/5)のままだと、スマホの幅では
   // 150px前後しか残らず、行の中身が1文字ずつ縦に折り返される。上に地図が残るので、
   // 行を押してそこへ寄せるという使い方は変わらない。
-  // **高さは65%取る** —— 見出しと下の操作で上下を挟むので、半分だと一覧が1行ぶんも残らない
+  // **高さは半分まで**にして、上半分の地図を必ず残す —— 候補を押して位置を確かめる
+  // のがこのパネルの使い方なので、地図が3割しか見えないと確かめる先が無い。
+  // そのぶん上下の操作は詰めてある(見出しにAIのやり取り、状態は追加ボタンと同じ行)
   return (
-    <div className="absolute bottom-0 left-0 right-0 top-[35%] z-20 flex flex-col overflow-hidden rounded-t-xl bg-white/95 shadow-xl backdrop-blur sm:left-auto sm:top-40 sm:w-2/5 sm:max-w-sm sm:rounded-tr-none">
+    <div
+      ref={ref}
+      className="absolute bottom-0 left-0 right-0 top-1/2 z-20 flex flex-col overflow-hidden rounded-t-xl bg-white/95 shadow-xl backdrop-blur sm:left-auto sm:top-40 sm:w-2/5 sm:max-w-sm sm:rounded-tr-none"
+    >
       <div className="border-b border-gray-200 p-2 sm:p-3">
         <p className="text-xs text-gray-500">この周辺を探す</p>
-        <h2 className="font-bold leading-snug">候補 {rows.length}件(チェック {checkedRows.length}件)</h2>
+        {/* **AIとのやり取りは見出しの右**。下の操作に置くと、追加までの手順の中に
+            「見るだけ」のボタンが挟まって縦を1行ぶん食う */}
+        <div className="flex items-start justify-between gap-2">
+          <h2 className="font-bold leading-snug">候補 {rows.length}件(チェック {checkedRows.length}件)</h2>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* **まとめて選ぶ・まとめて外す。** 最初のチェックは出どころとAIの精査で
+                決まる(下の`checked`の注記)ので、その判断ごと引き受けたい・捨てたいときに使う。
+                何件になるかは追加ボタンの文字に出るので、ここでは断りを挟まない */}
+            <button
+              type="button"
+              onClick={() => onToggleAll(!allSelected)}
+              disabled={selectableRows.length === 0}
+              className="whitespace-nowrap rounded-lg border border-gray-200 px-2 py-1 text-[11px] text-gray-600 disabled:opacity-50"
+            >
+              {allSelected ? "すべて外す" : "すべて選ぶ"}
+            </button>
+            {onShowExchange && (
+              <button
+                type="button"
+                onClick={onShowExchange}
+                className="whitespace-nowrap rounded-lg border border-gray-200 px-2 py-1 text-[11px] text-gray-600"
+              >
+                AIとのやり取り
+              </button>
+            )}
+          </div>
+        </div>
         {/* 狭い画面では出さない。**使い方の説明より一覧そのものの行数を優先する**
             (2行ぶんの説明で候補が1件隠れる) */}
         <p className="mt-0.5 hidden text-xs text-gray-500 sm:block">
@@ -199,7 +268,18 @@ export default function AiSpotDiscoveryPanel({
                   title={`${c.name}(タップで地図をここへ)`}
                 >
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                    <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-violet-600 px-1 text-xs font-bold text-white">
+                    {/* **番号の色は地図の印と同じ**(地図データ=青、AI=紫、登録済み=灰)。
+                        ここだけ一律に紫だった頃は、地図で青い印を押しても一覧の番号が
+                        紫で出るので、どの候補と対応しているのか色から読めなかった */}
+                    <span
+                      className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${
+                        disabled
+                          ? "bg-gray-500"
+                          : row.source === "ai"
+                            ? "bg-violet-600"
+                            : "bg-sky-600"
+                      }`}
+                    >
                       {row.no}
                     </span>
                     <span className={`text-sm leading-snug ${focused ? "font-medium text-blue-700" : ""}`}>
@@ -214,10 +294,8 @@ export default function AiSpotDiscoveryPanel({
                   <div className="flex flex-wrap gap-1 text-[11px]">
                     {/* 出どころ。同じ一覧に地図データとAIの候補が混ざるので必ず出す */}
                     <span
-                      className={`rounded px-1 py-0.5 ${
-                        row.source === "map"
-                          ? "bg-sky-100 text-sky-800"
-                          : "bg-violet-100 text-violet-800"
+                      className={`rounded px-1 py-0.5 font-medium text-white ${
+                        row.source === "map" ? "bg-sky-600" : "bg-violet-600"
                       }`}
                     >
                       {row.source === "map" ? "地図データ" : "AI"}
@@ -279,6 +357,20 @@ export default function AiSpotDiscoveryPanel({
                   文字の途中では切れない)。チェックボックスのぶんだけ字下げして、
                   上の行の名前と縦にそろえる */}
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-[11px]">
+                {/* **カテゴリは行ごとに直せる。** 初期値は候補のジャンルだが、
+                    地図データの分類は実態と食い違うことがある(麺類の店が「和食」など)。
+                    追加してから1件ずつ編集し直すより、ここで直すほうが早い */}
+                <label className="flex items-center gap-1 text-gray-600">
+                  カテゴリ
+                  <input
+                    value={discoveryRowCategory(row)}
+                    disabled={disabled}
+                    list={categoryListId}
+                    onChange={(e) => onRowCategoryChange(row.no, e.target.value)}
+                    placeholder="なし"
+                    className="w-24 rounded border border-gray-300 px-1 py-0.5 text-xs"
+                  />
+                </label>
                 {rankEnabled && (
                   <label className="flex items-center gap-1 text-gray-600">
                     ランク
@@ -347,87 +439,97 @@ export default function AiSpotDiscoveryPanel({
 
       {/* 下の操作は**狭い画面では詰める**(一覧に回せる高さがそのぶん増える) */}
       <div className="space-y-1.5 border-t border-gray-200 p-2 sm:space-y-2 sm:p-3">
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-0.5 block text-[11px] font-medium text-gray-600">状態</label>
-            <select
-              value={status}
-              onChange={(e) => onStatusChange(e.target.value as SpotStatus)}
-              className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
-            >
-              {allowedStatuses.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </div>
-          {seriesRequired && (
-            <div>
-              <label className="mb-0.5 block text-[11px] font-medium text-gray-600">シリーズ *</label>
-              <select
-                value={series}
-                onChange={(e) => onSeriesChange(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
-              >
-                {seriesOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          {/* 地域が取れなかった候補があるときだけ、全行共通の既定を選ばせる */}
-          {needsFallbackRegion && (
-            <div className="col-span-2">
-              <label className="mb-0.5 block text-[11px] font-medium text-gray-600">
-                {regionFieldLabel(regionScope)}(地域が分からなかった候補に使う) *
-              </label>
-              {regionScope === "jp" ? (
+        {/* カテゴリ欄の候補。一括の欄と行ごとの欄で同じものを参照する */}
+        <datalist id={categoryListId}>
+          {categoryOptions.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+        {(seriesRequired || needsFallbackRegion) && (
+          <div className="grid grid-cols-2 gap-2">
+            {seriesRequired && (
+              <div>
+                <label className="mb-0.5 block text-[11px] font-medium text-gray-600">シリーズ *</label>
                 <select
-                  value={fallbackRegion}
-                  onChange={(e) => onFallbackRegionChange(e.target.value)}
+                  value={series}
+                  onChange={(e) => onSeriesChange(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
                 >
-                  <option value="">選択</option>
-                  {PREFECTURES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
+                  {seriesOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
                     </option>
                   ))}
                 </select>
-              ) : (
-                <input
-                  value={fallbackRegion}
-                  onChange={(e) => onFallbackRegionChange(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
-                />
-              )}
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+            {/* 地域が取れなかった候補があるときだけ、全行共通の既定を選ばせる */}
+            {needsFallbackRegion && (
+              <div className="col-span-2">
+                <label className="mb-0.5 block text-[11px] font-medium text-gray-600">
+                  {regionFieldLabel(regionScope)}(地域が分からなかった候補に使う) *
+                </label>
+                {regionScope === "jp" ? (
+                  <select
+                    value={fallbackRegion}
+                    onChange={(e) => onFallbackRegionChange(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
+                  >
+                    <option value="">選択</option>
+                    {PREFECTURES.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={fallbackRegion}
+                    onChange={(e) => onFallbackRegionChange(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {/* **追加する全件に足すカテゴリ。** 行ごとのジャンル由来のカテゴリは残したまま
+            併せて付くので、「この一帯はラーメン」のようなまとめの札を1回で足せる */}
+        <label className="flex items-center gap-2 text-[11px] font-medium text-gray-600">
+          <span className="shrink-0">カテゴリを全件に追加</span>
+          <input
+            value={category}
+            list={categoryListId}
+            onChange={(e) => onCategoryChange(e.target.value)}
+            placeholder="任意"
+            className="min-w-0 flex-1 rounded-lg border border-gray-300 px-2 py-1 text-sm font-normal"
+          />
+        </label>
         {error && <p className="text-xs text-red-600">{error}</p>}
-        <button
-          type="button"
-          onClick={onAdd}
-          disabled={adding || checkedRows.length === 0}
-          className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {adding ? "追加中…" : `${checkedRows.length}件を${STATUS_LABELS[status]}で追加`}
-        </button>
-        {/* 直近がAIだったときだけ。何を頼んで何が返ったかを見ないと、
-            遅い・少ない・的外れの原因を切り分けられない */}
-        {onShowExchange && (
+        {/* **状態は見出しを付けず追加ボタンと同じ行に置く。** 追加するときにしか
+            使わない選択なので、押すボタンの隣にあれば何の状態かは読める */}
+        <div className="flex gap-2">
+          <select
+            value={status}
+            onChange={(e) => onStatusChange(e.target.value as SpotStatus)}
+            aria-label="追加する状態"
+            className="w-24 shrink-0 rounded-lg border border-gray-300 px-2 py-2 text-sm"
+          >
+            {allowedStatuses.map((s) => (
+              <option key={s} value={s}>
+                {STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
-            onClick={onShowExchange}
-            disabled={adding}
-            className="w-full rounded-lg border border-gray-200 py-1.5 text-xs text-gray-600 disabled:opacity-50"
+            onClick={onAdd}
+            disabled={adding || checkedRows.length === 0}
+            className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            AIとのやり取りを見る
+            {adding ? "追加中…" : `${checkedRows.length}件を追加`}
           </button>
-        )}
+        </div>
         <div className="flex gap-2">
           <button
             type="button"
