@@ -26,8 +26,11 @@ export const DEFAULT_DISCOVERY_RADIUS = 300;
 export const MAX_DISCOVERY_QUERY_LENGTH = 100;
 
 /**
- * 1回の探索でAIに返させる件数の選択肢と上限。相手は1回ずつしか動かないので
- * まとめて返させるが、**増やすほど答えが長くなって待ちが延びる**。
+ * 1回の探索で**AIに任せる件数**の選択肢と上限。2つの意味を兼ねる:
+ * **精査させる地図データの件数**(中心から近い順にこの数だけ渡す)と、
+ * **足させる候補の上限**。どちらも増やすほど答えが長くなって待ちが延びるので、
+ * 1つのつまみにまとめてある。
+ *
  * 上限30は外の制約ではなく、「1回の探索で待てる長さ」としてこちらで決めた値
  * (足りなければパネルの「もう一度探す」で同じ一覧に足せる)
  */
@@ -100,10 +103,48 @@ export interface DiscoveryChoice {
  * - `ai`: web検索を持つAIに調べさせる。30秒〜2分かかるが、**地図データに無い新しい店**や
  *   一言の説明・参照URLが付く
  *
- * 「まず地図データで雑に集め、足りなければAIで探し足す」が想定の流れで、
- * 同じ一覧に混ぜて並ぶ(行に出どころの印が付く)
+ * 「まず地図データで雑に集め、**その一覧をAIに精査させて足りないぶんを足す**」が
+ * 想定の流れで、同じ一覧に混ぜて並ぶ(行に出どころの印が付く)
  */
 export type DiscoverySource = "map" | "ai";
+
+/**
+ * AIに精査させる地図データの候補(POSTの`known`で渡す1件)。
+ *
+ * **渡すのは名前・ジャンル・距離だけ。** 座標や住所まで渡してもAIには使い道が無く、
+ * プロンプトが伸びたぶんだけ待ちが延びる(位置は地図データのほうが正確なので、
+ * AIに直させるものでもない)。
+ */
+export interface DiscoveryReviewTarget {
+  name: string;
+  genre: string | null;
+  distance_m: number;
+}
+
+/**
+ * 地図データの候補1件に対するAIの判定(`DiscoveryResult.reviews`)。
+ *
+ * **地図データは「在るもの」を全部並べるだけで、探しているものに合うかも、
+ * 記録する価値があるかも見ていない**(半径300mで1,800件返ることもある)。
+ * そこをAIに見せて選ばせ、あわせてジャンルとランクを付けさせる。
+ * 選ばれなかった候補は画面がチェックを外して薄く出す(消しはしない ——
+ * AIが見落とすこともあるので、選び直せる形で残す)。
+ */
+export interface DiscoveryReview {
+  /**
+   * 精査した候補の名前。**渡した名前をそのまま返す**(AIが書き写した名前ではない)
+   * ので、画面は正規化した名前で行を突き合わせられる
+   */
+  name: string;
+  /** 記録する価値があるとAIが見たか(falseなら画面はチェックを外す) */
+  picked: boolean;
+  /** AIが付けたランク(A〜E)。ランクを使う種別に聞いたときだけ入る */
+  rank: Rank | null;
+  /** AIが付け直したジャンル(地図データの分類が粗いことがある)。無ければnull */
+  genre: string | null;
+  /** AIによる一言。地図データは説明文を持たないので、ここで初めて付く */
+  summary: string | null;
+}
 
 /**
  * 地図データの候補が**どの辞典から来たか**。
@@ -174,6 +215,12 @@ export interface DiscoveryCandidate {
   dataset: DiscoveryDataset | null;
   /** 既存スポット(公開・承認待ち)と名前一致か近接していればその1件 */
   existing: { id: string; name: string } | null;
+  /**
+   * 地図データの候補にAIの精査が当たったか(`source: "map"`のときだけ立つ)。
+   * **説明文の出どころに書く** —— ジャンル・要約がAIの言葉に置き換わっているので、
+   * 地図データをそのまま写しただけの行と見分けられないと後から辿れない
+   */
+  ai_reviewed?: boolean;
 }
 
 /**
@@ -192,6 +239,12 @@ export interface DiscoveryExchange {
 
 export interface DiscoveryResult {
   candidates: DiscoveryCandidate[];
+  /**
+   * 渡した地図データの候補に対するAIの判定(`known`を渡したときだけ)。
+   * **渡した順・渡した件数ぶん揃う**(選ばれなかったものも`picked: false`で入る) ——
+   * 画面は「AIが見た上で選ばなかった」と「AIに渡していない」を区別する必要がある
+   */
+  reviews?: DiscoveryReview[];
   /** この結果の出どころ(行の印と、画面の言い回しに使う) */
   source: DiscoverySource;
   /** 実際に答えた相手とモデル(`ai`のときだけ。説明文には書かないが画面で確かめられる) */
@@ -220,7 +273,10 @@ export function formatJstDate(iso: string): string {
  * 口コミ本文や点数はプロンプトで転記を禁じているので、ここには入らない
  */
 export function buildDiscoveredDescription(
-  candidate: Pick<DiscoveryCandidate, "summary" | "url" | "location_verified" | "dataset">,
+  candidate: Pick<
+    DiscoveryCandidate,
+    "summary" | "url" | "location_verified" | "dataset" | "ai_reviewed"
+  >,
   searchedAt: string,
   source: DiscoverySource
 ): string {
@@ -235,6 +291,9 @@ export function buildDiscoveredDescription(
           `${DISCOVERY_DATASET_LABELS[candidate.dataset ?? "osm"]}から取得(${formatJstDate(searchedAt)})`,
         ]
       : [`AIがwebから収集(${formatJstDate(searchedAt)})`];
+  // 地図データの行でも、ジャンル・要約はAIが付けていることがある(精査の段)。
+  // **名前と座標は辞典のもの、言葉はAIのもの**という混ざり方をするので、そこを書き分ける
+  if (source === "map" && candidate.ai_reviewed) provenance.push("ジャンルと要約はAIが精査");
   if (candidate.url) provenance.push(`参照: ${candidate.url}`);
   if (source === "ai" && !candidate.location_verified) provenance.push("位置は未確認");
   lines.push(provenance.join("、"));

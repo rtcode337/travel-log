@@ -26,6 +26,8 @@ import {
   type DiscoveryDepth,
   type DiscoveryOptions,
   type DiscoveryResult,
+  type DiscoveryReview,
+  type DiscoveryReviewTarget,
 } from "@/lib/spotDiscovery";
 import {
   DEFAULT_DISCOVERY_EFFORT,
@@ -37,12 +39,23 @@ import {
 import { bboxAround } from "@/lib/osmNearby";
 
 /**
- * 地図の周辺を検索語でAIに調べさせ、スポットの候補を返す(spot_admin/admin専用)。
+ * 「この周辺を探す」の2段目。**1段目(地図データ)の候補をAIに精査させ、
+ * 足りないぶんを足させる**(spot_admin/admin専用)。
  *
- * **なぜAIに調べさせるか。** 飲食店のような「新しい店がよく入れ替わる」種別は、
+ * **AIと地図データに別々のものを探させない。** かつては同じ場所を両方が独立に探し、
+ * 同じ店が二重に並ぶうえ、AIの側は「地図に載っている当たり前の店」を挙げるのに
+ * 時間を使っていた。**それぞれ得意なことが違う**ので、役割で分ける:
+ * - 地図データ: 名前と座標を正確に、漏らさず集める(半径300mで1,800件)。
+ *   反面、探しているものに合うかも、記録する価値があるかも見ていない
+ * - AI: その一覧を**精査**する(選ぶ・ジャンルを付け直す・ランクを付ける)。
+ *   そのうえで、**地図データに無いもの**(開いたばかりの店など)を足す
+ *
+ * 画面は1段目の候補を近い順に`known`で渡し、`reviews`(渡した件数ぶんの判定)と
+ * `candidates`(足したぶん)を受け取る。
+ *
+ * **なぜ足すのにAIが要るか。** 飲食店のような「新しい店がよく入れ替わる」種別は、
  * 商用のAPI(グルメサイト・地図サービス)が自前DBへの保存と再配布を禁じているため
  * 出どころにできず、地図データは開いたばかりの店が載らない。
- * そこでweb検索を持つAIに周辺を調べさせ、機械的に決めにくいランク付けまで任せる。
  *
  * **AIへの中継は知識サーバー(chiezo)の`/v1/ai/complete`。** 鍵はあちらが握っていて
  * このアプリは持たない。接続先は`CHIEZO_BASE_URL`で、未設定ならこの機能は出ない
@@ -367,21 +380,27 @@ async function verifyLocation(
  * 役割の指示。**`quick`では「webの検索は多くても2回」と言い渡す**のが要点 ——
  * エージェントとして動く相手は、放っておくと候補ごとに裏取りの検索を回して
  * 時間を使う。上限を切るだけで実測41秒→17秒になった(同じ相手・同じ件数)。
+ *
+ * **頼むのは2つ**: 渡した地図データの一覧を精査すること(選ぶ・ジャンル・ランク)と、
+ * その一覧に無いものを足すこと。**別々に探させない** —— 地図データを見せずに
+ * 探させていた頃は、同じ店を両方が挙げて一覧に二重に並び、しかもAIの側は
+ * 「地図に載っている当たり前の店」を埋め草に使っていた。
  */
 function buildSystemPrompt(depth: DiscoveryDepth): string {
   if (depth === "quick") {
     return [
-      "周辺の店を手早く挙げる。**webの検索は多くても2回**。1回の検索で分かる範囲で答え、裏取りに時間をかけない。",
-      "**実在すると確信できる店だけ**を挙げる。名前・場所があやふやなものは数合わせに入れず、件数が足りなくてもそのまま返す。",
+      "地図データから拾った周辺の一覧を精査し、足りないものを足す。**webの検索は多くても2回**。1回の検索で分かる範囲で答え、裏取りに時間をかけない。",
+      "一覧から選ぶのは、探しているものに合い、記録する価値がある場所だけ。合わないもの・場所として成り立たない地物(ATM・自販機・駐輪場など)は選ばない。",
+      "足すのは**実在すると確信できる場所だけ**。名前・場所があやふやなものは数合わせに入れず、件数が足りなくてもそのまま返す。",
       "**指定された半径の外は入れない。**",
       "口コミの本文・点数・順位は書き写さない。",
-      "出力はJSONの配列だけ。前置き・説明・コードブロックの記号は付けない。",
+      "出力はJSONだけ。前置き・説明・コードブロックの記号は付けない。",
     ].join("\n");
   }
   return [
-    "実在の場所をweb検索で確かめて探す調査員。閉店・移転が疑われる場所は含めない。",
+    "実在の場所をweb検索で確かめて探す調査員。渡された一覧を精査し、足りないものを足す。閉店・移転が疑われる場所は含めない。",
     "口コミの本文・点数・順位は書き写さない。要約は自分の言葉で短く。",
-    "出力はJSONの配列だけ。前置き・説明・コードブロックの記号は付けない。",
+    "出力はJSONだけ。前置き・説明・コードブロックの記号は付けない。",
   ].join("\n");
 }
 
@@ -395,6 +414,13 @@ function buildSystemPrompt(depth: DiscoveryDepth): string {
  *
  * `quick`では**URLも必須にしない** —— 1件ずつ根拠のページを当たらせると、
  * そのぶん検索が増えて遅くなる(参照URLの無い候補は画面が薄く出す)。
+ *
+ * **精査させる側(`picked`)は番号で答えさせる。** 店名を書き写させると、
+ * 一字一句は合わないので突き合わせに`looksLikeSameSpot`相当の緩さが要るうえ、
+ * 名前のぶんだけ答えが長くなる。番号なら1〜2文字で済む。
+ *
+ * **地図データを渡せなかったとき**(日本以外の種別・地図データの取得に失敗)は
+ * 精査するものが無いので、足すぶんだけを頼む形に落ちる。
  */
 function buildUserPrompt(
   center: Point,
@@ -402,10 +428,12 @@ function buildUserPrompt(
   searchQuery: string,
   limit: number,
   withRank: boolean,
-  depth: DiscoveryDepth
+  depth: DiscoveryDepth,
+  targets: DiscoveryReviewTarget[]
 ): string {
   const quick = depth === "quick";
-  const shape = [
+  const label = searchQuery || "スポット";
+  const addShape = [
     '"name":"店名"',
     quick ? '"address":"住所か目印"' : '"address":"住所"',
     '"lat":35.6,"lng":139.7',
@@ -414,15 +442,34 @@ function buildUserPrompt(
     quick ? '"url":"分かればURL(なければnull)"' : '"url":"根拠にしたページのURL"',
     ...(withRank ? ['"rank":"A〜Eの1文字(知名度)"'] : []),
   ].join(",");
-  const head = quick
-    ? `緯度${center.lat.toFixed(5)} 経度${center.lng.toFixed(5)} から半径${radiusM}mの「${searchQuery}」を${limit}件。`
-    : `緯度${center.lat.toFixed(5)} 経度${center.lng.toFixed(5)} から半径${radiusM}mの「${searchQuery}」を最大${limit}件。`;
+  const head = `緯度${center.lat.toFixed(5)} 経度${center.lng.toFixed(5)} から半径${radiusM}mの「${label}」。`;
+  if (targets.length === 0) {
+    return [
+      `${head}${quick ? `${limit}件。` : `最大${limit}件。`}`,
+      `JSON: {"added":[{${addShape}}]}`,
+      quick
+        ? "分からない値はnull。近い順。"
+        : "分からない値はnull。中心から近い順。半径の外は含めない。該当が無ければ空の配列。",
+    ].join("\n");
+  }
+  const pickShape = [
+    '"no":番号',
+    '"genre":"ジャンル"',
+    '"summary":"一言(知らなければnull。調べ直さない)"',
+    ...(withRank ? ['"rank":"A〜Eの1文字(知名度)"'] : []),
+  ].join(",");
   return [
     head,
-    `JSON配列で: [{${shape}}]`,
-    quick
-      ? "分からない値はnull。近い順。"
-      : "分からない値はnull。中心から近い順。半径の外は含めない。該当が無ければ []。",
+    "",
+    "地図データにある候補(番号 名前 / ジャンル / 中心からの距離):",
+    ...targets.map(
+      (t, i) => `${i + 1} ${t.name}${t.genre ? ` / ${t.genre}` : ""} / ${t.distance_m}m`
+    ),
+    "",
+    `1. この一覧から「${label}」に合い、記録する価値のあるものを番号で選ぶ(picked)。ジャンルが粗ければ付け直す。`,
+    `2. 一覧に無い場所で、半径内にあると確信できるものを最大${limit}件足す(added)。**一覧にあるものは足さない。**`,
+    `JSON: {"picked":[{${pickShape}}],"added":[{${addShape}}]}`,
+    "該当が無ければ空の配列。分からない値はnull。",
   ].join("\n");
 }
 
@@ -496,18 +543,47 @@ async function askAi(
   };
 }
 
-/** AIの答えからJSON配列を取り出す。コードブロックや前置きが混じっても拾えるようにする */
-function extractCandidateArray(content: string): unknown[] | null {
-  const stripped = content.replace(/```(?:json)?/gi, "").trim();
-  const start = stripped.indexOf("[");
-  const end = stripped.lastIndexOf("]");
+/** 前置き・コードブロックの記号が混じった答えから、いちばん外側の1つを切り出して読む */
+function sliceJson(content: string, open: string, close: string): unknown {
+  const start = content.indexOf(open);
+  const end = content.lastIndexOf(close);
   if (start < 0 || end <= start) return null;
   try {
-    const parsed: unknown = JSON.parse(stripped.slice(start, end + 1));
-    return Array.isArray(parsed) ? parsed : null;
+    return JSON.parse(content.slice(start, end + 1));
   } catch {
     return null;
   }
+}
+
+/**
+ * AIの答えから、精査(`picked`)と足したぶん(`added`)を取り出す。
+ *
+ * **配列だけを返してくることがある**ので、そのときは中身で振り分ける ——
+ * `no`を持つ要素は精査の答え、名前と座標を持つ要素は足したぶん。
+ * 形を守らせるより、返ってきたものを読めるほうが実用的
+ * (**この機能は答えが1往復しか無く、直せる相手がいない**)。
+ */
+function extractAnswer(content: string): { picked: unknown[]; added: unknown[] } | null {
+  const stripped = content.replace(/```(?:json)?/gi, "").trim();
+  const object = sliceJson(stripped, "{", "}");
+  if (object && typeof object === "object" && !Array.isArray(object)) {
+    const o = object as Record<string, unknown>;
+    return {
+      picked: Array.isArray(o.picked) ? o.picked : [],
+      added: Array.isArray(o.added) ? o.added : [],
+    };
+  }
+  const array = sliceJson(stripped, "[", "]");
+  if (Array.isArray(array)) {
+    const objects = array.filter(
+      (el): el is Record<string, unknown> => typeof el === "object" && el !== null
+    );
+    return {
+      picked: objects.filter((el) => "no" in el),
+      added: objects.filter((el) => !("no" in el)),
+    };
+  }
+  return null;
 }
 
 interface RawCandidate {
@@ -566,6 +642,43 @@ function toRawCandidate(value: unknown): RawCandidate | null {
   };
 }
 
+/** AIが精査した1件(番号で指された地図データの候補) */
+interface RawPick {
+  /** 渡した一覧での位置(0始まり。プロンプトでは1始まりで見せている) */
+  index: number;
+  rank: Rank | null;
+  genre: string | null;
+  summary: string | null;
+}
+
+/** 精査の答え1件を検証する。範囲外の番号は捨てる(数を合わせに来ることがある) */
+function toRawPick(value: unknown, count: number): RawPick | null {
+  if (typeof value !== "object" || value === null) return null;
+  const o = value as Record<string, unknown>;
+  const no = Number(o.no);
+  if (!Number.isInteger(no) || no < 1 || no > count) return null;
+  return {
+    index: no - 1,
+    rank: parseRank(o.rank),
+    genre: str(o.genre, 50),
+    summary: str(o.summary, 500),
+  };
+}
+
+/** 画面から渡された「精査してほしい地図データの候補」1件を検証する */
+function toReviewTarget(value: unknown): DiscoveryReviewTarget | null {
+  if (typeof value !== "object" || value === null) return null;
+  const o = value as Record<string, unknown>;
+  const name = str(o.name, 200);
+  if (!name) return null;
+  const distance = Number(o.distance_m);
+  return {
+    name,
+    genre: str(o.genre, 50),
+    distance_m: Number.isFinite(distance) ? Math.max(0, Math.round(distance)) : 0,
+  };
+}
+
 /** 地域の値がその種別で使える形か('jp'は既知の都道府県名だけを通す) */
 function acceptableRegion(region: string | null, scope: string): string | null {
   if (!region) return null;
@@ -613,11 +726,15 @@ export async function POST(request: Request) {
     model?: unknown;
     effort?: unknown;
     depth?: unknown;
+    known?: unknown;
   } | null;
   const lat = Number(body?.lat);
   const lng = Number(body?.lng);
   const radius = Number(body?.radius);
-  const searchQuery = str(body?.query, MAX_DISCOVERY_QUERY_LENGTH);
+  // **検索語は無くてよい**(1段目と同じ)。精査だけを頼む使い方 ——
+  // 「この辺に何があるか地図データで見て、記録する価値のあるものをAIに選ばせる」——
+  // では語を入れようが無いので、空なら「スポット」として頼む
+  const searchQuery = str(body?.query, MAX_DISCOVERY_QUERY_LENGTH) ?? "";
   const limitRaw = Number(body?.limit);
   const limit = Number.isInteger(limitRaw)
     ? Math.min(Math.max(limitRaw, 1), MAX_DISCOVERY_CANDIDATES)
@@ -635,9 +752,6 @@ export async function POST(request: Request) {
   if (!(DISCOVERY_RADIUS_OPTIONS as readonly number[]).includes(radius)) {
     return NextResponse.json({ error: "invalid radius" }, { status: 400 });
   }
-  if (!searchQuery) {
-    return NextResponse.json({ error: "query is required" }, { status: 400 });
-  }
   const center: Point = { lat, lng };
   // 念の入れ方。おかしな値は既定(さっくり)に寄せる
   const depth: DiscoveryDepth = (DISCOVERY_DEPTHS as readonly string[]).includes(
@@ -647,6 +761,15 @@ export async function POST(request: Request) {
     : DEFAULT_DISCOVERY_DEPTH;
   // ランクを使わない種別ではランクを聞かない(捨てる項目のぶんだけ待たされるため)
   const withRank = getSpotTypeSetting(spotType, "rank_enabled");
+  // **精査させる地図データの候補**(1段目の結果を画面が近い順に切って渡す)。
+  // ここも`limit`で頭打ちにする —— 一覧が長いほどプロンプトも答えも伸び、
+  // そのまま待ち時間になる。渡されなければ精査するものが無いだけで、探索は続く
+  const reviewTargets: DiscoveryReviewTarget[] = (
+    Array.isArray(body?.known) ? body.known : []
+  )
+    .map(toReviewTarget)
+    .filter((t): t is DiscoveryReviewTarget => t !== null)
+    .slice(0, limit);
 
   // 画面で選ばれた相手・モデル・深さを確かめる。**選択肢の取得に失敗しても止めない**
   // (確かめられないことを理由に探索そのものを断らない)
@@ -679,7 +802,15 @@ export async function POST(request: Request) {
 
   // 画面の「やり取りを見る」で出すので、投げた本文はここで組んで取っておく
   const systemPrompt = buildSystemPrompt(depth);
-  const userPrompt = buildUserPrompt(center, radius, searchQuery, limit, withRank, depth);
+  const userPrompt = buildUserPrompt(
+    center,
+    radius,
+    searchQuery,
+    limit,
+    withRank,
+    depth,
+    reviewTargets
+  );
 
   let answer: Awaited<ReturnType<typeof askAi>>;
   try {
@@ -701,8 +832,8 @@ export async function POST(request: Request) {
     elapsed_ms: answer.elapsedMs,
   };
 
-  const array = extractCandidateArray(answer.content);
-  if (!array) {
+  const parsed = extractAnswer(answer.content);
+  if (!parsed) {
     // **読み取れなかったときこそ中身が要る**(何が返ったか見ないと直しようがない)
     return NextResponse.json(
       {
@@ -713,9 +844,35 @@ export async function POST(request: Request) {
       { status: 502 }
     );
   }
-  const raws = array
+
+  // 精査の答え。**渡した件数ぶんの判定を組む** —— 選ばれなかったものも
+  // `picked: false`で返さないと、画面は「AIが選ばなかった」と「AIに渡していない」を
+  // 区別できない(前者はチェックを外し、後者はそのまま残す)
+  const picksByIndex = new Map<number, RawPick>();
+  for (const value of parsed.picked) {
+    const pick = toRawPick(value, reviewTargets.length);
+    // 同じ番号を2度返してきたら先に来たほうを採る
+    if (pick && !picksByIndex.has(pick.index)) picksByIndex.set(pick.index, pick);
+  }
+  const reviews: DiscoveryReview[] = reviewTargets.map((target, i) => {
+    const pick = picksByIndex.get(i);
+    return {
+      name: target.name,
+      picked: !!pick,
+      rank: withRank ? pick?.rank ?? null : null,
+      genre: pick?.genre ?? null,
+      summary: pick?.summary ?? null,
+    };
+  });
+
+  // 足したぶん。**一覧に渡した名前と同じものは捨てる** —— 「一覧にあるものは足さない」と
+  // 頼んではいるが、守られないと同じ店が二重に並ぶ。ここで落としておけば、
+  // 位置を確かめるchiezoへの往復もそのぶん減る
+  const reviewedNames = new Set(reviewTargets.map((t) => normalizeSpotName(t.name)));
+  const raws = parsed.added
     .map(toRawCandidate)
     .filter((c): c is RawCandidate => c !== null)
+    .filter((c) => !reviewedNames.has(normalizeSpotName(c.name)))
     .slice(0, limit);
 
   const [centerRegion, { rows: existingSpots }] = await Promise.all([
@@ -772,6 +929,9 @@ export async function POST(request: Request) {
 
   const result: DiscoveryResult = {
     candidates,
+    // 精査を頼まなかったとき(地図データを渡せなかったとき)は付けない ——
+    // 空配列で返すと、画面が「全件が選ばれなかった」と読んでしまう
+    ...(reviews.length > 0 ? { reviews } : {}),
     source: "ai",
     backend: answer.backend,
     model: answer.model,

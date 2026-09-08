@@ -89,6 +89,8 @@ import {
   type DiscoveryDepth,
   type DiscoveryExchange,
   type DiscoveryResult,
+  type DiscoveryReview,
+  type DiscoveryReviewTarget,
   type DiscoverySource,
 } from "@/lib/spotDiscovery";
 import AiExchangeDialog from "@/components/AiExchangeDialog";
@@ -2672,8 +2674,15 @@ export default function MapView({
             // **AIの候補は「地図データで実在を確かめられたもの」だけ**。
             // かつては参照URLの有無で決めていたが、URLはAIが書いた文字列でしかなく
             // 確かめる相手がいない。地図に在るかどうかのほうが強い根拠で、しかも
-            // `quick`のAIはURLをまず返さないので、判定として働いていなかった
-            checked: !c.existing && (result.source === "map" || c.location_verified),
+            // `quick`のAIはURLをまず返さないので、判定として働いていなかった。
+            //
+            // **AIに精査させるときは、地図データを選んでおかない** ——
+            // 選ぶのはAIの仕事になる(`applyDiscoveryReviews`)。半径の中の全件を
+            // 選んだままにすると、精査した数件と精査していない千件が混ざったまま
+            // 「1,792件を追加」という選択になってしまう
+            checked:
+              !c.existing &&
+              (result.source === "map" ? !params.aiAssist : c.location_verified),
             rank: c.rank ?? "",
             searchedAt: result.searched_at,
             source: result.source,
@@ -2703,6 +2712,42 @@ export default function MapView({
     },
     []
   );
+
+  /**
+   * AIの精査を一覧に当てる。**渡した候補ぶんの判定が揃って返る**ので、
+   * 選ばれなかった行はチェックを外す —— 地図データは「在るもの」を全部並べるだけで、
+   * 探しているものに合うかは見ていない。**行は消さない**(AIも見落とすので、
+   * 印を付けて薄く出すに留め、選び直せるようにする)。
+   *
+   * 突き合わせは**正規化した名前**で行う。渡したのは今回の地図データのぶんだけだが、
+   * 一覧には前回までの行も混ざっているため、番号では当てられない。
+   */
+  const applyDiscoveryReviews = useCallback((reviews: DiscoveryReview[]) => {
+    const byName = new Map(reviews.map((r) => [normalizeSpotName(r.name), r] as const));
+    setDiscoveryRows((prev) =>
+      prev.map((row) => {
+        if (row.source !== "map") return row;
+        const review = byName.get(normalizeSpotName(row.candidate.name));
+        if (!review) return row;
+        return {
+          ...row,
+          checked: review.picked && !row.candidate.existing,
+          reviewed: review.picked ? "picked" : "dropped",
+          // ランクは行ごとに直せるので、AIの値は初期値として入れるだけ
+          rank: review.rank ?? row.rank,
+          candidate: {
+            ...row.candidate,
+            // **AIの値で上書きするのは言葉だけ**(ジャンル・要約・ランク)。
+            // 名前と座標は辞典のほうが正確なので触らない
+            genre: review.genre ?? row.candidate.genre,
+            summary: review.summary ?? row.candidate.summary,
+            rank: review.rank ?? row.candidate.rank,
+            ai_reviewed: true,
+          },
+        };
+      })
+    );
+  }, []);
 
   // パネルの行を押したときに、その候補へ地図を寄せる(訪問予定リストの作成パネルと同じ流儀)
   const focusDiscoveryRow = useCallback(
@@ -2782,6 +2827,7 @@ export default function MapView({
       limit: number;
       depth: DiscoveryDepth;
       choice: DiscoveryChoice;
+      known: DiscoveryReviewTarget[];
     }) => {
       const center = discoverySearchCenterRef.current;
       if (!center) return;
@@ -2794,6 +2840,7 @@ export default function MapView({
         query: req.query,
         limit: req.limit,
         depth: req.depth,
+        known: req.known,
         ...req.choice,
       });
       setDiscoveryAiPending(false);
@@ -2801,6 +2848,10 @@ export default function MapView({
         setDiscoveryError(error?.message ?? "AIへの問い合わせに失敗しました。");
         return;
       }
+      // **精査の結果は既にある行に当てる**(足したぶんより先に)。
+      // 足すぶんは同じ一覧に並ぶので、順序を逆にすると足した行まで
+      // 「AIが見なかった」ように見える
+      if (data.reviews) applyDiscoveryReviews(data.reviews);
       appendDiscoveryResult(data, {
         query: req.query,
         radius: req.radius,
@@ -2808,7 +2859,7 @@ export default function MapView({
         source: "ai",
       });
     },
-    [appendDiscoveryResult, spotTypeKey]
+    [appendDiscoveryResult, applyDiscoveryReviews, spotTypeKey]
   );
 
   const closeDiscovery = useCallback(() => {
