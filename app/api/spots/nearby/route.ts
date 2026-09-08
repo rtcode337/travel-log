@@ -16,10 +16,17 @@ import {
   MAX_DISCOVERY_QUERY_LENGTH,
   distanceMeters,
   normalizeSpotName,
+  searchSpellings,
   type DiscoveryCandidate,
   type DiscoveryResult,
 } from "@/lib/spotDiscovery";
-import { addressOf, bboxAround, featuresForWord, genreOf } from "@/lib/osmNearby";
+import {
+  addressOf,
+  bboxAround,
+  cuisinesForWord,
+  featuresForWord,
+  genreOf,
+} from "@/lib/osmNearby";
 import {
   DEFAULT_OVERTURE_CATEGORIES,
   categoriesForWord,
@@ -122,6 +129,12 @@ interface MapRaw {
   url: string | null;
   /** 都道府県名(取れたときだけ)。OSMは`area`、Overtureはコードから引く */
   region: string | null;
+  /**
+   * OSMの`cuisine`タグ(`japanese;ramen`のように複数入る)。
+   * **料理の種類での絞り込みに要る** —— chiezoの`feature=`は主タグしか見ないので、
+   * `cuisine=ramen`で絞ることはできず(実測で0件)、こちらで落とすしかない
+   */
+  cuisine: string | null;
 }
 
 /** chiezoへのGET。落ちていても機能ごと止めないので、失敗はnullで返す */
@@ -164,6 +177,7 @@ function osmRaw(title: string, extra: OsmExtra | undefined): MapRaw | null {
     address: addressOf(tags),
     url: str(tags.website) ?? str(tags["contact:website"]),
     region: area && (PREFECTURES as readonly string[]).includes(area) ? area : null,
+    cuisine: str(tags.cuisine),
   };
 }
 
@@ -194,6 +208,7 @@ function overtureRaw(
     address: address && locality && !address.includes(locality) ? `${locality}${address}` : address,
     url: str(extra?.website),
     region: prefectureFromAreaCode(str(extra?.area)),
+    cuisine: null,
   };
 }
 
@@ -316,6 +331,8 @@ export async function GET(request: Request) {
 
   // ① 種別での絞り込み(名前に出ない語のため)。検索語が無いときもこちらだけで並ぶ
   const features = searchQuery ? featuresForWord(searchQuery) : [];
+  // 料理の種類は主タグにならないので、**広い主タグで取ってから`cuisine`で落とす**
+  const cuisines = searchQuery ? cuisinesForWord(searchQuery) : [];
   const osmFilterParams = new URLSearchParams({ bbox, fields: "title,extra" });
   if (features.length > 0) osmFilterParams.set("feature", features.join(","));
   const osmFilterPromise =
@@ -323,35 +340,50 @@ export async function GET(request: Request) {
       ? filterAll<OsmExtra>("osm_japan", osmFilterParams)
       : Promise.resolve(null);
 
-  // Overtureは種別が`category=`。**検索語が無いときは既定のカテゴリで絞る** ——
-  // 絞らないと、bboxに数千件ある中からATMや駐車場が先に並ぶ(実測: 新宿の小さな
-  // bboxで7,744件)
+  // Overtureの絞り込みは**検索語の有無で引き方を変える**。
+  //
+  // 検索語があるときは`tag=`(カテゴリの並びのどこにあってもよい)。主カテゴリだけを
+  // 見る`feature=category=`だと、**副カテゴリにしか具体的な種別を持たない店が丸ごと
+  // 落ちる** —— 実測で、ある繁華街のbboxの`noodles_restaurant`は主カテゴリ55件に対し
+  // 並びのどこかに持つものは127件あり、麺類の店の半分以上が出てこなかった。
+  //
+  // 検索語が無いときは`feature=category=`のまま。既定のカテゴリは`restaurant`のような
+  // 大きいくくりを含み、`tag=`にすると副カテゴリで引っかかるものまで拾って件数が
+  // 1.5倍になる(実測: 同じbboxで4,124件 → 6,172件)。**何を探すか言われていない
+  // ときは主カテゴリで代表させるほうが、読み切れる件数に収まる**
   const categories = searchQuery ? categoriesForWord(searchQuery) : DEFAULT_OVERTURE_CATEGORIES;
   const overtureFilterParams = new URLSearchParams({ bbox, fields: "title,extra,tags" });
   if (categories.length > 0) {
-    overtureFilterParams.set("feature", categories.map((c) => `category=${c}`).join(","));
+    if (searchQuery) {
+      overtureFilterParams.set("tag", categories.join(","));
+    } else {
+      overtureFilterParams.set("feature", categories.map((c) => `category=${c}`).join(","));
+    }
   }
   const overtureFilterPromise =
     categories.length > 0
       ? filterAll<OvertureExtra>("overture_japan", overtureFilterParams)
       : Promise.resolve(null);
 
-  // ② 全文検索(名前に出る語のため)。座標は載らないので、当たった題名で`doc`を引き直す
+  // ② 全文検索(名前に出る語のため)。座標は載らないので、当たった題名で`doc`を引き直す。
+  // **書き方のゆれぶん投げる**(`ラーメン`と`らーめん`は別の当たりになる)。
+  // どれもローカルのSQLiteを引くだけなので並列でよい
+  const spellings = searchQuery ? searchSpellings(searchQuery) : [];
   const searchParamsFor = (q: string) =>
     new URLSearchParams({ q, bbox, limit: searchLimit });
-  const osmSearchPromise = searchQuery
-    ? chiezoGet<SearchResponse>(baseUrl, "/v1/osm_japan/search", searchParamsFor(searchQuery))
-    : Promise.resolve(null);
-  const overtureSearchPromise = searchQuery
-    ? chiezoGet<SearchResponse>(baseUrl, "/v1/overture_japan/search", searchParamsFor(searchQuery))
-    : Promise.resolve(null);
+  const searchAll = (source: "osm_japan" | "overture_japan") =>
+    Promise.all(
+      spellings.map((q) =>
+        chiezoGet<SearchResponse>(baseUrl, `/v1/${source}/search`, searchParamsFor(q))
+      )
+    );
 
   const [osmFiltered, overtureFiltered, osmFound, overtureFound, { rows: existingSpots }] =
     await Promise.all([
       osmFilterPromise,
       overtureFilterPromise,
-      osmSearchPromise,
-      overtureSearchPromise,
+      searchAll("osm_japan"),
+      searchAll("overture_japan"),
       existingPromise,
     ]);
 
@@ -359,18 +391,30 @@ export async function GET(request: Request) {
   const collect = async <E,>(
     source: "osm_japan" | "overture_japan",
     filtered: FilterResponse<E> | null,
-    found: SearchResponse | null,
-    build: (title: string, extra: E | undefined, tags: unknown) => MapRaw | null
+    found: (SearchResponse | null)[],
+    build: (title: string, extra: E | undefined, tags: unknown) => MapRaw | null,
+    /** 種別で絞り込んだぶんだけに掛ける追加の条件(全文検索の当たりは名前で選ばれている) */
+    keep: (raw: MapRaw) => boolean = () => true
   ): Promise<MapRaw[]> => {
     const byTitle = new Map<string, MapRaw>();
     for (const r of filtered?.results ?? []) {
       if (typeof r.title !== "string") continue;
       const raw = build(r.title, r.extra, r.tags);
-      if (raw) byTitle.set(r.title, raw);
+      if (raw && keep(raw)) byTitle.set(r.title, raw);
     }
-    const missing = (found?.results ?? [])
-      .map((r) => (typeof r.title === "string" ? r.title : null))
-      .filter((t): t is string => !!t && !byTitle.has(t));
+    // 書き方のゆれぶんの当たりをまとめる。**`doc`の往復は上限で切る** ——
+    // 1件につき1往復なので、言い換えの数だけ増やすわけにはいかない
+    const missing: string[] = [];
+    const seen = new Set<string>();
+    for (const res of found) {
+      for (const r of res?.results ?? []) {
+        if (typeof r.title !== "string") continue;
+        if (byTitle.has(r.title) || seen.has(r.title)) continue;
+        seen.add(r.title);
+        missing.push(r.title);
+      }
+    }
+    missing.length = Math.min(missing.length, SEARCH_DOC_LOOKUPS);
     // ローカルなので**並列**に投げる
     const docs = await Promise.all(
       missing.map((title) =>
@@ -388,8 +432,23 @@ export async function GET(request: Request) {
     return [...byTitle.values()];
   };
 
+  /**
+   * 料理の種類で探しているときに、種別の絞り込みで取った広い一覧を落とす。
+   * OSMの`cuisine`は`japanese;ramen`のように複数入るので、含まれていれば残す。
+   *
+   * **タグの無い店は落とす。** ここで広げた主タグは`amenity=restaurant`のような
+   * 「飲食店すべて」なので(実測: ある繁華街のbboxで701件)、残すと料理の種類を
+   * 指定した意味が消える。タグの無い店は全文検索の側で名前から拾う
+   */
+  const matchesCuisine = (raw: MapRaw) => {
+    if (cuisines.length === 0) return true;
+    if (!raw.cuisine) return false;
+    const values = raw.cuisine.split(";").map((v) => v.trim().toLowerCase());
+    return cuisines.some((c) => values.includes(c));
+  };
+
   const [osmRaws, overtureRaws] = await Promise.all([
-    collect("osm_japan", osmFiltered, osmFound, (t, e) => osmRaw(t, e)),
+    collect("osm_japan", osmFiltered, osmFound, (t, e) => osmRaw(t, e), matchesCuisine),
     collect("overture_japan", overtureFiltered, overtureFound, overtureRaw),
   ]);
 
