@@ -16,8 +16,16 @@
  * **両方を引いて混ぜる**のはこの表のため。店の数とURLはOverture、都道府県と
  * 構造化された住所はOSMが埋める。片方だけにすると、どちらかが必ず落ちる。
  *
- * 種別の絞り込みは`filter?feature=category=<カテゴリ>`(chiezo側でOSMと同じ書き方に
- * 揃えてある)。カテゴリ名はOverture独自なので、語 → カテゴリの表を持つ。
+ * 種別の絞り込みには**2つの引き方**があり、使い分ける(呼び出し側の判断)。
+ * カテゴリ名はOverture独自なので、語 → カテゴリの表を持つ。
+ *
+ * - `filter?tag=<カテゴリ>` —— 地物が持つカテゴリの**並びのどこか**に一致すればよい。
+ *   Overtureは`[主カテゴリ, ...副カテゴリ]`を持ち、**具体的な種別が副にしか無い店が多い**
+ *   (実測: ある繁華街のbboxで`noodles_restaurant`は主55件に対し並びのどこかなら127件)。
+ *   **検索語があるときはこちら**
+ * - `filter?feature=category=<カテゴリ>` —— **主カテゴリだけ**を見る。
+ *   検索語が無いときの既定のカテゴリはこちら —— `restaurant`のような大きいくくりを
+ *   含むので、`tag=`にすると件数が1.5倍に膨らむ(同じbboxで4,124件 → 6,172件)
  */
 
 import { PREFECTURES } from "./types";
@@ -188,10 +196,38 @@ const GENRE_BY_CATEGORY: Record<string, string> = {
 };
 
 /**
- * 地物のジャンル名。**先頭のカテゴリが主タグ**(chiezoが`[category, ...alt]`の順で入れる)
- * なので、そこから順に表に当たり、当たらなければ主タグを読める形にして返す。
+ * 上位のくくり。**同じ地物により具体的なカテゴリが付いていれば、そちらを名乗らせる**。
+ *
+ * Overtureの主カテゴリ(`[category, ...alt]`の先頭)は大きいくくりのことがあり、
+ * 先頭から順に当てるとラーメン店が「和食」になる ——
+ * 実測: ある繁華街のbboxで主カテゴリが`japanese_restaurant`の1,785件のうち、
+ * 名前に麺類を含む30件の半数は`noodles_restaurant`をaltに持っていた。
+ * 名乗りが「和食」だと、あとからカテゴリで絞るときにも麺類として拾えない。
+ */
+const BROAD_CATEGORIES = new Set([
+  "eat_and_drink",
+  "restaurant",
+  "japanese_restaurant",
+  "asian_restaurant",
+  "diner",
+  "bar",
+  "accommodation",
+  "religious_organization",
+  // 日本の寺社がまとめて入っている(`buddhist_temple`・`shinto_shrines`のほうが具体的)
+  "church_cathedral",
+  "attractions_and_activities",
+]);
+
+/**
+ * 地物のジャンル名。**具体的なカテゴリを先に見て**(`BROAD_CATEGORIES`参照)、
+ * 無ければ大きいくくりに落ち、どれも表に無ければ主タグを読める形にして返す。
  */
 export function overtureGenreOf(tags: string[]): string | null {
+  for (const tag of tags) {
+    if (BROAD_CATEGORIES.has(tag)) continue;
+    const label = GENRE_BY_CATEGORY[tag];
+    if (label) return label;
+  }
   for (const tag of tags) {
     const label = GENRE_BY_CATEGORY[tag];
     if (label) return label;

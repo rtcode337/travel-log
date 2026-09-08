@@ -10,7 +10,48 @@
  *
  * `feature`はOSMの主タグ1つ(`amenity=restaurant`など)しか受け付けない
  * (`cuisine=ramen`で絞ろうとすると0件。実測)。なので語 → 主タグの表を持つ。
+ *
+ * **料理の種類はこの形では絞れない**ので、「飲食店すべて」を取ってから
+ * `cuisine`タグでこちらが落とす(`cuisinesForWord`。絞り込みは呼び出し側)。
  */
+
+/**
+ * 料理の種類で探す語 → `cuisine`タグの値。**主タグでは絞れない**ので、
+ * 飲食店すべてを取ってから呼び出し側でこの値と突き合わせる。
+ *
+ * 名前に料理の種類が出ない店(屋号だけの店)は全文検索では拾えず、
+ * ここが唯一の手掛かりになる。
+ */
+const CUISINE_BY_WORD: { words: string[]; cuisines: string[]; features: string[] }[] = [
+  {
+    words: ["ラーメン", "らーめん", "ラー麺", "らー麺", "中華そば"],
+    cuisines: ["ramen", "noodle", "noodles"],
+    features: ["amenity=restaurant", "amenity=fast_food"],
+  },
+  { words: ["そば", "蕎麦"], cuisines: ["soba"], features: ["amenity=restaurant", "amenity=fast_food"] },
+  { words: ["うどん"], cuisines: ["udon"], features: ["amenity=restaurant", "amenity=fast_food"] },
+  { words: ["寿司", "すし", "鮨"], cuisines: ["sushi"], features: ["amenity=restaurant"] },
+  { words: ["焼肉", "焼き肉"], cuisines: ["yakiniku", "korean"], features: ["amenity=restaurant"] },
+  { words: ["焼鳥", "焼き鳥", "やきとり"], cuisines: ["yakitori"], features: ["amenity=restaurant"] },
+  { words: ["カレー"], cuisines: ["curry", "indian"], features: ["amenity=restaurant"] },
+  { words: ["中華", "中国料理"], cuisines: ["chinese"], features: ["amenity=restaurant"] },
+  { words: ["イタリアン", "パスタ"], cuisines: ["italian", "pizza"], features: ["amenity=restaurant"] },
+  { words: ["韓国料理"], cuisines: ["korean"], features: ["amenity=restaurant"] },
+  { words: ["とんかつ", "トンカツ", "豚カツ"], cuisines: ["tonkatsu"], features: ["amenity=restaurant"] },
+  { words: ["天ぷら", "天麩羅"], cuisines: ["tempura"], features: ["amenity=restaurant"] },
+  { words: ["ハンバーガー", "バーガー"], cuisines: ["burger"], features: ["amenity=fast_food"] },
+  { words: ["ピザ"], cuisines: ["pizza"], features: ["amenity=restaurant", "amenity=fast_food"] },
+  { words: ["海鮮", "魚"], cuisines: ["seafood"], features: ["amenity=restaurant"] },
+  { words: ["ステーキ"], cuisines: ["steak_house"], features: ["amenity=restaurant"] },
+];
+
+/** その検索語が料理の種類を指すなら、突き合わせる`cuisine`の値(無ければ空) */
+export function cuisinesForWord(word: string): string[] {
+  const q = word.trim();
+  if (!q) return [];
+  const entry = CUISINE_BY_WORD.find((e) => e.words.some((w) => q.includes(w)));
+  return entry?.cuisines ?? [];
+}
 
 /** 検索語 → OSMの主タグ。**当てはまらない語は全文検索だけで探す** */
 const FEATURE_BY_WORD: { words: string[]; features: string[] }[] = [
@@ -36,10 +77,16 @@ const FEATURE_BY_WORD: { words: string[]; features: string[] }[] = [
   { words: ["観光", "名所", "見どころ"], features: ["tourism=attraction", "tourism=viewpoint"] },
 ];
 
-/** その検索語で絞り込めるOSMの主タグ(無ければ空=全文検索だけ) */
+/**
+ * その検索語で絞り込めるOSMの主タグ(無ければ空=全文検索だけ)。
+ * **料理の種類の語を先に当てる** —— そちらは主タグを広く取ってから
+ * `cuisine`で落とす前提なので、当てる表が違う
+ */
 export function featuresForWord(word: string): string[] {
   const q = word.trim();
   if (!q) return [];
+  const byCuisine = CUISINE_BY_WORD.find((e) => e.words.some((w) => q.includes(w)));
+  if (byCuisine) return byCuisine.features;
   for (const entry of FEATURE_BY_WORD) {
     if (entry.words.some((w) => q.includes(w))) return entry.features;
   }
@@ -102,14 +149,22 @@ const GENRE_BY_CUISINE: Record<string, string> = {
 };
 
 /**
+ * 上位のくくりのcuisine。**同じ店がより具体的な値も持っていればそちらを名乗らせる** ——
+ * `japanese;ramen`は先頭を見ると「和食」になるが、ラーメン店として探せなくなる
+ */
+const BROAD_CUISINES = new Set(["japanese", "asian", "regional", "international", "local"]);
+
+/**
  * 地物のジャンル名。cuisineが具体的ならそちら、無ければ主タグ、
  * どちらも表に無ければ主タグの値をそのまま出す(空にするより手がかりになる)
  */
 export function genreOf(feature: string | null, cuisine: string | null): string | null {
   if (cuisine) {
-    // `japanese;ramen` のように複数入ることがあるので先頭を見る
-    const head = cuisine.split(";")[0]?.trim();
-    if (head && GENRE_BY_CUISINE[head]) return GENRE_BY_CUISINE[head];
+    // `japanese;ramen` のように複数入る。**具体的な値を先に見る**(`BROAD_CUISINES`参照)
+    const values = cuisine.split(";").map((v) => v.trim());
+    const specific = values.find((v) => !BROAD_CUISINES.has(v) && GENRE_BY_CUISINE[v]);
+    const label = specific ?? values.find((v) => GENRE_BY_CUISINE[v]);
+    if (label) return GENRE_BY_CUISINE[label];
   }
   if (!feature) return null;
   return GENRE_BY_FEATURE[feature] ?? feature.split("=")[1] ?? null;
