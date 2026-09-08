@@ -46,7 +46,8 @@ import { discoveryBaseUrl } from "@/lib/aiDiscoveryConfig";
  * ——URLと電話を持っているぶん、候補として手掛かりが多い)。
  *
  * **代わりに落ちるもの**: どちらの辞典も説明文を持たず、開いたばかりの店は載っていない。
- * 足りないぶんは画面から「AIで探し足す」で同じ一覧に足す。
+ * **探しているものに合うかも、記録する価値があるかも見ていない**(在るものを全部並べる)。
+ * そこは2段目のAI(`/api/spots/discover`)に精査させ、足りないぶんも足させる。
  *
  * **辞典ごとに2つ投げて混ぜる**(`lib/osmNearby.ts` / `lib/overtureNearby.ts`):
  * 全文検索は「ラーメン」のように名前に出る語に強く、種別の絞り込みは「ランチ」のように
@@ -443,7 +444,7 @@ export async function GET(request: Request) {
         lat: raw.lat,
         lng: raw.lng,
         genre: raw.genre,
-        // 地図データは説明文を持たない。要るならAIで探し足すか、後から手で書く
+        // 地図データは説明文を持たない。要るなら2段目のAIの精査で付くか、後から手で書く
         summary: null,
         rank: null,
         rank_reason: null,

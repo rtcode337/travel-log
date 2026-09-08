@@ -15,20 +15,21 @@ import {
   type DiscoveryDepth,
   type DiscoveryOptions,
   type DiscoveryResult,
+  type DiscoveryReviewTarget,
   type DiscoverySource,
 } from "@/lib/spotDiscovery";
 
 /**
- * 周辺スポット探しの入口。**探し方を2つから選ぶ**のがこの画面の要:
+ * 周辺スポット探しの入口。**探し方は選ばせない** —— まず地図データを引き、
+ * **その結果をAIに精査させるかどうか**だけをチェックボックスで選ぶ:
  *
- * | 探し方 | かかる時間 | 得意なもの |
+ * | 段 | かかる時間 | やること |
  * |---|---|---|
- * | **地図データ**(既定) | 1秒かからない | 正確な座標。AIの枠を使わない |
- * | **AIでweb検索** | 30秒〜2分 | 地図に載っていない新しい店、一言の説明、参照URL |
+ * | **地図データ**(必ず走る) | 2〜9秒(半径による) | 正確な名前と座標を漏らさず集める |
+ * | **AIの精査**(任意) | 15秒〜2分 | 一覧から選ぶ・ジャンルとランクを付ける・地図に無いものを足す |
  *
- * **既定を地図データにしてあるのは、「近くの飲食店をちょっと見たい」が主な使い方だから。**
- * AIだけの頃は1回に3分近くかかって使い物にならなかった。まず地図データで雑に集め、
- * 足りなければパネルの「もう一度探す」からAIで探し足す(同じ一覧に混ざる)、が想定の流れ。
+ * **既定で地図データだけにしてあるのは、「近くの飲食店をちょっと見たい」が主な使い方だから。**
+ * AIだけの頃は1回に3分近くかかって使い物にならなかった。
  *
  * **AIの相手・モデル・考える深さもここで選ぶ**(AIを選んだときだけ出る折り畳み)。
  * 管理画面に置かないのは、その場の目的で軽くも重くもしたい設定だから —— 全員ぶんを
@@ -100,9 +101,13 @@ export default function AiSpotDiscoverySearchModal({
     }
   ) => void;
   /**
-   * 「AIに足りないぶんを補わせる」が入っていたときに、**この画面を閉じたあとで**
+   * 「AIに精査させる」が入っていたときに、**この画面を閉じたあとで**
    * 呼び出し側にAIへ聞かせる。ここで待たないのは、地図データの結果を見ながら
-   * 待てるようにするため(AIは15秒〜2分かかる)
+   * 待てるようにするため(AIは15秒〜2分かかる)。
+   *
+   * **精査させる候補(`known`)はここで渡す** —— 呼び出し側の一覧(state)は
+   * この時点ではまだ更新されておらず、あちらから今回の結果を読むことはできない。
+   * 前回の探索で並んでいた候補を混ぜないという意味でも、今回のぶんだけを渡すのが正しい
    */
   onAiFollowUp?: (req: {
     query: string;
@@ -110,6 +115,7 @@ export default function AiSpotDiscoverySearchModal({
     limit: number;
     depth: DiscoveryDepth;
     choice: DiscoveryChoice;
+    known: DiscoveryReviewTarget[];
   }) => void;
   /** 半径が決まる・変わるたびに知らせる(地図に探す範囲の円を出すため) */
   onRadiusChange?: (radius: number) => void;
@@ -209,9 +215,16 @@ export default function AiSpotDiscoverySearchModal({
       onResult(data, { query: q, radius, limit, source: "map", aiAssist });
     }
     if (aiAssist) {
+      // **精査に渡すのは中心から近い順に`limit`件まで。** 地図データは半径の中を
+      // 全部返す(300mで約1,800件)ので、そのまま渡せばプロンプトが読み切れない長さになり、
+      // 答えもそのぶん延びる。**登録済みのものは渡さない**(追加できないので精査しても使えない)
+      const known: DiscoveryReviewTarget[] = (data?.candidates ?? [])
+        .filter((c) => !c.existing)
+        .slice(0, limit)
+        .map((c) => ({ name: c.name, genre: c.genre, distance_m: c.distance_m }));
       // **AIは呼び出し側に投げて、この画面は閉じる。** 地図データの結果を見ながら
       // 待てるようにするため(ここで待つと、出ている結果が見えないまま数十秒止まる)
-      onAiFollowUp?.({ query: q, radius, limit, depth, choice });
+      onAiFollowUp?.({ query: q, radius, limit, depth, choice, known });
     }
     onClose();
   };
@@ -231,12 +244,13 @@ export default function AiSpotDiscoverySearchModal({
           緯度 {lat.toFixed(5)} ・ 経度 {lng.toFixed(5)} を中心に、見つかった候補を地図に出します。
         </p>
 
-        {/* **探し方は選ばせない。** まず地図データを引き、AIは「足りないぶんを補う」
-            後段として任意で足す —— AIは単品で使うものではなく、地図に無い店と
-            一言の説明を埋めるためのもの、というのが実際の使われ方 */}
+        {/* **探し方は選ばせない。** まず地図データを引き、AIはその結果を精査する
+            後段として任意で足す —— AIと地図データに別々のものを探させると、
+            同じ店が二重に並ぶうえ、AIが「地図に載っている当たり前の店」を挙げるのに
+            時間を使う。得意なことが違うので役割で分ける */}
         <p className="text-xs text-gray-500">
           地図データ(Overture MapsとOpenStreetMap)から引きます。座標は正確ですが、
-          開いたばかりの店は載っていないことがあり、説明文は付きません。
+          探しているものに合うかどうかは見ておらず、説明文も付きません。
         </p>
         <label className="flex items-start gap-2 rounded-lg border border-gray-300 p-2.5 text-sm">
           <input
@@ -247,9 +261,10 @@ export default function AiSpotDiscoverySearchModal({
             className="mt-0.5 size-4"
           />
           <span className="min-w-0">
-            AIに足りないぶんを補わせる
+            AIに精査させる
             <span className="block text-xs font-normal text-gray-500">
-              地図データを出したあとで、AIにもweb検索で探させて同じ一覧に足します
+              地図データを出したあとで、AIが一覧から選び直し、ジャンル・ランク・一言を
+              付けます。あわせて地図データに無いスポットも足します
               (15秒〜2分かかりますが、地図データの結果は先に出ます)
             </span>
           </span>
@@ -286,7 +301,7 @@ export default function AiSpotDiscoverySearchModal({
         {aiAssist && (
           <p className="text-xs text-gray-500">
             {depth === "quick"
-              ? "webの検索を2回までに抑えて手早く挙げてもらいます。裏取りをしないので、参照URLが付かない候補が増えます。"
+              ? "webの検索を2回までに抑えて手早く精査してもらいます。裏取りをしないので、足した候補に参照URLが付かないことがあります。"
               : "1件ずつweb検索で確かめ、根拠のURLを付けてもらいます。そのぶん時間がかかります。"}
           </p>
         )}
@@ -323,10 +338,11 @@ export default function AiSpotDiscoverySearchModal({
           </div>
           {/* **件数はAIに聞くときだけ選ばせる。** 返させる件数がそのまま待ち時間に
               なるのはAIの側の事情で、地図データはローカルを引くだけなので上限を持たない
-              (半径の中にあるものを全部並べる)。半径がそのまま件数を決める */}
+              (半径の中にあるものを全部並べる)。半径がそのまま件数を決める。
+              **AIに渡すのは近い順にこの件数まで**で、足させる候補の上限も同じ値 */}
           {aiAssist ? (
             <div>
-              <label className="mb-1 block text-sm font-medium">件数(上限)</label>
+              <label className="mb-1 block text-sm font-medium">AIに任せる件数</label>
               <select
                 value={limit}
                 onChange={(e) => setLimit(Number(e.target.value))}
@@ -439,6 +455,8 @@ export default function AiSpotDiscoverySearchModal({
         )}
 
         <p className="text-xs text-gray-500">
+          {aiAssist &&
+            "精査に渡すのは中心から近い順にこの件数までです(地図データは半径の中を全部並べます)。"}
           足りなければ、結果のパネルから「もう一度探す」で条件を変えて同じ一覧に足せます。
           AIに聞いた後は、同じパネルから「AIとのやり取りを見る」で頼んだ本文と返答を確かめられます。
         </p>
@@ -447,7 +465,7 @@ export default function AiSpotDiscoverySearchModal({
             地図データを引いています… {elapsed}秒
             {aiAssist && (
               <span className="mt-0.5 block text-xs text-blue-700/80">
-                このあとAIにも聞きます{" "}
+                このあとAIが精査します{" "}
                 {depth === "quick"
                   ? "ふだんは15〜30秒ほどです。遅いときは件数を減らしてください。"
                   : "裏取りをするので40秒〜2分ほどかかります。急ぐときは「さっくり」に変えてください。"}

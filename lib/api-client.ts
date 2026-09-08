@@ -23,6 +23,7 @@ import type {
   DiscoveryChoice,
   DiscoveryOptions,
   DiscoveryResult,
+  DiscoveryReviewTarget,
 } from "@/lib/spotDiscovery";
 
 interface Result<T> {
@@ -217,7 +218,8 @@ export const api = {
       if (params.query) qs.set("q", params.query);
       return request<DiscoveryResult>(`/api/spots/nearby?${qs}`, { fresh: true });
     },
-    // 2段目。AIの答えを待つので30秒〜2分ほどかかる。結果は保存されず、選んで追加した
+    // 2段目。**1段目の候補(known)を渡して精査させ、足りないぶんを足させる**。
+    // AIの答えを待つので30秒〜2分ほどかかる。結果は保存されず、選んで追加した
     // ものだけがcreateManyで通常のスポットになる
     discover: (
       type: string,
@@ -227,6 +229,8 @@ export const api = {
         radius: number;
         query: string;
         limit: number;
+        /** 精査させる地図データの候補(中心から近い順。多いほど待ちが延びる) */
+        known?: DiscoveryReviewTarget[];
       } & DiscoveryChoice
     ) =>
       request<DiscoveryResult>(

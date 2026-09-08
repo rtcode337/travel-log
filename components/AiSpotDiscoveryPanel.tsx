@@ -14,9 +14,13 @@ import type { DiscoveryCandidate, DiscoverySource } from "@/lib/spotDiscovery";
 import { buildGoogleMapsCompareUrl } from "@/lib/googleMaps";
 
 /**
- * 周辺のAI探索の結果を並べる、地図の右側のパネル(`PlanBuildPanel`と同じ置き方)。
+ * 周辺の探索の結果を並べる、地図の右側のパネル(`PlanBuildPanel`と同じ置き方)。
  * 候補は地図に番号つきの印で描かれ、**行を押すとそのピンへ寄り、ピンを押すとその行が
  * 目立つ**(一覧の名前と地図の印を目で突き合わせなくて済むように)。
+ *
+ * **AIに精査させたときは、選ばれた行にチェックと「AIが選定」の印が付く**
+ * (選ばれなかった行はチェックが外れて薄くなるが、消えはしない —— AIも見落とすので、
+ * 選び直せる形で残す)。ジャンル・ランク・一言もそこで付く。
  *
  * できることは5つ: チェックで「追加するもの」を選ぶ、×で候補から外す、
  * **「位置を直す」でその1件だけ住所から座標を引き直す**、「もう一度探す」で別の検索語・
@@ -41,6 +45,12 @@ export interface DiscoveryRow {
   source: DiscoverySource;
   /** 「位置を直す」で住所から引き直したか(印を分けるため) */
   relocated?: boolean;
+  /**
+   * AIの精査が当たったか(地図データの行だけ)。**「AIが見て選ばなかった」と
+   * 「AIに渡していない」は別物**なので、未設定と`dropped`を分ける ——
+   * 地図データは近い順に上限まで渡すので、渡していない行のほうが多い
+   */
+  reviewed?: "picked" | "dropped";
   /** この候補を頼んだときの半径(m)。**行ごとに持つ** —— 「もう一度探す」で
       別の半径の結果が同じ一覧に混ざるため、画面側の今の値では判定できない */
   radius: number;
@@ -120,19 +130,25 @@ export default function AiSpotDiscoveryPanel({
     el?.scrollIntoView({ block: "nearest" });
   }, [focusedNo]);
 
+  // **狭い画面では下から敷く帯にする。** 右の帯(w-2/5)のままだと、スマホの幅では
+  // 150px前後しか残らず、行の中身が1文字ずつ縦に折り返される。上に地図が残るので、
+  // 行を押してそこへ寄せるという使い方は変わらない。
+  // **高さは65%取る** —— 見出しと下の操作で上下を挟むので、半分だと一覧が1行ぶんも残らない
   return (
-    <div className="absolute bottom-0 right-0 top-40 z-20 flex w-2/5 max-w-sm flex-col overflow-hidden rounded-tl-xl bg-white/95 shadow-xl backdrop-blur">
-      <div className="border-b border-gray-200 p-3">
+    <div className="absolute bottom-0 left-0 right-0 top-[35%] z-20 flex flex-col overflow-hidden rounded-t-xl bg-white/95 shadow-xl backdrop-blur sm:left-auto sm:top-40 sm:w-2/5 sm:max-w-sm sm:rounded-tr-none">
+      <div className="border-b border-gray-200 p-2 sm:p-3">
         <p className="text-xs text-gray-500">この周辺を探す</p>
         <h2 className="font-bold leading-snug">候補 {rows.length}件(チェック {checkedRows.length}件)</h2>
-        <p className="mt-0.5 text-xs text-gray-500">
+        {/* 狭い画面では出さない。**使い方の説明より一覧そのものの行数を優先する**
+            (2行ぶんの説明で候補が1件隠れる) */}
+        <p className="mt-0.5 hidden text-xs text-gray-500 sm:block">
           行を押すと地図がそこへ寄ります。候補は保存されず、追加したものだけがスポットになります。
         </p>
         {/* **AIは地図データの結果を出した後ろで動く**ので、待っていることを出さないと
             「もう終わったのか、まだ来るのか」が分からない */}
         {aiPending && (
           <p className="mt-1.5 rounded bg-violet-50 px-2 py-1 text-xs text-violet-800">
-            AIにも聞いています… 見つかったぶんはこの一覧に足されます
+            AIが精査しています… 選ばれた候補に印が付き、地図データに無いものが足されます
           </p>
         )}
       </div>
@@ -152,128 +168,135 @@ export default function AiSpotDiscoveryPanel({
           // 確かめる相手がいない。しかも地図データ側の候補はURLを持たないものが多く
           // (OSMは実測で200件中51件)、**意味の無い理由で行の大半が薄くなっていた**。
           // 印の色分け・最初から選んでおくかの判定と同じ根拠にそろえる
-          const dubious = row.source === "ai" && !c.location_verified;
+          // **AIが見たうえで選ばなかった行も薄くする。** チェックは外れているので、
+          // 一覧を上から追うときに「残っているが対象外」だと分かる必要がある
+          const dubious =
+            (row.source === "ai" && !c.location_verified) || row.reviewed === "dropped";
           return (
             <li
               key={row.no}
               data-no={row.no}
-              className={`flex items-start gap-2 py-2 pl-2 pr-2 ${
+              className={`px-2 py-2 ${
                 focused ? "bg-blue-50 ring-1 ring-inset ring-blue-400" : ""
               } ${disabled || dubious ? "opacity-60" : ""}`}
             >
-              <input
-                type="checkbox"
-                checked={row.checked && !disabled}
-                disabled={disabled}
-                onChange={() => onToggle(row.no)}
-                className="mt-1 shrink-0"
-                aria-label="追加する"
-              />
-              <button
-                type="button"
-                onClick={() => onFocus(row.no)}
-                className="min-w-0 flex-1 space-y-0.5 text-left"
-                title={`${c.name}(タップで地図をここへ)`}
-              >
-                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                  <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-violet-600 px-1 text-xs font-bold text-white">
-                    {row.no}
-                  </span>
-                  <span className={`text-sm leading-snug ${focused ? "font-medium text-blue-700" : ""}`}>
-                    {c.name}
-                  </span>
-                  {c.genre && (
-                    <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-700">
-                      {c.genre}
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1 text-[11px]">
-                  {/* 出どころ。同じ一覧に地図データとAIの候補が混ざるので必ず出す */}
-                  <span
-                    className={`rounded px-1 py-0.5 ${
-                      row.source === "map"
-                        ? "bg-sky-100 text-sky-800"
-                        : "bg-violet-100 text-violet-800"
-                    }`}
-                  >
-                    {row.source === "map" ? "地図データ" : "AI"}
-                  </span>
-                  {c.existing ? (
-                    <span className="rounded bg-gray-200 px-1 py-0.5 text-gray-700">
-                      登録済み: {c.existing.name}
-                    </span>
-                  ) : row.relocated ? (
-                    <span className="rounded bg-green-100 px-1 py-0.5 text-green-800">住所から取得</span>
-                  ) : row.source === "ai" ? (
-                    /* **実在を確かめられたかどうかを言い切る。** AIの候補で
-                       いちばん危ないのは「その場所に無い店」なので、位置の話ではなく
-                       地図データに在ったかどうかとして出す */
-                    c.location_verified ? (
-                      <span className="rounded bg-green-100 px-1 py-0.5 text-green-800">
-                        地図データで確認
-                      </span>
-                    ) : (
-                      <span className="rounded bg-amber-100 px-1 py-0.5 text-amber-800">
-                        地図データに無い
-                      </span>
-                    )
-                  ) : null}
-                  <span className="rounded bg-gray-100 px-1 py-0.5 text-gray-600">
-                    {c.distance_m >= 1000 ? `${(c.distance_m / 1000).toFixed(1)} km` : `${c.distance_m} m`}
-                  </span>
-                  {/* **半径の外に出た候補は必ず言う。** 頼んだ範囲を無視して数を
-                      合わせにくることがあり(実測)、地図で見るまで気づけない */}
-                  {c.distance_m > row.radius && (
-                    <span className="rounded bg-red-50 px-1 py-0.5 text-red-700">半径の外</span>
-                  )}
-                </div>
-                {c.summary && <p className="text-xs leading-snug text-gray-700">{c.summary}</p>}
-              </button>
-              {/* **候補の座標と、店名で引いた本物の場所を1枚の地図に並べる。**
-                  経路検索の出発地に座標・目的地に店名を入れる形(検索は問い合わせを
-                  1つしか受け取れないので、2地点を同時に出すにはこれになる)。
-                  **ずれが距離として出る**ので、目で見比べるより判断が速い。
-                  行の本体はボタンなので、リンクはその外に置く(入れ子にできない) */}
-              <div className="flex flex-wrap gap-2 pl-6 text-[11px]">
-                <a
-                  href={buildGoogleMapsCompareUrl(
-                    { lat: c.lat, lng: c.lng },
-                    c.name,
-                    c.address ?? c.region
-                  )}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="この候補の座標から店名で引いた場所までをGoogle マップで出す(離れていれば座標が違う)"
-                  className="text-blue-600 underline underline-offset-2 hover:text-blue-800"
+              {/* **横に並べるのは「選ぶ・読む・外す」だけ。** 行ごとの操作(ランク・
+                  位置を直す・リンク)まで同じ横並びに入れると、1列が数十pxまで潰れて
+                  文字が1文字ずつ縦に折り返される。操作は下の行へ出し、幅いっぱいで折り返す */}
+              <div className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={row.checked && !disabled}
+                  disabled={disabled}
+                  onChange={() => onToggle(row.no)}
+                  className="mt-1 shrink-0"
+                  aria-label="追加する"
+                />
+                <button
+                  type="button"
+                  onClick={() => onFocus(row.no)}
+                  className="min-w-0 flex-1 space-y-0.5 text-left"
+                  title={`${c.name}(タップで地図をここへ)`}
                 >
-                  座標と店名を見比べる
-                </a>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-violet-600 px-1 text-xs font-bold text-white">
+                      {row.no}
+                    </span>
+                    <span className={`text-sm leading-snug ${focused ? "font-medium text-blue-700" : ""}`}>
+                      {c.name}
+                    </span>
+                    {c.genre && (
+                      <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-700">
+                        {c.genre}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1 text-[11px]">
+                    {/* 出どころ。同じ一覧に地図データとAIの候補が混ざるので必ず出す */}
+                    <span
+                      className={`rounded px-1 py-0.5 ${
+                        row.source === "map"
+                          ? "bg-sky-100 text-sky-800"
+                          : "bg-violet-100 text-violet-800"
+                      }`}
+                    >
+                      {row.source === "map" ? "地図データ" : "AI"}
+                    </span>
+                    {/* **AIの精査の結果は出どころの隣に出す。** 地図データの行に
+                        ジャンル・ランク・一言が付いているのは精査を通ったからで、
+                        その断りが無いと辞典が持っていた値に見える */}
+                    {row.reviewed === "picked" && (
+                      <span className="rounded bg-violet-100 px-1 py-0.5 text-violet-800">
+                        AIが選定
+                      </span>
+                    )}
+                    {row.reviewed === "dropped" && (
+                      <span className="rounded bg-gray-100 px-1 py-0.5 text-gray-600">
+                        AIは選ばず
+                      </span>
+                    )}
+                    {c.existing ? (
+                      <span className="rounded bg-gray-200 px-1 py-0.5 text-gray-700">
+                        登録済み: {c.existing.name}
+                      </span>
+                    ) : row.relocated ? (
+                      <span className="rounded bg-green-100 px-1 py-0.5 text-green-800">住所から取得</span>
+                    ) : row.source === "ai" ? (
+                      /* **実在を確かめられたかどうかを言い切る。** AIの候補で
+                         いちばん危ないのは「その場所に無い店」なので、位置の話ではなく
+                         地図データに在ったかどうかとして出す */
+                      c.location_verified ? (
+                        <span className="rounded bg-green-100 px-1 py-0.5 text-green-800">
+                          地図データで確認
+                        </span>
+                      ) : (
+                        <span className="rounded bg-amber-100 px-1 py-0.5 text-amber-800">
+                          地図データに無い
+                        </span>
+                      )
+                    ) : null}
+                    <span className="rounded bg-gray-100 px-1 py-0.5 text-gray-600">
+                      {c.distance_m >= 1000 ? `${(c.distance_m / 1000).toFixed(1)} km` : `${c.distance_m} m`}
+                    </span>
+                    {/* **半径の外に出た候補は必ず言う。** 頼んだ範囲を無視して数を
+                        合わせにくることがあり(実測)、地図で見るまで気づけない */}
+                    {c.distance_m > row.radius && (
+                      <span className="rounded bg-red-50 px-1 py-0.5 text-red-700">半径の外</span>
+                    )}
+                  </div>
+                  {c.summary && <p className="text-xs leading-snug text-gray-700">{c.summary}</p>}
+                </button>
                 <button
                   type="button"
                   aria-label="候補から外す"
                   onClick={() => onRemove(row.no)}
-                  className="px-1 text-lg leading-none text-gray-400 hover:text-red-500"
+                  className="shrink-0 px-1 text-lg leading-none text-gray-400 hover:text-red-500"
                 >
                   ×
                 </button>
+              </div>
+              {/* 行ごとの操作。**幅いっぱいを使って折り返す**(要素ごとに折り返すので、
+                  文字の途中では切れない)。チェックボックスのぶんだけ字下げして、
+                  上の行の名前と縦にそろえる */}
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-[11px]">
                 {rankEnabled && (
-                  <select
-                    value={row.rank}
-                    disabled={disabled}
-                    onChange={(e) => onRankChange(row.no, e.target.value as Rank | "")}
-                    title={c.rank_reason ?? "ランク"}
-                    className="rounded border border-gray-300 px-1 py-0.5 text-xs"
-                  >
-                    <option value="">なし</option>
-                    {RANKS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="flex items-center gap-1 text-gray-600">
+                    ランク
+                    <select
+                      value={row.rank}
+                      disabled={disabled}
+                      onChange={(e) => onRankChange(row.no, e.target.value as Rank | "")}
+                      title={c.rank_reason ?? "ランク"}
+                      className="rounded border border-gray-300 px-1 py-0.5 text-xs"
+                    >
+                      <option value="">なし</option>
+                      {RANKS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 )}
                 {/* 位置がずれていると思ったときに、その1件だけ住所から引き直す。
                     AIの座標は当てにならないことがあるので、気づいた行だけ直せればよい */}
@@ -283,7 +306,7 @@ export default function AiSpotDiscoveryPanel({
                     onClick={() => onRelocate(row.no)}
                     disabled={relocatingNo === row.no}
                     title={`「${c.address}」から位置を引き直す`}
-                    className="text-[11px] text-blue-600 underline disabled:opacity-50"
+                    className="whitespace-nowrap text-blue-600 underline disabled:opacity-50"
                   >
                     {relocatingNo === row.no ? "取得中…" : "位置を直す"}
                   </button>
@@ -293,18 +316,37 @@ export default function AiSpotDiscoveryPanel({
                     href={c.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[11px] text-blue-600 underline"
+                    className="whitespace-nowrap text-blue-600 underline"
                   >
                     参照
                   </a>
                 )}
+                {/* **候補の座標と、店名で引いた本物の場所を1枚の地図に並べる。**
+                    経路検索の出発地に座標・目的地に店名を入れる形(検索は問い合わせを
+                    1つしか受け取れないので、2地点を同時に出すにはこれになる)。
+                    **ずれが距離として出る**ので、目で見比べるより判断が速い。
+                    行の本体はボタンなので、リンクはその外に置く(入れ子にできない) */}
+                <a
+                  href={buildGoogleMapsCompareUrl(
+                    { lat: c.lat, lng: c.lng },
+                    c.name,
+                    c.address ?? c.region
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="この候補の座標から店名で引いた場所までをGoogle マップで出す(離れていれば座標が違う)"
+                  className="whitespace-nowrap text-blue-600 underline underline-offset-2 hover:text-blue-800"
+                >
+                  座標と店名を見比べる
+                </a>
               </div>
             </li>
           );
         })}
       </ul>
 
-      <div className="space-y-2 border-t border-gray-200 p-3">
+      {/* 下の操作は**狭い画面では詰める**(一覧に回せる高さがそのぶん増える) */}
+      <div className="space-y-1.5 border-t border-gray-200 p-2 sm:space-y-2 sm:p-3">
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="mb-0.5 block text-[11px] font-medium text-gray-600">状態</label>
