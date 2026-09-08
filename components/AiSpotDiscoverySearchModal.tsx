@@ -124,8 +124,11 @@ export default function AiSpotDiscoverySearchModal({
   const [radius, setRadius] = useState<number>(initial?.radius ?? DEFAULT_DISCOVERY_RADIUS);
   const [limit, setLimit] = useState<number>(initial?.limit ?? DEFAULT_DISCOVERY_LIMIT);
   // **AIは「足りないぶんを補う」後段**なので、探し方の選択ではなくチェックボックス。
-  // 前回入れていたら次も入れておく(補完したい場面は続けて起きる)
-  const [aiAssist, setAiAssist] = useState(initial?.aiAssist ?? false);
+  // **既定は入れておく** —— 地図データは半径の中に在るものを全部並べるだけで、
+  // 探しているものに合うかも記録する価値があるかも見ていない(半径300mで千件を超える)。
+  // 精査を通さないほうが例外なので、外したいときに外す形にする。
+  // 前回外していたら次も外しておく(`initial`は「もう一度探す」から渡る前回の選択)
+  const [aiAssist, setAiAssist] = useState(initial?.aiAssist ?? true);
   // AIで探すときの念の入れ方。**既定はさっくり** —— 待てるのはせいぜい数十秒なので、
   // 裏取りまで頼むのは「しっかり」を選んだときだけにする
   const [depth, setDepth] = useState<DiscoveryDepth>(DEFAULT_DISCOVERY_DEPTH);
@@ -458,7 +461,7 @@ export default function AiSpotDiscoverySearchModal({
           {aiAssist &&
             "精査に渡すのは中心から近い順にこの件数までです(地図データは半径の中を全部並べます)。"}
           足りなければ、結果のパネルから「もう一度探す」で条件を変えて同じ一覧に足せます。
-          AIに聞いた後は、同じパネルから「AIとのやり取りを見る」で頼んだ本文と返答を確かめられます。
+          AIに聞いた後は、同じパネルの見出しにある「AIとのやり取り」で頼んだ本文と返答を確かめられます。
         </p>
         {searching && (
           <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">

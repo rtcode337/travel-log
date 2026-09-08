@@ -78,6 +78,7 @@ import FilterBar, {
 import AddSpotModal from "@/components/AddSpotModal";
 import AiSpotDiscoverySearchModal from "@/components/AiSpotDiscoverySearchModal";
 import AiSpotDiscoveryPanel, {
+  discoveryRowCategory,
   type DiscoveryRow,
 } from "@/components/AiSpotDiscoveryPanel";
 import {
@@ -160,6 +161,29 @@ function circlePolygon(
     ]);
   }
   return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
+}
+
+/**
+ * 地図の上に敷いたパネルを避けて、**見えている側の中心**へ寄せるための`offset`
+ * ([x, y]のピクセル。`flyTo`/`easeTo`の`offset`は「最終的な中心を container の
+ * 中心からどれだけずらすか」を指す)。
+ *
+ * パネルは狭い画面では下から敷く帯、広い画面では右の帯になる。**どちらかは
+ * 画面幅で決め打ちせず実寸から判定する** —— 決め打ちすると、パネル側の
+ * 折り返し位置を変えたときにここが取り残される。
+ */
+function visibleCenterOffset(
+  container: DOMRect | undefined,
+  panel: DOMRect | undefined
+): [number, number] {
+  if (!container || !panel || panel.width === 0 || panel.height === 0) return [0, 0];
+  // 幅をほぼ覆っていれば下から敷く帯、そうでなければ右の帯
+  if (panel.width >= container.width * 0.9) {
+    const visibleBottom = Math.max(container.top, panel.top);
+    return [0, (visibleBottom - container.bottom) / 2];
+  }
+  const visibleRight = Math.max(container.left, panel.left);
+  return [(visibleRight - container.right) / 2, 0];
 }
 
 const PATH_PIN_SOURCE_ID = "spots-path";
@@ -2474,6 +2498,12 @@ export default function MapView({
   const [discoveryRows, setDiscoveryRows] = useState<DiscoveryRow[]>([]);
   const [discoveryPanelOpen, setDiscoveryPanelOpen] = useState(false);
   // 地図のクリックハンドラは1度しか束縛されないので、いまの状態はrefから読む
+  /**
+   * パネルが開いているか。**stateと同時に手で立てる** —— 反映を`useEffect`だけに任せると、
+   * 「結果を渡す → 自分を閉じる」を続けて呼ぶ探し方の画面から見たとき、まだ古い値のまま
+   * になる(コミット後にしか走らないため)。地図のクリックハンドラのように一度しか
+   * 束縛されない場所からも読む
+   */
   const discoveryPanelOpenRef = useRef(false);
   useEffect(() => {
     discoveryPanelOpenRef.current = discoveryPanelOpen;
@@ -2481,6 +2511,14 @@ export default function MapView({
   const [discoveryFocusedNo, setDiscoveryFocusedNo] = useState<number | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = useState<SpotStatus>("published");
   const [discoverySeries, setDiscoverySeries] = useState("");
+  /** 追加する全件に足すカテゴリ(空なら足さない)。行ごとのジャンルとは併せて付く */
+  const [discoveryCategory, setDiscoveryCategory] = useState("");
+  /**
+   * パネルの実寸。**寄せ先を「パネルに隠れていない側の中心」にする**ために測る
+   * (`focusDiscoveryRow`)。パネルの置き方は画面幅で変わる(下の帯 / 右の帯)ので、
+   * こちら側で同じ条件を書き写すと片方を直したときにずれる
+   */
+  const discoveryPanelRef = useRef<HTMLDivElement | null>(null);
   const [discoveryFallbackRegion, setDiscoveryFallbackRegion] = useState("");
   const [discoveryAdding, setDiscoveryAdding] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
@@ -2512,6 +2550,20 @@ export default function MapView({
    * 依存を持たないコールバックなので、そこで状態を読むと初回の値を掴む
    */
   const discoverySearchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
+  /**
+   * 探す範囲の円の半径を、探し方の画面(`AiSpotDiscoverySearchModal`)から受け取る。
+   *
+   * **同じ半径なら state をそのまま返し、関数の同一性も固定する。** 毎回新しい
+   * オブジェクトを作って渡すと、「円のstateが変わる → この画面が描き直される →
+   * 渡している関数の同一性が変わる → 向こうの`useEffect`(依存に関数が入っている)が
+   * また知らせてくる」が延々と回り、Reactが`Maximum update depth exceeded`で
+   * 描画を打ち切る。**打ち切られると円が出ないだけでなく、探した結果のパネルも
+   * 更新されないので「何も見つからなかった」ように見える**(実測でそうなった)。
+   */
+  const handleDiscoveryRadiusChange = useCallback((radius: number) => {
+    setDiscoveryRange((prev) => (prev && prev.radius !== radius ? { ...prev, radius } : prev));
+  }, []);
+
   const openDiscoverySearch = useCallback((center: { lat: number; lng: number }) => {
     discoverySearchCenterRef.current = center;
     setDiscoverySearchAt(center);
@@ -2707,6 +2759,7 @@ export default function MapView({
         aiAssist: params.aiAssist ?? prev?.aiAssist,
       }));
       setDiscoveryPanelOpen(true);
+      discoveryPanelOpenRef.current = true;
       setDiscoverySearchAt(null);
       setDiscoveryError(null);
     },
@@ -2749,7 +2802,17 @@ export default function MapView({
     );
   }, []);
 
-  // パネルの行を押したときに、その候補へ地図を寄せる(訪問予定リストの作成パネルと同じ流儀)
+  /**
+   * パネルの行を押したときに、その候補へ地図を寄せる(訪問予定リストの作成パネルと同じ流儀)。
+   *
+   * **寄せ先は地図の中心ではなく、パネルに隠れていない側の中心**。パネルは画面の下半分
+   * (狭い画面)か右側を覆っているので、素直に中心へ運ぶと**押した候補がパネルの下に入って
+   * 見えない**。`flyTo`の`offset`(最終的な中心を container の中心からずらすピクセル数)で
+   * 見えている矩形の中心へ置く。
+   *
+   * **`padding`は使わない** —— あちらは地図の transform に残り続けるので、以後の
+   * `fitBounds`・`flyTo`(訪問順の経路や現在地への移動)まで巻き込んでずれる。
+   */
   const focusDiscoveryRow = useCallback(
     (no: number) => {
       setDiscoveryFocusedNo(no);
@@ -2759,10 +2822,39 @@ export default function MapView({
       map.flyTo({
         center: [row.candidate.lng, row.candidate.lat],
         zoom: Math.max(map.getZoom(), 15),
+        offset: visibleCenterOffset(
+          containerRef.current?.getBoundingClientRect(),
+          discoveryPanelRef.current?.getBoundingClientRect()
+        ),
       });
     },
     [discoveryRows]
   );
+
+  /**
+   * パネルが開いた(または探し直しで中心が変わった)ら、**探した中心を
+   * 「パネルに隠れていない側」へ寄せる**。
+   *
+   * 右クリックした点はそのとき地図の真ん中とは限らないうえ、パネルは画面の半分
+   * (狭い画面なら下半分)を覆う。**開いた直後は探した中心も候補の半分もパネルの下**
+   * という状態になっていた —— 行を押したときだけ直しても、最初に見る画面が合っていない。
+   * 寄せ方は`focusDiscoveryRow`と同じで、**縮尺は動かさない**(探した範囲の見え方を
+   * 勝手に変えない)。
+   */
+  useEffect(() => {
+    if (!discoveryPanelOpen) return;
+    const map = mapRef.current;
+    const center = discoverySearchCenterRef.current;
+    if (!map || !center) return;
+    map.easeTo({
+      center: [center.lng, center.lat],
+      offset: visibleCenterOffset(
+        containerRef.current?.getBoundingClientRect(),
+        discoveryPanelRef.current?.getBoundingClientRect()
+      ),
+      duration: 400,
+    });
+  }, [discoveryPanelOpen, discoveryRange?.lat, discoveryRange?.lng]);
 
   /**
    * その候補の位置を住所から引き直す。**押した1件だけ**を地名検索(Nominatim)に投げる
@@ -2864,7 +2956,9 @@ export default function MapView({
 
   const closeDiscovery = useCallback(() => {
     setDiscoveryPanelOpen(false);
+    discoveryPanelOpenRef.current = false;
     setDiscoveryRows([]);
+    setDiscoveryCategory("");
     setDiscoveryFocusedNo(null);
     setDiscoveryError(null);
     setDiscoveryExchange(null);
@@ -2893,6 +2987,10 @@ export default function MapView({
     }
     setDiscoveryAdding(true);
     setDiscoveryError(null);
+    // カテゴリは**行ごとの値と一括の値を併せて**付ける(重複と空は落とす)。
+    // 一括で置き換えないのは、まとめの札(「ラーメン」)と候補ごとの分類(「和食」)が
+    // 別の粒度で、どちらも残しておくほうが後から絞り込めるため
+    const bulkCategory = discoveryCategory.trim();
     const records = targets.map((row) => ({
       name: row.candidate.name,
       name_kana: row.candidate.name_kana,
@@ -2901,7 +2999,9 @@ export default function MapView({
       region: regionOf(row),
       rank: rankEnabled ? row.rank || null : null,
       series: seriesRequired ? discoverySeries : null,
-      categories: row.candidate.genre ? [row.candidate.genre] : [],
+      categories: [...new Set([discoveryRowCategory(row).trim(), bulkCategory])].filter(
+        (c) => c !== ""
+      ),
       description: buildDiscoveredDescription(row.candidate, row.searchedAt, row.source),
       status: discoveryStatus,
     }));
@@ -2928,6 +3028,7 @@ export default function MapView({
   }, [
     discoveryRows,
     discoverySeries,
+    discoveryCategory,
     discoveryFallbackRegion,
     discoveryStatus,
     seriesStyles,
@@ -2936,6 +3037,22 @@ export default function MapView({
     spotTypeKey,
     spotCache,
   ]);
+
+  /**
+   * カテゴリ欄の候補。**種別の設定を先に、いま並んでいる候補のジャンルを後ろに**足す
+   * (設定に無いジャンルでもそのまま入力できるので、打ち直さずに済むよう並べるだけ)
+   */
+  const discoveryCategoryOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const c of [...categories, ...discoveryRows.map(discoveryRowCategory)]) {
+      const v = c.trim();
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
+    return out;
+  }, [categories, discoveryRows]);
 
   // シリーズの既定は種別の定義順の先頭
   useEffect(() => {
@@ -5078,18 +5195,20 @@ export default function MapView({
           initial={discoveryLastParams ?? undefined}
           onClose={() => {
             setDiscoverySearchAt(null);
-            // 探さずに閉じたら円も消す(結果を見ている間は出したまま)
-            if (!discoveryPanelOpen) setDiscoveryRange(null);
+            // 探さずに閉じたら円も消す(結果を見ている間は出したまま)。
+            // **stateではなくrefを見る** —— 探し方の画面は結果を渡してから自分を閉じるので、
+            // この関数が読む`discoveryPanelOpen`は「パネルを開く前」の値のまま。
+            // それで判定すると**探した直後に必ず円が消えていた**
+            if (!discoveryPanelOpenRef.current) setDiscoveryRange(null);
           }}
           onResult={appendDiscoveryResult}
           onAiFollowUp={runAiFollowUp}
-          onRadiusChange={(radius) =>
-            setDiscoveryRange((prev) => (prev ? { ...prev, radius } : prev))
-          }
+          onRadiusChange={handleDiscoveryRadiusChange}
         />
       )}
       {discoveryPanelOpen && (
         <AiSpotDiscoveryPanel
+          ref={discoveryPanelRef}
           rows={discoveryRows}
           aiPending={discoveryAiPending}
           role={role}
@@ -5098,20 +5217,34 @@ export default function MapView({
           seriesOptions={seriesStyles.map((s) => s.series)}
           status={discoveryStatus}
           series={discoverySeries}
+          category={discoveryCategory}
+          categoryOptions={discoveryCategoryOptions}
           fallbackRegion={discoveryFallbackRegion}
           focusedNo={discoveryFocusedNo}
           adding={discoveryAdding}
           error={discoveryError}
           onStatusChange={setDiscoveryStatus}
           onSeriesChange={setDiscoverySeries}
+          onCategoryChange={setDiscoveryCategory}
           onFallbackRegionChange={setDiscoveryFallbackRegion}
           onToggle={(no) =>
             setDiscoveryRows((prev) =>
               prev.map((r) => (r.no === no ? { ...r, checked: !r.checked } : r))
             )
           }
+          onToggleAll={(checked) =>
+            setDiscoveryRows((prev) =>
+              // 登録済みの行は追加できないので、まとめて選んでも外したままにする
+              prev.map((r) => ({ ...r, checked: checked && !r.candidate.existing }))
+            )
+          }
           onRankChange={(no, rank) =>
             setDiscoveryRows((prev) => prev.map((r) => (r.no === no ? { ...r, rank } : r)))
+          }
+          onRowCategoryChange={(no, category) =>
+            setDiscoveryRows((prev) =>
+              prev.map((r) => (r.no === no ? { ...r, category } : r))
+            )
           }
           onRemove={(no) => {
             setDiscoveryRows((prev) => prev.filter((r) => r.no !== no));
