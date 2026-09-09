@@ -11,8 +11,13 @@ import {
   type Spot,
 } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
-import { resolveSeriesStyles } from "@/lib/seriesStyle";
+import {
+  mergeSeriesStyles,
+  resolveSeriesStyles,
+  SERIES_STYLES_SETTING_KEY,
+} from "@/lib/seriesStyle";
 import { parseRank, RANKS } from "@/lib/rank";
+import { CATEGORIES_SETTING_KEY, mergeCategories, resolveCategories } from "@/lib/category";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
 // (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
@@ -228,6 +233,57 @@ async function insertSpots(
   return rows;
 }
 
+/**
+ * 追加したスポットで**使われた値のうち、その種別の一覧にまだ無いものを一覧の末尾へ足す**
+ * (`?register_series=1` / `?register_categories=1`のときだけ)。
+ *
+ * **一覧に既定値を置いていないぶん、使った値がそのまま一覧になっていく形が要る。**
+ * 周辺を探すは地図データのジャンル(「ラーメン」「カフェ」…)をそのままシリーズにするので、
+ * 足さないと**ピンが全部同じ見た目になり、何を追加したのか地図から読めない**
+ * (シリーズはピンの中身と色を決める軸。`lib/spotStyle.ts`)。追加のたびに管理画面へ回って
+ * 同じ語を打ち直させるのも筋が悪い。カテゴリは絞り込みの並びと次回の候補のために足す。
+ *
+ * **入口を限る。** 呼び出し側が明示したときだけ動かし、権限もspot_admin/adminに限る ——
+ * CSVインポートのような大量投入まで一覧へ流し込むと、**空配列を明示して
+ * 「定義なし」にしてある種別の意図を黙って上書きする**ことになる。
+ *
+ * **失敗しても呼び出しは成功のまま返す。** スポットはもう入っているので、
+ * 一覧の更新に失敗したことでエラーを返すと「追加できなかった」と読めてしまう。
+ */
+async function registerUsedValues(
+  spotType: SpotType,
+  spots: Spot[],
+  what: { series: boolean; categories: boolean }
+) {
+  const updates: [string, string][] = [];
+  if (what.series) {
+    const merged = mergeSeriesStyles(
+      resolveSeriesStyles(spotType),
+      spots.map((s) => s.series)
+    );
+    if (merged) updates.push([SERIES_STYLES_SETTING_KEY, JSON.stringify(merged)]);
+  }
+  if (what.categories) {
+    const merged = mergeCategories(
+      resolveCategories(spotType),
+      spots.flatMap((s) => s.categories ?? [])
+    );
+    if (merged) updates.push([CATEGORIES_SETTING_KEY, JSON.stringify(merged)]);
+  }
+  for (const [key, value] of updates) {
+    try {
+      await query(
+        `insert into spot_type_settings (spot_type_id, key, value)
+         values ($1, $2, $3)
+         on conflict (spot_type_id, key) do update set value = excluded.value`,
+        [spotType.id, key, value]
+      );
+    } catch {
+      // 一覧に載らないだけで、スポット自体のシリーズ・カテゴリは保存できている
+    }
+  }
+}
+
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
@@ -236,7 +292,8 @@ export async function POST(request: Request) {
 
   // 新規登録先のスポット種別も、参照(GET)と同じくURLのキーで必ず明示させる
   // (app_settingsの既定には依存しない)
-  const typeKey = new URL(request.url).searchParams.get("type");
+  const { searchParams: postParams } = new URL(request.url);
+  const typeKey = postParams.get("type");
   if (!typeKey) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
   }
@@ -290,6 +347,13 @@ export async function POST(request: Request) {
 
   try {
     const inserted = await insertSpots(spotType.id, records, statuses, user.id);
+    if (SPOT_ADMIN_ROLES.includes(user.role)) {
+      const series = postParams.get("register_series") === "1";
+      const categories = postParams.get("register_categories") === "1";
+      if (series || categories) {
+        await registerUsedValues(spotType, inserted, { series, categories });
+      }
+    }
     return NextResponse.json({ data: Array.isArray(body) ? inserted : inserted[0] });
   } catch (err) {
     return NextResponse.json(

@@ -78,7 +78,7 @@ import FilterBar, {
 import AddSpotModal from "@/components/AddSpotModal";
 import AiSpotDiscoverySearchModal from "@/components/AiSpotDiscoverySearchModal";
 import AiSpotDiscoveryPanel, {
-  discoveryRowCategory,
+  discoveryRowSeries,
   type DiscoveryRow,
 } from "@/components/AiSpotDiscoveryPanel";
 import {
@@ -192,6 +192,22 @@ function visibleCenterOffset(
   }
   const visibleRight = Math.max(container.left, panel.left);
   return [(visibleRight - container.right) / 2, 0];
+}
+
+/**
+ * 空を除いた重複なしの一覧を**出てきた順のまま**返す。`distinctValues`(lib/types.ts)は
+ * 並べ替えてしまうので、「種別の設定を先に、実データを後ろに」の並びを保てない
+ */
+function distinctNonEmpty(values: (string | null | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const v = value?.trim();
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
 }
 
 const PATH_PIN_SOURCE_ID = "spots-path";
@@ -2518,8 +2534,7 @@ export default function MapView({
   }, [discoveryPanelOpen]);
   const [discoveryFocusedNo, setDiscoveryFocusedNo] = useState<number | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = useState<SpotStatus>("published");
-  const [discoverySeries, setDiscoverySeries] = useState("");
-  /** 追加する全件に足すカテゴリ(空なら足さない)。行ごとのジャンルとは併せて付く */
+  /** 追加する全件に足すカテゴリ(空なら足さない) */
   const [discoveryCategory, setDiscoveryCategory] = useState("");
   /**
    * パネルの実寸。**寄せ先を「パネルに隠れていない側の中心」にする**ために測る
@@ -2992,11 +3007,6 @@ export default function MapView({
   const addDiscoveryRows = useCallback(async () => {
     const targets = discoveryRows.filter((r) => r.checked && !r.candidate.existing);
     if (targets.length === 0) return;
-    const seriesRequired = seriesStyles.length > 0;
-    if (seriesRequired && !discoverySeries) {
-      setDiscoveryError("シリーズを選んでください。");
-      return;
-    }
     const regionOf = (row: DiscoveryRow) =>
       row.candidate.region ?? discoveryFallbackRegion.trim();
     if (targets.some((r) => !regionOf(r))) {
@@ -3007,9 +3017,8 @@ export default function MapView({
     }
     setDiscoveryAdding(true);
     setDiscoveryError(null);
-    // カテゴリは**行ごとの値と一括の値を併せて**付ける(重複と空は落とす)。
-    // 一括で置き換えないのは、まとめの札(「ラーメン」)と候補ごとの分類(「和食」)が
-    // 別の粒度で、どちらも残しておくほうが後から絞り込めるため
+    // **候補のジャンルはシリーズに入れる**(ピンの中身と色を決める軸)。カテゴリは
+    // 一括の欄で付ける「まとめの札」だけで、候補ごとの分類はシリーズが受け持つ
     const bulkCategory = discoveryCategory.trim();
     const records = targets.map((row) => ({
       name: row.candidate.name,
@@ -3018,14 +3027,18 @@ export default function MapView({
       lng: row.candidate.lng,
       region: regionOf(row),
       rank: rankEnabled ? row.rank || null : null,
-      series: seriesRequired ? discoverySeries : null,
-      categories: [...new Set([discoveryRowCategory(row).trim(), bulkCategory])].filter(
-        (c) => c !== ""
-      ),
+      series: discoveryRowSeries(row).trim() || null,
+      categories: bulkCategory ? [bulkCategory] : [],
       description: buildDiscoveredDescription(row.candidate, row.searchedAt, row.source),
       status: discoveryStatus,
     }));
-    const { data, error } = await api.spots.createMany(records, spotTypeKey);
+    // **使った値はその種別の一覧にも足す。** 地図データのジャンルがそのままシリーズに
+    // なるので、足しておかないと**ピンが全部同じ見た目になり、何を追加したのか地図から
+    // 読めない**(一覧に既定値を置いていないぶん、ここで育てる)
+    const { data, error } = await api.spots.createMany(records, spotTypeKey, {
+      registerSeries: true,
+      registerCategories: true,
+    });
     setDiscoveryAdding(false);
     if (error || !data) {
       setDiscoveryError("追加に失敗しました: " + (error?.message ?? "unknown error"));
@@ -3047,7 +3060,6 @@ export default function MapView({
     setDiscoveryFocusedNo(null);
   }, [
     discoveryRows,
-    discoverySeries,
     discoveryCategory,
     discoveryFallbackRegion,
     discoveryStatus,
@@ -3058,28 +3070,24 @@ export default function MapView({
     spotCache,
   ]);
 
-  /**
-   * カテゴリ欄の候補。**種別の設定を先に、いま並んでいる候補のジャンルを後ろに**足す
-   * (設定に無いジャンルでもそのまま入力できるので、打ち直さずに済むよう並べるだけ)
-   */
-  const discoveryCategoryOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const c of [...categories, ...discoveryRows.map(discoveryRowCategory)]) {
-      const v = c.trim();
-      if (!v || seen.has(v)) continue;
-      seen.add(v);
-      out.push(v);
-    }
-    return out;
-  }, [categories, discoveryRows]);
+  /** カテゴリ欄の候補。種別の設定を先に、既存スポットで使われている値を後ろに足す */
+  const discoveryCategoryOptions = useMemo(
+    () => distinctNonEmpty([...categories, ...spots.flatMap((s) => s.categories)]),
+    [categories, spots]
+  );
 
-  // シリーズの既定は種別の定義順の先頭
-  useEffect(() => {
-    if (!discoverySeries && seriesStyles.length > 0) {
-      setDiscoverySeries(seriesStyles[0].series);
-    }
-  }, [seriesStyles, discoverySeries]);
+  /**
+   * 行ごとのシリーズ欄の候補。**種別の設定を先に、いま並んでいる候補のジャンルを後ろに**
+   * 足す(設定に無いジャンルでもそのまま入力できるので、並べるだけ)
+   */
+  const discoverySeriesOptions = useMemo(
+    () =>
+      distinctNonEmpty([
+        ...seriesStyles.map((s) => s.series),
+        ...discoveryRows.map(discoveryRowSeries),
+      ]),
+    [seriesStyles, discoveryRows]
+  );
 
   // 地図の初期化
   useEffect(() => {
@@ -5234,9 +5242,8 @@ export default function MapView({
           role={role}
           regionScope={regionScope ?? DEFAULT_REGION_SCOPE}
           rankEnabled={rankEnabled}
-          seriesOptions={seriesStyles.map((s) => s.series)}
+          seriesOptions={discoverySeriesOptions}
           status={discoveryStatus}
-          series={discoverySeries}
           category={discoveryCategory}
           categoryOptions={discoveryCategoryOptions}
           fallbackRegion={discoveryFallbackRegion}
@@ -5244,7 +5251,6 @@ export default function MapView({
           adding={discoveryAdding}
           error={discoveryError}
           onStatusChange={setDiscoveryStatus}
-          onSeriesChange={setDiscoverySeries}
           onCategoryChange={setDiscoveryCategory}
           onFallbackRegionChange={setDiscoveryFallbackRegion}
           onToggle={(no) =>
@@ -5261,9 +5267,9 @@ export default function MapView({
           onRankChange={(no, rank) =>
             setDiscoveryRows((prev) => prev.map((r) => (r.no === no ? { ...r, rank } : r)))
           }
-          onRowCategoryChange={(no, category) =>
+          onRowSeriesChange={(no, series) =>
             setDiscoveryRows((prev) =>
-              prev.map((r) => (r.no === no ? { ...r, category } : r))
+              prev.map((r) => (r.no === no ? { ...r, series } : r))
             )
           }
           onRemove={(no) => {

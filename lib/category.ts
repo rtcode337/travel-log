@@ -5,26 +5,13 @@ import type { Category, SpotType } from "./types";
  * 同じく値がbooleanではないためSpotTypeSettingKeyの仕組みとは別扱いで、
  * spot_type_settingsの'categories'キーにJSON文字列(string[])として保存する。
  * 配列の並び順がそのまま絞り込みチップ・サジェストの並び順になる。
- * 未設定・parse失敗時はDEFAULT_CATEGORIES(観光地が当初使っていたカテゴリ)にフォールバックする。
+ *
+ * **未設定は「カテゴリ無し」**(空配列と同じ)。かつては観光地が当初使っていた一覧
+ * (神社仏閣・自然・城…)へフォールバックしていたが、**種別を新しく作るたびに、
+ * その種別と何の関係も無い候補が最初から並ぶ**ことになっていた。カテゴリは
+ * 種別ごとに中身が違う軸なので、共通の既定値を置ける性質のものではない。
  */
 export const CATEGORIES_SETTING_KEY = "categories";
-
-/**
- * カテゴリ一覧を設定していない種別の既定値(旧lib/types.tsのCATEGORIESハードコードの後継)。
- * **観光地(tourist)が当初使っていた一覧をそのまま残したもので、「観光地の現行カテゴリ」ではない**
- * —— 分類の軸はシリーズへ移り、いまの観光地は categories を空配列で明示している。
- * spots.categories列自体は自由入力のままで、この一覧に無い値も動作はする
- * (並び順は一覧の後ろになる)
- */
-export const DEFAULT_CATEGORIES: Category[] = [
-  "神社仏閣",
-  "自然",
-  "城",
-  "温泉",
-  "街並み",
-  "美術館博物館",
-  "その他",
-];
 
 /** 空でない文字列の配列(=カテゴリ一覧として使える形)か検証する */
 export function isValidCategoryList(v: unknown): v is Category[] {
@@ -45,15 +32,39 @@ export function parseCategories(json: string): Category[] | null {
 
 /**
  * スポット種別のsettingsから、そのカテゴリ一覧(並び順込み)を解決する。
- * 未設定・不正な値の場合はDEFAULT_CATEGORIESを返す。
- * 明示的に空配列("[]")を保存した種別は「定義済みカテゴリなし」の扱いになる
+ * **未設定・不正な値はどちらも空配列**(=定義済みカテゴリなし)。
+ * spots.categories列自体は自由入力のままなので、一覧に無い値も動作はする
+ * (並び順は一覧の後ろになる)
  */
 export function resolveCategories(
   type: Pick<SpotType, "settings"> | null | undefined
 ): Category[] {
   const raw = type?.settings?.[CATEGORIES_SETTING_KEY];
-  if (raw === undefined) return DEFAULT_CATEGORIES;
-  return parseCategories(raw) ?? DEFAULT_CATEGORIES;
+  if (raw === undefined) return [];
+  return parseCategories(raw) ?? [];
+}
+
+/**
+ * 実際に使われたカテゴリのうち、一覧にまだ無いものを**末尾に足した**新しい一覧を返す。
+ * 足すものが無ければnull(呼び出し側が「保存しない」を判断できるように)。
+ *
+ * 一覧の既定値を廃したぶん、**使った値がそのまま一覧になっていく形**にするためのもの。
+ * 並びは「もとの一覧 → 新しく出てきた順」で、既にある値の位置は動かさない
+ * (絞り込みチップの並びが、追加のたびに入れ替わらないようにするため)。
+ */
+export function mergeCategories(
+  defined: Category[],
+  used: Category[]
+): Category[] | null {
+  const seen = new Set(defined);
+  const added: Category[] = [];
+  for (const value of used) {
+    const v = value.trim();
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    added.push(v);
+  }
+  return added.length > 0 ? [...defined, ...added] : null;
 }
 
 /** カテゴリの並び順(categories配列の順→未知の値→null の順)。Array.sort用 */

@@ -157,6 +157,66 @@ export function findSeriesStyle(
   return styles.find((s) => s.series === series) ?? { series, label: series };
 }
 
+/**
+ * 定義の無いシリーズへ自動で割り当てる面の色。**順に配り、尽きたら先頭へ戻る**。
+ *
+ * 周辺を探すは地図データのジャンル(「ラーメン」「カフェ」…)をそのままシリーズにするので、
+ * 定義が無いままだとピンが全部同じ色になり、**何を追加したのか地図から読めない**。
+ * かといって追加のたびに色を選ばせると、そこで手が止まる。
+ *
+ * 選び方の制約は3つ: **隣り合う色が紛れないこと**、**ランクの色(`lib/rank.ts`)と
+ * 見分けが付くこと**、そして**アプリが意味を割り当てている色を避けること** ——
+ * 緑は訪問済み、紫は訪問予定リストの経路、青は押している候補の縁取りに使っている。
+ * 濃さは中身の文字が白で読める程度にそろえてある(`autoTextColor`が選ぶ)。
+ */
+const AUTO_SERIES_COLORS = [
+  "#0ea5e9", // sky
+  "#f97316", // orange
+  "#14b8a6", // teal
+  "#e11d48", // rose
+  "#8b5cf6", // violet
+  "#65a30d", // lime
+  "#d946ef", // fuchsia
+  "#0891b2", // cyan
+  "#ea580c", // orange(濃)
+  "#4f46e5", // indigo
+];
+
+/**
+ * シリーズ名から、ピンの中に収まる短いラベルを作る(**先頭2文字**)。
+ *
+ * ピンは小さいので、名前をそのまま入れると潰れて読めない。2文字までにしてあるのは
+ * 絞り込みの見た目とも揃うため —— アイコンか1〜2文字のラベルだけで構成された種別は
+ * 横並びのボタン列になる(`canTileSeries`)ので、長いラベルを混ぜるとそこが崩れる。
+ */
+export function autoSeriesLabel(series: string): string {
+  return [...series.trim()].slice(0, 2).join("");
+}
+
+/**
+ * 実際に使われたシリーズのうち、定義にまだ無いものを**末尾に足した**新しい定義を返す。
+ * 足すものが無ければnull(呼び出し側が「保存しない」を判断できるように)。
+ *
+ * 足す定義はラベル(`autoSeriesLabel`)と色(`AUTO_SERIES_COLORS`)だけで、形は既定の丸。
+ * **色は「定義済みの数」から続けて配る**ので、何回かに分けて追加しても色が偏らない。
+ * 既にある定義には触らない —— 手で決めた見た目を、あとからの自動登録で上書きしない。
+ */
+export function mergeSeriesStyles(
+  defined: SeriesStyleDefinition[],
+  used: (string | null | undefined)[]
+): SeriesStyleDefinition[] | null {
+  const seen = new Set(defined.map((s) => s.series));
+  const added: SeriesStyleDefinition[] = [];
+  for (const value of used) {
+    const series = value?.trim();
+    if (!series || seen.has(series)) continue;
+    seen.add(series);
+    const color = AUTO_SERIES_COLORS[(defined.length + added.length) % AUTO_SERIES_COLORS.length];
+    added.push({ series, label: autoSeriesLabel(series), color });
+  }
+  return added.length > 0 ? [...defined, ...added] : null;
+}
+
 /** アイコン(解決済み)。無ければnull */
 export function seriesIconOf(
   style: SeriesStyleDefinition | null
