@@ -146,7 +146,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 新しい種別は`/[type]/admin`のキー+表示名の手入力フォームのほか、`{ key, label, settings?, series?, categories? }`形式のJSONファイルアップロードでも作成できる(`lib/types.ts`の`parseSpotTypeDefinition`でバリデーション、`AdminView`側で`spotTypes.create`→(settings/series/categoriesがあれば)`spotTypes.applySettings`の2段APIコールに分解する。バックエンドに専用エンドポイントは増やしていない)。travel-log-dataリポジトリの`<スポットキー>/settings.json`がこの形式の実例。同じ形式のJSONは、既存の種別に対して「スポット種別の設定」セクション(admin専用)の「JSONファイルから設定を反映」からも読み込める(`AdminView`の`handleApplyTypeFromJson`)。こちらは既存の`spotTypes.applySettings`(PATCH `/api/spot-types/[id]`)をそのまま使ってlabel/settings/series/categoriesを上書きする(PATCHの`label`は元々`settings`専用だったこのエンドポイントに追加した省略可能フィールドで、指定時のみ`spot_types.label`列をUPDATEする)。keyの変更だけは影響が大きい(URLの`/[type]/`セグメント・`app_settings.active_spot_type_id`・地図の表示位置記憶等、あらゆる箇所がkeyで紐づいているため)ため意図的にサポートせず、JSONのkeyが現在開いている種別のkeyと一致しない場合は何も反映せずエラーにする。
 
-`spots.rank`(A〜Eかnull)/`spots.series`(1スポットに1つ・nullable text)/`spots.categories`(1スポットに複数・`text[]`)の3軸については「見た目の軸: ランク・シリーズ・カテゴリ」を参照。series/categoriesは自由入力で、種別ごとに使う値の一覧を設定に持つ(カテゴリの既定は`lib/category.ts`の`DEFAULT_CATEGORIES`)。
+`spots.rank`(A〜Eかnull)/`spots.series`(1スポットに1つ・nullable text)/`spots.categories`(1スポットに複数・`text[]`)の3軸については「見た目の軸: ランク・シリーズ・カテゴリ」を参照。series/categoriesは自由入力で、種別ごとに使う値の一覧を設定に持つ(カテゴリの一覧は**未設定なら空**。`lib/category.ts`)。
 
 ### 対象地域(`region_scope`)
 
@@ -340,7 +340,14 @@ PATCH `/api/spot-types/[id]`は`series_styles`・`categories`を保存前に検�
 
 **1スポットは複数のカテゴリを持てる**(`spots.categories`は`text[]`。かつては単数の`spots.category text`だった)。絞り込みはOR条件で、選択中のカテゴリのいずれかを持つスポットが通る(`FilterBar`の`passesFilters`)。CSV・訪問記録エクスポートでは`categories`という1列にパイプ区切り(`CATEGORY_SEPARATOR`)で書く — カンマだとCSVの区切りと衝突して値全体の引用が要るため(`parseCategoryList`/`formatCategoryList`)。CSVに`categories`列自体が無い場合は、`key`列と同じく既存スポットのカテゴリを変更しない(全消しを防ぐため)。PATCH `/api/spots/[id]`も同じ理由で、ボディに`categories`が含まれるときだけ更新する(「カテゴリなし」にするには空配列を明示的に送る)。
 
-カテゴリの一覧(種別ごとに使える値の定義)も同じパターンでスポット種別ごとに持つ(`lib/category.ts`)。`spot_type_settings`の`categories`キー(`CATEGORIES_SETTING_KEY`)にJSON文字列(`string[]`。見た目は持たない)を保存し、行が無い・parse失敗時は`DEFAULT_CATEGORIES`(観光地の現行カテゴリ、旧`lib/types.ts`の`CATEGORIES`ハードコードの後継)にフォールバックする(`resolveCategories`)。明示的に空配列`"[]"`を保存した種別は「定義済みカテゴリなし」の扱い。配列の並び順がカテゴリの並び順(`getCategoryOrder`)で、地図・スポット一覧の絞り込みチップ(`components/FilterBar.tsx`の`SpotFilters.categories`。シリーズと同じ複数選択+「すべて」チップ(訪問状況は「すべて」チップ無しで既定=未訪問のみ)、選択肢は実データに存在する値から作る)と、スポット追加・編集フォーム(`AddSpotModal`)の選択チップ(複数選択のトグル。設定の一覧を先頭に、設定外の既存値を後ろに合成し、一覧に無い値は下の入力欄から足せる)がこの並びを使う。取得は`useCategories(typeKey)`フック(`useSeriesStyles`のカテゴリ版)。管理画面`/[type]/admin`「スポット種別の設定」のカテゴリ欄(カンマ・読点区切りで入力、admin専用)と、スポット種別JSON作成の`categories`フィールド(文字列配列)から設定でき、PATCH `/api/spot-types/[id]`が`parseCategories`で妥当性を検証する。`categories`列自体は従来どおり自由入力で、一覧に無い値も動く(並びは末尾)。
+カテゴリの一覧(種別ごとに使える値の定義)も同じパターンでスポット種別ごとに持つ(`lib/category.ts`)。`spot_type_settings`の`categories`キー(`CATEGORIES_SETTING_KEY`)にJSON文字列(`string[]`。見た目は持たない)を保存し、**行が無い・parse失敗時はどちらも空配列=「定義済みカテゴリなし」**(`resolveCategories`)。かつては観光地が当初使っていた一覧(神社仏閣・自然・城…)へフォールバックしていたが、**種別を新しく作るたびに、その種別と何の関係も無い候補が最初から並ぶ**ことになっていた。カテゴリは種別ごとに中身が違う軸なので、共通の既定値を置ける性質のものではない。配列の並び順がカテゴリの並び順(`getCategoryOrder`)で、地図・スポット一覧の絞り込みチップ(`components/FilterBar.tsx`の`SpotFilters.categories`。シリーズと同じ複数選択+「すべて」チップ(訪問状況は「すべて」チップ無しで既定=未訪問のみ)、選択肢は実データに存在する値から作る)と、スポット追加・編集フォーム(`AddSpotModal`)の選択チップ(複数選択のトグル。設定の一覧を先頭に、設定外の既存値を後ろに合成し、一覧に無い値は下の入力欄から足せる)がこの並びを使う。取得は`useCategories(typeKey)`フック(`useSeriesStyles`のカテゴリ版)。管理画面`/[type]/admin`「スポット種別の設定」のカテゴリ欄(カンマ・読点区切りで入力、admin専用)と、スポット種別JSON作成の`categories`フィールド(文字列配列)から設定でき、PATCH `/api/spot-types/[id]`が`parseCategories`で妥当性を検証する。`categories`列自体は従来どおり自由入力で、一覧に無い値も動く(並びは末尾)。
+
+**一覧は「使った値」で育つ。** POST `/api/spots`に`?register_series=1`・`?register_categories=1`を付けると、追加したスポットの**シリーズ・カテゴリのうち一覧にまだ無いものを末尾へ足す**(`registerUsedValues`+`mergeSeriesStyles`/`mergeCategories`)。既定値を廃したぶんの受け皿で、いまの使い手は**周辺を探す**。
+
+- **既にある定義には触らない。** 位置も見た目も動かさない —— 手で決めた見た目を、あとからの自動登録で上書きしないため。絞り込みチップの並びが追加のたびに入れ替わるのも防げる
+- **足すシリーズの見た目は自動で決める**(`mergeSeriesStyles`)。ラベルは**シリーズ名の先頭2文字**(`autoSeriesLabel`。ピンは小さいので名前をそのまま入れると潰れる。1〜2文字にそろえておくと絞り込みが横並びのボタン列のままになる=`canTileSeries`)、色は`AUTO_SERIES_COLORS`から**定義済みの数に続けて**配る(何回かに分けて追加しても偏らない)。形は既定の丸
+- **呼び出し側が明示したときだけ動かし、権限も`SPOT_ADMIN_ROLES`に限る。** 全経路で自動にすると、CSVインポートのような大量投入まで一覧へ流し込み、**空配列を明示して「定義なし」にしてある種別の意図を黙って上書きする**
+- **一覧の更新に失敗しても呼び出しは成功のまま返す。** スポットはもう入っているので、ここでエラーを返すと「追加できなかった」と読めてしまう(載らないのは一覧だけで、スポット自身の値は保存できている)
 
 ### 経路(`spot_routes`/`spot_route_points`)とスポット参照キー(`spots.key`)
 
@@ -922,15 +929,22 @@ StrictModeが更新関数を2回呼ぶ開発時には番号が2倍消費され�
 **名前と座標は辞典のもの、言葉はAIのもの**という混ざり方をするため。
 AIが足したものなら「AIがwebから収集(日付)、参照: URL」。**どの辞典かは候補ごとに持つ**
 =`DiscoveryCandidate.dataset` —— ライセンスが辞典ごとに違い、1回の探索で両方を引くため)
-—— 手で書いた説明と見分けるため。状態・シリーズは全行共通。
+—— 手で書いた説明と見分けるため。状態は全行共通。
 
-**カテゴリは一括と行ごとの両方から付く**(重複と空は落として`categories`に入れる)。
-行ごとの欄は**候補のジャンルが初期値**で、下の「カテゴリを全件に追加」はそれに**足す**
-(置き換えない)。分けてあるのは、地図データの分類が実態と食い違うこと
-(麺類の店が「和食」で入る)と、「この一帯はラーメン」のようなまとめの札が別の用途だから。
-**行ごとの値は手で直したときだけ持つ**(`DiscoveryRow.category`が`undefined`なら
-候補のジャンルを読む)ので、後から届くAIの精査でジャンルが付け直されても
-直した内容は消えず、直していない行はAIの結果に追従する。
+**候補のジャンルはカテゴリではなくシリーズに入れる。** シリーズはピンの中身と色を決める軸
+なので、ここに入れて初めて**地図で何を追加したのかが見分けられる**(カテゴリは絞り込み専用で
+見た目には効かない。「見た目の軸」の節)。**一覧に無いジャンルは追加時に種別のシリーズ設定へ
+自動で足される**(上記`?register_series=1`)ので、行ごとに選び直す必要はない ——
+足さないとピンが全部同じ見た目になり、追加した意味が地図から読めない。
+
+シリーズの欄は**行ごと**で、候補のジャンルが初期値。地図データの分類は実態と食い違うことが
+あるので(麺類の店が「和食」で入る)、追加してから1件ずつ直すより、ここで直せるほうが早い。
+**行ごとの値は手で直したときだけ持つ**(`DiscoveryRow.series`が`undefined`なら候補のジャンルを
+読む)ので、後から届くAIの精査でジャンルが付け直されても直した内容は消えず、直していない行は
+AIの結果に追従する。**全行共通のシリーズの選択は置かない**(行ごとに決まるため)。
+
+**カテゴリは一括の欄だけ**(「この一帯はラーメン」のようなまとめの札)。候補ごとの分類は
+シリーズが受け持つので、行ごとの欄は置かない。
 公開で追加した行は`spotCache.applySpotChange`で次のダウンロードを待たずに地図へ載せる。
 
 **ライセンスは辞典ごとに違う。** OSMは**ODbL**(継承条件つき)、Overtureは

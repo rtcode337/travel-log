@@ -667,8 +667,7 @@ export default function AdminView({
       }
 
       // series/categoriesが指定されていれば、真偽値の設定と合わせて1回のPATCHで反映する
-      // (省略時はDEFAULT_SERIES_STYLES=観光地のA〜E、DEFAULT_CATEGORIES=観光地の
-      // カテゴリにフォールバックするので何もしない)
+      // (どちらも省略時は定義なしになるので何もしない)
       const settingsToApply: Record<string, boolean | string> = {};
       for (const [k, v] of Object.entries(settings ?? {})) {
         if (v !== undefined) settingsToApply[k] = v;

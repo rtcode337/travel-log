@@ -143,11 +143,25 @@ export const api = {
         method: "POST",
         body: JSON.stringify(spot),
       }),
-    createMany: (spots: unknown[], type: string) =>
-      request<Spot[]>(`/api/spots?type=${encodeURIComponent(type)}`, {
-        method: "POST",
-        body: JSON.stringify(spots),
-      }),
+    /**
+     * まとめて追加する。`registerSeries`/`registerCategories`を立てると、
+     * **一覧にまだ無い値をその種別のシリーズ設定・カテゴリ一覧へ足す**
+     * (spot_admin/adminのみ。周辺を探すからの追加で使う)
+     */
+    createMany: (
+      spots: unknown[],
+      type: string,
+      opts?: { registerSeries?: boolean; registerCategories?: boolean }
+    ) =>
+      request<Spot[]>(
+        `/api/spots?type=${encodeURIComponent(type)}${
+          opts?.registerSeries ? "&register_series=1" : ""
+        }${opts?.registerCategories ? "&register_categories=1" : ""}`,
+        {
+          method: "POST",
+          body: JSON.stringify(spots),
+        }
+      ),
     update: (id: string, spot: unknown) =>
       request<Spot>(`/api/spots/${id}`, {
         method: "PATCH",

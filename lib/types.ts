@@ -226,8 +226,8 @@ export function getSpotTypeSetting(
  * region_scope('jp'/国コード/'world')・wikipedia_lang('en'等)のような文字列値の
  * 設定もそのまま指定できる(妥当性はPATCH /api/spot-types/[id]側で検証される)。
  * seriesを省略した場合(または画面から手入力で種別を追加した場合)はシリーズ定義なし
- * (lib/seriesStyle.ts)、categoriesを省略した場合は観光地の現行カテゴリ
- * (DEFAULT_CATEGORIES、lib/category.ts参照)が既定になる。
+ * (lib/seriesStyle.ts)、categoriesを省略した場合はカテゴリ定義なし
+ * (lib/category.ts参照)になる。
  */
 export interface SpotTypeDefinitionFile {
   key: string;

@@ -31,12 +31,16 @@ import { buildGoogleMapsCompareUrl } from "@/lib/googleMaps";
  * 間隔制限がそのまま待ちになるが、気づいた1件だけなら1秒で済む
  * (AIの座標は当てにならないことがあり、地図で見て初めて分かる)。
  *
- * 状態・シリーズは全行共通(追加後に個別に編集できるので、ここでは行ごとに分けない)。
- * ランクとカテゴリはAI・地図データの値を行ごとに直せる。
+ * 状態は全行共通(追加後に個別に編集できるので、ここでは行ごとに分けない)。
+ * **シリーズとランクは行ごと**にAI・地図データの値を直せる。
  *
- * **カテゴリは一括と行ごとの両方から付く。** 行ごとの値は候補のジャンルが初期値で、
- * 一括の欄はそれに**足す**(置き換えない) —— 分類の粒度が食い違うことがあり
- * (麺類の店が「和食」で入ってくる)、まとめの札と個別の直しは別の用途になる。
+ * **候補のジャンルはシリーズに入れる。** シリーズはピンの中身と色を決める軸なので、
+ * ここに入れて初めて**地図で何を追加したのかが見分けられる**(カテゴリは絞り込み専用で
+ * 見た目には効かない。`lib/spotStyle.ts`)。一覧に無いジャンルは追加時に種別の
+ * シリーズ設定へ自動で足されるので、行ごとに選び直す必要はない。
+ *
+ * **カテゴリは一括だけ**(「この一帯はラーメン」のようなまとめの札)。
+ * 候補ごとの分類はシリーズが受け持つので、行ごとの欄は置かない。
  */
 export interface DiscoveryRow {
   /** 一覧・地図の印で共有する通し番号(1始まり。外しても振り直さない) */
@@ -60,16 +64,16 @@ export interface DiscoveryRow {
       別の半径の結果が同じ一覧に混ざるため、画面側の今の値では判定できない */
   radius: number;
   /**
-   * 追加するときに付けるカテゴリ。**未設定(`undefined`)なら候補のジャンルを使う** ——
+   * 追加するときに付けるシリーズ。**未設定(`undefined`)なら候補のジャンルを使う** ——
    * 手で直したときだけ値を持つので、AIの精査でジャンルが付け直されても
    * 直した内容が消えない(逆に、直していない行はAIの結果に追従する)
    */
-  category?: string;
+  series?: string;
 }
 
-/** その行が追加時に持つカテゴリ(手で直していなければ候補のジャンル) */
-export function discoveryRowCategory(row: DiscoveryRow): string {
-  return row.category ?? row.candidate.genre ?? "";
+/** その行が追加時に持つシリーズ(手で直していなければ候補のジャンル) */
+export function discoveryRowSeries(row: DiscoveryRow): string {
+  return row.series ?? row.candidate.genre ?? "";
 }
 
 export default function AiSpotDiscoveryPanel({
@@ -80,7 +84,6 @@ export default function AiSpotDiscoveryPanel({
   rankEnabled,
   seriesOptions,
   status,
-  series,
   category,
   categoryOptions,
   fallbackRegion,
@@ -88,13 +91,12 @@ export default function AiSpotDiscoveryPanel({
   adding,
   error,
   onStatusChange,
-  onSeriesChange,
   onCategoryChange,
   onFallbackRegionChange,
   onToggle,
   onToggleAll,
   onRankChange,
-  onRowCategoryChange,
+  onRowSeriesChange,
   onRemove,
   onRelocate,
   relocatingNo,
@@ -109,13 +111,12 @@ export default function AiSpotDiscoveryPanel({
   role: Role | null;
   regionScope: string;
   rankEnabled: boolean;
-  /** 種別のシリーズ設定の値(定義順)。空なら選ばせず、シリーズなしで追加する */
+  /** 種別のシリーズ設定の値(定義順)。行ごとのシリーズ欄の候補に出す */
   seriesOptions: string[];
   status: SpotStatus;
-  series: string;
-  /** 追加する全件に足すカテゴリ(空なら足さない)。行ごとのジャンルとは**併せて**付く */
+  /** 追加する全件に足すカテゴリ(空なら足さない) */
   category: string;
-  /** カテゴリ欄の候補(種別の設定+いま並んでいる候補のジャンル) */
+  /** カテゴリ欄の候補(種別の設定+既存の値) */
   categoryOptions: string[];
   /** 地域が解けなかった候補に使う既定 */
   fallbackRegion: string;
@@ -123,15 +124,14 @@ export default function AiSpotDiscoveryPanel({
   adding: boolean;
   error: string | null;
   onStatusChange: (status: SpotStatus) => void;
-  onSeriesChange: (series: string) => void;
   onCategoryChange: (category: string) => void;
   onFallbackRegionChange: (region: string) => void;
   onToggle: (no: number) => void;
   /** 追加できる行をまとめて選ぶ・まとめて外す(登録済みの行は対象外) */
   onToggleAll: (checked: boolean) => void;
   onRankChange: (no: number, rank: Rank | "") => void;
-  /** その行だけカテゴリを直す(地図データのジャンルが実態と合わないことがあるため) */
-  onRowCategoryChange: (no: number, category: string) => void;
+  /** その行だけシリーズを直す(地図データのジャンルが実態と合わないことがあるため) */
+  onRowSeriesChange: (no: number, series: string) => void;
   onRemove: (no: number) => void;
   /** その候補の位置を住所から引き直す(1件だけなので待ちは1秒ほど) */
   onRelocate: (no: number) => void;
@@ -149,8 +149,9 @@ export default function AiSpotDiscoveryPanel({
   ref?: React.Ref<HTMLDivElement>;
 }) {
   const listRef = useRef<HTMLUListElement | null>(null);
-  // カテゴリ欄の候補は一括・行ごとで共有する(同じ`datalist`を全部の欄が参照する)
+  // 入力欄の候補。シリーズは行ごとの欄が全部で共有する(同じ`datalist`を参照する)
   const categoryListId = useId();
+  const seriesListId = useId();
   const allowedStatuses = (role ? ALLOWED_STATUS_BY_ROLE[role] : ["private"]).filter(
     (s) => s !== "private"
   ) as SpotStatus[];
@@ -159,7 +160,6 @@ export default function AiSpotDiscoveryPanel({
   const selectableRows = rows.filter((r) => !r.candidate.existing);
   const allSelected = selectableRows.length > 0 && checkedRows.length === selectableRows.length;
   const needsFallbackRegion = rows.some((r) => !r.candidate.region);
-  const seriesRequired = seriesOptions.length > 0;
 
   // 地図の印を押したときに、その行が見える位置までスクロールする
   useEffect(() => {
@@ -357,16 +357,17 @@ export default function AiSpotDiscoveryPanel({
                   文字の途中では切れない)。チェックボックスのぶんだけ字下げして、
                   上の行の名前と縦にそろえる */}
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-[11px]">
-                {/* **カテゴリは行ごとに直せる。** 初期値は候補のジャンルだが、
-                    地図データの分類は実態と食い違うことがある(麺類の店が「和食」など)。
-                    追加してから1件ずつ編集し直すより、ここで直すほうが早い */}
+                {/* **シリーズは行ごとに直せる。** 初期値は候補のジャンルで、これが
+                    ピンの中身と色になる。地図データの分類は実態と食い違うことがある
+                    (麺類の店が「和食」など)ので、追加してから1件ずつ編集し直すより
+                    ここで直すほうが早い */}
                 <label className="flex items-center gap-1 text-gray-600">
-                  カテゴリ
+                  シリーズ
                   <input
-                    value={discoveryRowCategory(row)}
+                    value={discoveryRowSeries(row)}
                     disabled={disabled}
-                    list={categoryListId}
-                    onChange={(e) => onRowCategoryChange(row.no, e.target.value)}
+                    list={seriesListId}
+                    onChange={(e) => onRowSeriesChange(row.no, e.target.value)}
                     placeholder="なし"
                     className="w-24 rounded border border-gray-300 px-1 py-0.5 text-xs"
                   />
@@ -439,62 +440,47 @@ export default function AiSpotDiscoveryPanel({
 
       {/* 下の操作は**狭い画面では詰める**(一覧に回せる高さがそのぶん増える) */}
       <div className="space-y-1.5 border-t border-gray-200 p-2 sm:space-y-2 sm:p-3">
-        {/* カテゴリ欄の候補。一括の欄と行ごとの欄で同じものを参照する */}
+        {/* 入力欄の候補。カテゴリは一括の欄、シリーズは行ごとの欄が参照する */}
         <datalist id={categoryListId}>
           {categoryOptions.map((c) => (
             <option key={c} value={c} />
           ))}
         </datalist>
-        {(seriesRequired || needsFallbackRegion) && (
-          <div className="grid grid-cols-2 gap-2">
-            {seriesRequired && (
-              <div>
-                <label className="mb-0.5 block text-[11px] font-medium text-gray-600">シリーズ *</label>
-                <select
-                  value={series}
-                  onChange={(e) => onSeriesChange(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
-                >
-                  {seriesOptions.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {/* 地域が取れなかった候補があるときだけ、全行共通の既定を選ばせる */}
-            {needsFallbackRegion && (
-              <div className="col-span-2">
-                <label className="mb-0.5 block text-[11px] font-medium text-gray-600">
-                  {regionFieldLabel(regionScope)}(地域が分からなかった候補に使う) *
-                </label>
-                {regionScope === "jp" ? (
-                  <select
-                    value={fallbackRegion}
-                    onChange={(e) => onFallbackRegionChange(e.target.value)}
-                    className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
-                  >
-                    <option value="">選択</option>
-                    {PREFECTURES.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    value={fallbackRegion}
-                    onChange={(e) => onFallbackRegionChange(e.target.value)}
-                    className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
-                  />
-                )}
-              </div>
+        <datalist id={seriesListId}>
+          {seriesOptions.map((v) => (
+            <option key={v} value={v} />
+          ))}
+        </datalist>
+        {/* 地域が取れなかった候補があるときだけ、全行共通の既定を選ばせる */}
+        {needsFallbackRegion && (
+          <div>
+            <label className="mb-0.5 block text-[11px] font-medium text-gray-600">
+              {regionFieldLabel(regionScope)}(地域が分からなかった候補に使う) *
+            </label>
+            {regionScope === "jp" ? (
+              <select
+                value={fallbackRegion}
+                onChange={(e) => onFallbackRegionChange(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
+              >
+                <option value="">選択</option>
+                {PREFECTURES.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={fallbackRegion}
+                onChange={(e) => onFallbackRegionChange(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-2 py-1 text-sm"
+              />
             )}
           </div>
         )}
-        {/* **追加する全件に足すカテゴリ。** 行ごとのジャンル由来のカテゴリは残したまま
-            併せて付くので、「この一帯はラーメン」のようなまとめの札を1回で足せる */}
+        {/* **追加する全件に足すカテゴリ。** 候補ごとの分類はシリーズが受け持つので、
+            ここは「この一帯はラーメン」のようなまとめの札を1回で足すための欄 */}
         <label className="flex items-center gap-2 text-[11px] font-medium text-gray-600">
           <span className="shrink-0">カテゴリを全件に追加</span>
           <input
