@@ -165,8 +165,16 @@ function circlePolygon(
 
 /**
  * 地図の上に敷いたパネルを避けて、**見えている側の中心**へ寄せるための`offset`
- * ([x, y]のピクセル。`flyTo`/`easeTo`の`offset`は「最終的な中心を container の
- * 中心からどれだけずらすか」を指す)。
+ * ([x, y]のピクセル。`offset`は「最終的な中心を container の中心からどれだけ
+ * ずらすか」を指す)。
+ *
+ * **渡す先は`easeTo`にすること。`flyTo`では効かないことがある** ——
+ * MapLibreの`flyTo`は端末が「視差効果を減らす」設定のときに`jumpTo`へ落ち、
+ * そのとき引き継ぐのは`center`・`zoom`・`bearing`・`pitch`・`roll`・`elevation`・
+ * `padding`だけで、**`offset`は黙って捨てられる**。落ちた先では寄せ先が地図の
+ * ど真ん中になり、下から敷く帯のときはそこがちょうどパネルの上端なので、
+ * **押した候補が半分隠れる**(実機で再現。手元のブラウザはこの設定を持たないので出ない)。
+ * `easeTo`は同じ設定で`duration`を0にするだけなので、`offset`はそのまま効く。
  *
  * パネルは狭い画面では下から敷く帯、広い画面では右の帯になる。**どちらかは
  * 画面幅で決め打ちせず実寸から判定する** —— 決め打ちすると、パネル側の
@@ -2807,11 +2815,13 @@ export default function MapView({
    *
    * **寄せ先は地図の中心ではなく、パネルに隠れていない側の中心**。パネルは画面の下半分
    * (狭い画面)か右側を覆っているので、素直に中心へ運ぶと**押した候補がパネルの下に入って
-   * 見えない**。`flyTo`の`offset`(最終的な中心を container の中心からずらすピクセル数)で
-   * 見えている矩形の中心へ置く。
+   * 見えない**。`offset`(`visibleCenterOffset`)で見えている矩形の中心へ置く。
+   *
+   * **`flyTo`ではなく`easeTo`を使う** —— `flyTo`は「視差効果を減らす」設定の端末で
+   * `offset`を捨てる(`visibleCenterOffset`の注記)。
    *
    * **`padding`は使わない** —— あちらは地図の transform に残り続けるので、以後の
-   * `fitBounds`・`flyTo`(訪問順の経路や現在地への移動)まで巻き込んでずれる。
+   * `fitBounds`(訪問順の経路や現在地への移動)まで巻き込んでずれる。
    */
   const focusDiscoveryRow = useCallback(
     (no: number) => {
@@ -2819,13 +2829,14 @@ export default function MapView({
       const map = mapRef.current;
       const row = discoveryRows.find((r) => r.no === no);
       if (!map || !row) return;
-      map.flyTo({
+      map.easeTo({
         center: [row.candidate.lng, row.candidate.lat],
         zoom: Math.max(map.getZoom(), 15),
         offset: visibleCenterOffset(
           containerRef.current?.getBoundingClientRect(),
           discoveryPanelRef.current?.getBoundingClientRect()
         ),
+        duration: 600,
       });
     },
     [discoveryRows]
@@ -2901,7 +2912,16 @@ export default function MapView({
       );
       // 直した位置がすぐ見えるように、その行へ寄せる
       setDiscoveryFocusedNo(no);
-      mapRef.current?.flyTo({ center: [hit.lng, hit.lat], zoom: Math.max(mapRef.current.getZoom(), 16) });
+      // 直した先もパネルに隠れていない側へ寄せる(行を押したときと同じ扱い)
+      mapRef.current?.easeTo({
+        center: [hit.lng, hit.lat],
+        zoom: Math.max(mapRef.current.getZoom(), 16),
+        offset: visibleCenterOffset(
+          containerRef.current?.getBoundingClientRect(),
+          discoveryPanelRef.current?.getBoundingClientRect()
+        ),
+        duration: 600,
+      });
     },
     [discoveryRows, regionScope]
   );
