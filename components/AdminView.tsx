@@ -229,7 +229,9 @@ export default function AdminView({
       setSavingTypeOrder(false);
       if (error) {
         setTypeMessage("並び順の保存に失敗しました: " + error.message);
-        load(); // 保存できていない並びを画面に残さない
+        // 保存できていない並びを画面に残さない。**種別を取り直す**(`load`はスポットの
+        // 一覧なので、こちらを呼んでも画面の並びは元に戻らない)
+        loadSpotTypes();
         return;
       }
       if (data) setSpotTypes(data);
