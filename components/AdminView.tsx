@@ -12,6 +12,8 @@ import { exportsEnabled } from "@/lib/features";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import { parseRank, type Rank } from "@/lib/rank";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
+import type { SpotCollectStatus } from "@/lib/spotCollect";
+import { formatJstDateTime } from "@/lib/spotDiscovery";
 import {
   CATEGORIES_SETTING_KEY,
   formatCategoryList,
@@ -212,6 +214,56 @@ export default function AdminView({
   );
   const currentTypeLabel = currentType?.label ?? typeKey;
 
+  /**
+   * 情報を集めさせる(知識サーバーへ依頼して、集まった頃に取り出す)。
+   * **周辺を探すの、待たない版** —— 依頼と状態はここ、取り出して選ぶのは地図のパネル。
+   */
+  const [collect, setCollect] = useState<SpotCollectStatus | null>(null);
+  const [collectPromptDraft, setCollectPromptDraft] = useState("");
+  const [collectBusy, setCollectBusy] = useState<"save" | "run" | null>(null);
+  const [collectMessage, setCollectMessage] = useState<string | null>(null);
+  const loadCollect = useCallback(async () => {
+    const { data } = await api.spotCollect.status(typeKey);
+    setCollect(data ?? null);
+    // **下書きは取得のたびに入れ直さない** —— 書きかけを消してしまう
+    setCollectPromptDraft((prev) => prev || (data?.prompt ?? ""));
+  }, [typeKey]);
+
+  const handleCollectSave = async () => {
+    const prompt = collectPromptDraft.trim();
+    if (!prompt) {
+      setCollectMessage("プロンプトを入力してください。");
+      return;
+    }
+    setCollectBusy("save");
+    setCollectMessage(null);
+    const { error } = await api.spotCollect.save(typeKey, prompt);
+    setCollectBusy(null);
+    if (error) {
+      setCollectMessage("依頼に失敗しました: " + error.message);
+      return;
+    }
+    await loadCollect();
+    setCollectMessage(
+      "依頼しました。知識サーバー側の管理画面で「有効にする」を押すまでは動きません。"
+    );
+  };
+
+  const handleCollectRun = async () => {
+    setCollectBusy("run");
+    setCollectMessage(null);
+    const { error } = await api.spotCollect.run(typeKey);
+    setCollectBusy(null);
+    if (error) {
+      setCollectMessage("集められませんでした: " + error.message);
+      return;
+    }
+    await loadCollect();
+    setCollectMessage(
+      "集め始めました。集まるまで数分かかります。地図の「集めた候補を見る」から取り出せます。"
+    );
+  };
+
   // スポット種別の並び替え(admin専用の一覧)。ドラッグ中は手元の並びだけを
   // 入れ替え、指を離した時点で1回だけ保存する(訪問予定リストと同じ流儀)
   const [savingTypeOrder, setSavingTypeOrder] = useState(false);
@@ -301,7 +353,8 @@ export default function AdminView({
     loadRoutes();
     loadSpotTypes();
     loadFlags();
-  }, [hasPageAccess, load, loadRoutes, loadSpotTypes, loadFlags]);
+    loadCollect();
+  }, [hasPageAccess, load, loadRoutes, loadSpotTypes, loadFlags, loadCollect]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2624,6 +2677,118 @@ export default function AdminView({
                 )}
               </section>
             </div>
+          )}
+
+          {collect?.available && (
+            <details>
+              <summary className="cursor-pointer select-none text-base font-bold">
+                情報を集めさせる
+                <span
+                  className="ml-1 inline-block align-middle"
+                  onClick={(e) => e.preventDefault()}
+                >
+                  <HelpTip anchored>
+                    知識サーバーに<b>依頼だけして離れ、集まった頃に取り出す</b>仕組み。
+                    その場で待つ「周辺を探す」と違って時間を掛けられるぶん、
+                    地図に載っていない新しい店なども拾える。
+                    <br />
+                    集まったものは<b>地図の長押しメニューの「集めた候補を見る」</b>から
+                    スポットの候補として取り出す(座標は地図データから引き直すので、
+                    引き当てられなかったものには印が付く)。
+                  </HelpTip>
+                </span>
+              </summary>
+              <section className="mt-2 space-y-3 rounded-xl border border-gray-200 bg-white p-3">
+                <p className="text-sm text-gray-500">
+                  溜め先: <code className="text-gray-700">{collect.source}</code>
+                </p>
+                {/* **止まっているあいだは、まずそれを出す。** 依頼しただけでは動かない
+                    (有効にできるのは知識サーバー側の管理画面だけ)ので、
+                    ここが読めないと「依頼したのに何も集まらない」で止まる */}
+                {collect.collection ? (
+                  collect.collection.enabled ? (
+                    <p className="rounded-lg bg-emerald-50 p-2 text-sm text-emerald-800">
+                      有効です。
+                      {collect.collection.last_run_at
+                        ? `前回: ${formatJstDateTime(collect.collection.last_run_at)}(${collect.collection.last_status ?? "?"})`
+                        : "まだ1回も集めていません。"}
+                      {collect.collection.last_error
+                        ? ` / 直前のエラー: ${collect.collection.last_error}`
+                        : ""}
+                    </p>
+                  ) : (
+                    <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">
+                      依頼済みですが<b>まだ止まっています</b>。
+                      知識サーバーの管理画面で「有効にする」を押してください
+                      (外のアプリから勝手に動かせない決まりのため)。
+                    </p>
+                  )
+                ) : (
+                  <p className="rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    まだ依頼していません。下のプロンプトを整えて「依頼する」を押してください。
+                  </p>
+                )}
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    集めさせる内容(プロンプト)
+                    <span className="ml-1 inline-block align-middle">
+                      <HelpTip anchored>
+                        <b>{"{cursor}"}</b>には前回どこまで集めたかが入る(相手が
+                        <b>next_cursor</b>で次の位置を返す)。
+                        <br />
+                        取り出す側は<b>title を名前</b>、
+                        <b>body の「所在地: …」を座標を引く手掛かり</b>、
+                        <b>tags の先頭をジャンル</b>、<b>url を出典</b>として読む。
+                        座標は書かせない(地図データから引き直すため)。
+                      </HelpTip>
+                    </span>
+                  </label>
+                  <textarea
+                    value={collectPromptDraft}
+                    onChange={(e) => setCollectPromptDraft(e.target.value)}
+                    rows={10}
+                    className="w-full rounded-lg border border-gray-300 px-2 py-2 font-mono text-xs"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCollectSave}
+                    disabled={collectBusy !== null}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {collectBusy === "save"
+                      ? "依頼中…"
+                      : collect.collection
+                        ? "内容を更新する"
+                        : "依頼する"}
+                  </button>
+                  {/* 予定を待たずに1回。**止まっていると向こうが断る**ので、
+                      そのときは理由をそのまま出す */}
+                  <button
+                    type="button"
+                    onClick={handleCollectRun}
+                    disabled={collectBusy !== null || !collect.collection}
+                    className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 disabled:opacity-50"
+                  >
+                    {collectBusy === "run" ? "起動中…" : "いま集める"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={loadCollect}
+                    disabled={collectBusy !== null}
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 disabled:opacity-50"
+                  >
+                    状態を取り直す
+                  </button>
+                </div>
+                {collectMessage && (
+                  <p className="whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {collectMessage}
+                  </p>
+                )}
+              </section>
+            </details>
           )}
 
           {isAdmin && (

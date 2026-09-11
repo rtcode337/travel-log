@@ -25,6 +25,7 @@ import type {
   DiscoveryResult,
   DiscoveryReviewTarget,
 } from "@/lib/spotDiscovery";
+import type { SpotCollectStatus } from "@/lib/spotCollect";
 
 interface Result<T> {
   data: T | null;
@@ -250,6 +251,35 @@ export const api = {
       request<DiscoveryResult>(
         `/api/spots/discover?type=${encodeURIComponent(type)}`,
         { method: "POST", body: JSON.stringify(params) }
+      ),
+  },
+  /**
+   * 情報を集めさせる(周辺を探すの、待たない版)。知識サーバーの収集へ依頼だけして
+   * 離れ、集まった頃に`candidates`で取り出す。**状態と候補はGETキャッシュを通さない**
+   * (`fresh`)—— どちらも向こう側で勝手に進むので、載せると古いまま画面が固まる
+   */
+  spotCollect: {
+    status: (type: string) =>
+      request<SpotCollectStatus>(
+        `/api/spots/collect?type=${encodeURIComponent(type)}`,
+        { fresh: true }
+      ),
+    /** 依頼する(まだ無ければ作る・あればプロンプトを差し替える) */
+    save: (type: string, prompt: string) =>
+      request<unknown>(`/api/spots/collect?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+        body: JSON.stringify({ prompt }),
+      }),
+    /** 予定を待たずに1回集めさせる(向こうで有効にしてあるときだけ通る) */
+    run: (type: string) =>
+      request<unknown>(`/api/spots/collect/run?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+      }),
+    /** 溜まったものからスポットの候補を取り出す */
+    candidates: (type: string) =>
+      request<DiscoveryResult>(
+        `/api/spots/collect/candidates?type=${encodeURIComponent(type)}`,
+        { fresh: true }
       ),
   },
   spotDeletions: {

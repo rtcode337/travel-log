@@ -10,7 +10,11 @@ import {
 } from "@/lib/types";
 import { regionFieldLabel } from "@/lib/region";
 import { RANKS, type Rank } from "@/lib/rank";
-import type { DiscoveryCandidate, DiscoverySource } from "@/lib/spotDiscovery";
+import {
+  DISCOVERY_SOURCE_LABELS,
+  type DiscoveryCandidate,
+  type DiscoverySource,
+} from "@/lib/spotDiscovery";
 import { buildGoogleMapsCompareUrl } from "@/lib/googleMaps";
 
 /**
@@ -159,7 +163,11 @@ export default function AiSpotDiscoveryPanel({
   // 登録済みの行はチェックできないので、「すべて」の対象から外す
   const selectableRows = rows.filter((r) => !r.candidate.existing);
   const allSelected = selectableRows.length > 0 && checkedRows.length === selectableRows.length;
-  const needsFallbackRegion = rows.some((r) => !r.candidate.region);
+  // **追加できる行だけを見る。** 登録済み・座標なしの行は追加の対象外なので、
+  // そこに地域が無いことを理由に全行共通の既定を求めると、埋めても意味の無い欄が出る
+  const needsFallbackRegion = selectableRows.some(
+    (r) => !r.candidate.region && !(r.candidate.lat === 0 && r.candidate.lng === 0)
+  );
 
   // 地図の印を押したときに、その行が見える位置までスクロールする
   useEffect(() => {
@@ -180,7 +188,14 @@ export default function AiSpotDiscoveryPanel({
       className="absolute bottom-0 left-0 right-0 top-1/2 z-20 flex flex-col overflow-hidden rounded-t-xl bg-white/95 shadow-xl backdrop-blur sm:left-auto sm:top-40 sm:w-2/5 sm:max-w-sm sm:rounded-tr-none"
     >
       <div className="border-b border-gray-200 p-2 sm:p-3">
-        <p className="text-xs text-gray-500">この周辺を探す</p>
+        {/* **どこから来た候補かを見出しに出す。** 同じ器で「その場で探したもの」と
+            「依頼して溜めたものを取り出したもの」の両方を並べるので、
+            見出しが「この周辺を探す」のままだと取り違える */}
+        <p className="text-xs text-gray-500">
+          {rows.length > 0 && rows.every((r) => r.source === "collect")
+            ? "集めた候補"
+            : "この周辺を探す"}
+        </p>
         {/* **AIとのやり取りは見出しの右**。下の操作に置くと、追加までの手順の中に
             「見るだけ」のボタンが挟まって縦を1行ぶん食う */}
         <div className="flex items-start justify-between gap-2">
@@ -230,7 +245,11 @@ export default function AiSpotDiscoveryPanel({
         )}
         {rows.map((row) => {
           const c = row.candidate;
-          const disabled = !!c.existing;
+          // **座標が無い候補は選べない。** 集めたものは地図辞典で引き当てられない
+          // ことがあり、そのまま入れると赤道上(0,0)にスポットが立つ。
+          // 「位置を直す」で住所から引ければ選べるようになる
+          const noPoint = c.lat === 0 && c.lng === 0;
+          const disabled = !!c.existing || noPoint;
           const focused = row.no === focusedNo;
           // **薄くするのは「登録済み」と「地図データで実在を確かめられなかった」の2つだけ。**
           // かつては参照URLの無い行を薄くしていたが、URLはAIが書いた文字列でしかなく
@@ -277,7 +296,9 @@ export default function AiSpotDiscoveryPanel({
                           ? "bg-gray-500"
                           : row.source === "ai"
                             ? "bg-violet-600"
-                            : "bg-sky-600"
+                            : row.source === "collect"
+                              ? "bg-teal-600"
+                              : "bg-sky-600"
                       }`}
                     >
                       {row.no}
@@ -295,10 +316,14 @@ export default function AiSpotDiscoveryPanel({
                     {/* 出どころ。同じ一覧に地図データとAIの候補が混ざるので必ず出す */}
                     <span
                       className={`rounded px-1 py-0.5 font-medium text-white ${
-                        row.source === "map" ? "bg-sky-600" : "bg-violet-600"
+                        row.source === "map"
+                          ? "bg-sky-600"
+                          : row.source === "collect"
+                            ? "bg-teal-600"
+                            : "bg-violet-600"
                       }`}
                     >
-                      {row.source === "map" ? "地図データ" : "AI"}
+                      {DISCOVERY_SOURCE_LABELS[row.source]}
                     </span>
                     {/* **AIの精査の結果は出どころの隣に出す。** 地図データの行に
                         ジャンル・ランク・一言が付いているのは精査を通ったからで、
@@ -317,6 +342,10 @@ export default function AiSpotDiscoveryPanel({
                       <span className="rounded bg-gray-200 px-1 py-0.5 text-gray-700">
                         登録済み: {c.existing.name}
                       </span>
+                    ) : noPoint ? (
+                      <span className="rounded bg-red-50 px-1 py-0.5 text-red-700">
+                        座標なし(位置を直す)
+                      </span>
                     ) : row.relocated ? (
                       <span className="rounded bg-green-100 px-1 py-0.5 text-green-800">住所から取得</span>
                     ) : row.source === "ai" ? (
@@ -333,9 +362,14 @@ export default function AiSpotDiscoveryPanel({
                         </span>
                       )
                     ) : null}
-                    <span className="rounded bg-gray-100 px-1 py-0.5 text-gray-600">
-                      {c.distance_m >= 1000 ? `${(c.distance_m / 1000).toFixed(1)} km` : `${c.distance_m} m`}
-                    </span>
+                    {/* 距離は探した中心があるときだけ。集めたものには中心が無い */}
+                    {row.source !== "collect" && (
+                      <span className="rounded bg-gray-100 px-1 py-0.5 text-gray-600">
+                        {c.distance_m >= 1000
+                          ? `${(c.distance_m / 1000).toFixed(1)} km`
+                          : `${c.distance_m} m`}
+                      </span>
+                    )}
                     {/* **半径の外に出た候補は必ず言う。** 頼んだ範囲を無視して数を
                         合わせにくることがあり(実測)、地図で見るまで気づけない */}
                     {c.distance_m > row.radius && (
