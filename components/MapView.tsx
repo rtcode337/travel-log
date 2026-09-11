@@ -128,6 +128,8 @@ const FOCUS_LAYER_ID = "spot-focus-halo";
  */
 const DISCOVERY_MAP_COLOR = "#0284c7"; // sky-600(バッジの bg-sky-100 / text-sky-800 と同系)
 const DISCOVERY_AI_COLOR = "#7c3aed"; // violet-600(バッジの bg-violet-100 / text-violet-800 と同系)
+/** 依頼して溜めたものから取り出した候補(その場で探したものと混ざらないよう色を分ける) */
+const DISCOVERY_COLLECT_COLOR = "#0d9488"; // teal-600
 /** 登録済み(もう足しようがない)は色を落とす */
 const DISCOVERY_EXISTING_COLOR = "#6b7280";
 
@@ -2685,7 +2687,9 @@ export default function MapView({
                 ? DISCOVERY_EXISTING_COLOR
                 : row.source === "ai"
                   ? DISCOVERY_AI_COLOR
-                  : DISCOVERY_MAP_COLOR,
+                  : row.source === "collect"
+                    ? DISCOVERY_COLLECT_COLOR
+                    : DISCOVERY_MAP_COLOR,
               opacity: row.checked && !row.candidate.existing ? 1 : 0.45,
               focused: row.no === discoveryFocusedNo,
             },
@@ -2989,6 +2993,45 @@ export default function MapView({
     [appendDiscoveryResult, applyDiscoveryReviews, spotTypeKey]
   );
 
+  /**
+   * 溜まった収集からスポットの候補を取り出し、探索のパネルに並べる。
+   *
+   * **周辺を探すと同じ器に載せる。** 出てくるのは同じ`DiscoveryResult`で、
+   * 地図の印・行ごとのシリーズ・登録済みの印・まとめて追加が全部そのまま使える ——
+   * 出どころが違うだけのものに、別の画面を作る理由が無い。
+   *
+   * **中心が無いので探す範囲の円は出さない**(集めたものは全国に散らばる)。
+   * 代わりに、取り出したあと候補全体が入るよう地図を寄せる。
+   */
+  const [collectFetching, setCollectFetching] = useState(false);
+  const openCollected = useCallback(async () => {
+    setCollectFetching(true);
+    const { data, error } = await api.spotCollect.candidates(spotTypeKey);
+    setCollectFetching(false);
+    if (error || !data) {
+      setDiscoveryError(error?.message ?? "集めたものを取り出せませんでした。");
+      setDiscoveryPanelOpen(true);
+      discoveryPanelOpenRef.current = true;
+      return;
+    }
+    // 探す範囲の円は消す(この取り出しには中心が無い)
+    setDiscoveryRange(null);
+    discoverySearchCenterRef.current = null;
+    setDiscoveryRows([]);
+    appendDiscoveryResult(data, {
+      query: "",
+      radius: DEFAULT_DISCOVERY_RADIUS,
+      limit: 0,
+      source: "collect",
+    });
+    const points = data.candidates.filter((c) => c.location_verified);
+    if (points.length > 0) {
+      fitMapToSpots(
+        points.map((c) => ({ lat: c.lat, lng: c.lng }) as Spot)
+      );
+    }
+  }, [appendDiscoveryResult, fitMapToSpots, spotTypeKey]);
+
   const closeDiscovery = useCallback(() => {
     setDiscoveryPanelOpen(false);
     discoveryPanelOpenRef.current = false;
@@ -3007,6 +3050,14 @@ export default function MapView({
   const addDiscoveryRows = useCallback(async () => {
     const targets = discoveryRows.filter((r) => r.checked && !r.candidate.existing);
     if (targets.length === 0) return;
+    // **座標の無い候補は入れない。** 集めたものは地図辞典で引き当てられないことがあり、
+    // そのまま入れると赤道上(0,0)にスポットが立つ。「位置を直す」で住所から引ける
+    if (targets.some((r) => r.candidate.lat === 0 && r.candidate.lng === 0)) {
+      setDiscoveryError(
+        "座標の無い候補が選ばれています。「位置を直す」で住所から取得するか、選択を外してください。"
+      );
+      return;
+    }
     const regionOf = (row: DiscoveryRow) =>
       row.candidate.region ?? discoveryFallbackRegion.trim();
     if (targets.some((r) => !regionOf(r))) {
@@ -5173,6 +5224,20 @@ export default function MapView({
                     className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
                   >
                     この周辺を探す
+                  </button>
+                )}
+                {/* **依頼して溜めておいたものを取り出す。** その場では探さないので
+                    「この周辺」ではない —— 集めたものは全国に散らばる */}
+                {discoveryEnabled && (
+                  <button
+                    onClick={() => {
+                      openCollected();
+                      setContextMenu(null);
+                    }}
+                    disabled={collectFetching}
+                    className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {collectFetching ? "取り出し中…" : "集めた候補を見る"}
                   </button>
                 )}
               </>

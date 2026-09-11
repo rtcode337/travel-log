@@ -106,7 +106,17 @@ export interface DiscoveryChoice {
  * 「まず地図データで雑に集め、**その一覧をAIに精査させて足りないぶんを足す**」が
  * 想定の流れで、同じ一覧に混ぜて並ぶ(行に出どころの印が付く)
  */
-export type DiscoverySource = "map" | "ai";
+export type DiscoverySource = "map" | "ai" | "collect";
+
+/**
+ * 出どころの表示名。画面のバッジ・説明文の両方から引く
+ * (片方だけ足すと、印は付いているのに説明文に出どころが残らない)
+ */
+export const DISCOVERY_SOURCE_LABELS: Record<DiscoverySource, string> = {
+  map: "地図データ",
+  ai: "AI",
+  collect: "収集",
+};
 
 /**
  * AIに精査させる地図データの候補(POSTの`known`で渡す1件)。
@@ -267,6 +277,15 @@ export function formatJstDate(iso: string): string {
   return `${jst.getUTCFullYear()}-${p(jst.getUTCMonth() + 1)}-${p(jst.getUTCDate())}`;
 }
 
+/** `YYYY-MM-DD HH:MM`(JST)。前回いつ集めたかのような、時刻まで要るところに使う */
+export function formatJstDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${formatJstDate(iso)} ${p(jst.getUTCHours())}:${p(jst.getUTCMinutes())}`;
+}
+
 /**
  * 候補からスポットの説明文を組む。AIの要約のあとに、出どころ(AIがwebから収集した
  * 日付と参照URL)を必ず添える —— 手で書いた説明と見分けられるようにするため。
@@ -290,12 +309,17 @@ export function buildDiscoveredDescription(
       ? [
           `${DISCOVERY_DATASET_LABELS[candidate.dataset ?? "osm"]}から取得(${formatJstDate(searchedAt)})`,
         ]
-      : [`AIがwebから収集(${formatJstDate(searchedAt)})`];
+      : source === "collect"
+        ? // **依頼して溜めたものから取り出した**、と分かる書き方にする ——
+          // その場で探したAIの候補と違い、集めた時点は取り出した時点より前で、
+          // 元の文書は知識サーバー側に残っている
+          [`知識サーバーの収集から取得(${formatJstDate(searchedAt)})`]
+        : [`AIがwebから収集(${formatJstDate(searchedAt)})`];
   // 地図データの行でも、ジャンル・要約はAIが付けていることがある(精査の段)。
   // **名前と座標は辞典のもの、言葉はAIのもの**という混ざり方をするので、そこを書き分ける
   if (source === "map" && candidate.ai_reviewed) provenance.push("ジャンルと要約はAIが精査");
   if (candidate.url) provenance.push(`参照: ${candidate.url}`);
-  if (source === "ai" && !candidate.location_verified) provenance.push("位置は未確認");
+  if (source !== "map" && !candidate.location_verified) provenance.push("位置は未確認");
   lines.push(provenance.join("、"));
   return lines.join("\n\n");
 }
