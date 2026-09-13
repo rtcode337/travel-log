@@ -7,6 +7,7 @@ import { discoveryBaseUrl } from "@/lib/aiDiscoveryConfig";
 import {
   resolveCollectSource,
   type ChiezoCollection,
+  type ChiezoIngestStatus,
   type SpotCollectStatus,
 } from "@/lib/spotCollect";
 
@@ -67,6 +68,33 @@ export async function chiezo<T>(
  * 404を返すので、「まだ依頼していない」と「繋がらない」が同じ形になる。
  * 一覧なら、返ってきたうえで見つからないことが「まだ無い」だと言い切れる。
  */
+/**
+ * 1件ぶんの収集を引く。**回り終えた地域まで返るのはこちらだけ**
+ * (一覧は件数しか持たない —— 積み上がると1件で数百KBになるため)。
+ * まだ依頼していなければnull。
+ */
+export async function fetchCollection(
+  baseUrl: string,
+  source: string
+): Promise<ChiezoCollection | null> {
+  const { data } = await chiezo<ChiezoCollection>(
+    baseUrl,
+    `/v1/collect/${encodeURIComponent(source)}`
+  );
+  return data ?? null;
+}
+
+/**
+ * いま取り込みが走っているか。**落ちていても機能ごと止めない**ので、
+ * 取れなければnull(画面は「分からない」として描く)。
+ */
+export async function fetchIngestStatus(
+  baseUrl: string
+): Promise<ChiezoIngestStatus | null> {
+  const { data } = await chiezo<ChiezoIngestStatus>(baseUrl, "/v1/ingest/status");
+  return data ?? null;
+}
+
 export async function findCollection(
   baseUrl: string,
   source: string
@@ -114,4 +142,4 @@ export async function resolveCollectContext(request: Request): Promise<
   return { spotType, baseUrl, source: resolveCollectSource(spotType) };
 }
 
-export type { ChiezoCollection, SpotCollectStatus };
+export type { ChiezoCollection, ChiezoIngestStatus, SpotCollectStatus };

@@ -15,6 +15,7 @@ import {
   type DiscoveryCandidate,
   type DiscoverySource,
 } from "@/lib/spotDiscovery";
+import type { CollectCoverage } from "@/lib/spotCollect";
 import { buildGoogleMapsCompareUrl } from "@/lib/googleMaps";
 
 /**
@@ -107,6 +108,9 @@ export default function AiSpotDiscoveryPanel({
   onFocus,
   onSearchAgain,
   onShowExchange,
+  coverage,
+  onCollectMissing,
+  collectStarting,
   aiPending,
   onAdd,
   onClose,
@@ -145,6 +149,15 @@ export default function AiSpotDiscoveryPanel({
   onSearchAgain: () => void;
   /** 直近のAIとのやり取りを見る(AIに聞いていなければ渡さない) */
   onShowExchange?: () => void;
+  /**
+   * 円の中がどこまで収集済みか(「この周辺の集めた情報」で開いたときだけ)。
+   * **集まっているぶんは出したうえで、足りない範囲を言う** —— 何も出ないのと
+   * 「まだ集めていない範囲がある」のとでは、次にすることが違う
+   */
+  coverage?: CollectCoverage | null;
+  /** まだ回っていない地域を、予定を待たずに集めさせる */
+  onCollectMissing?: () => void;
+  collectStarting?: boolean;
   /** AIへの問い合わせが走っている(地図データの結果を出した後ろで動いている) */
   aiPending?: boolean;
   onAdd: () => void;
@@ -165,6 +178,10 @@ export default function AiSpotDiscoveryPanel({
   const allSelected = selectableRows.length > 0 && checkedRows.length === selectableRows.length;
   // **追加できる行だけを見る。** 登録済み・座標なしの行は追加の対象外なので、
   // そこに地域が無いことを理由に全行共通の既定を求めると、埋めても意味の無い欄が出る
+  // **収集から取り出した画面かどうか。** 0件のときも見分けたいので、行が無くても
+  // 円の判定(`coverage`)があればそちら —— 「探して0件」と「まだ集めていない」は別物
+  const collected =
+    !!coverage || (rows.length > 0 && rows.every((r) => r.source === "collect"));
   const needsFallbackRegion = selectableRows.some(
     (r) => !r.candidate.region && !(r.candidate.lat === 0 && r.candidate.lng === 0)
   );
@@ -191,11 +208,7 @@ export default function AiSpotDiscoveryPanel({
         {/* **どこから来た候補かを見出しに出す。** 同じ器で「その場で探したもの」と
             「依頼して溜めたものを取り出したもの」の両方を並べるので、
             見出しが「この周辺を探す」のままだと取り違える */}
-        <p className="text-xs text-gray-500">
-          {rows.length > 0 && rows.every((r) => r.source === "collect")
-            ? "集めた候補"
-            : "この周辺を探す"}
-        </p>
+        <p className="text-xs text-gray-500">{collected ? "この周辺の集めた情報" : "この周辺を探す"}</p>
         {/* **AIとのやり取りは見出しの右**。下の操作に置くと、追加までの手順の中に
             「見るだけ」のボタンが挟まって縦を1行ぶん食う */}
         <div className="flex items-start justify-between gap-2">
@@ -228,6 +241,34 @@ export default function AiSpotDiscoveryPanel({
         <p className="mt-0.5 hidden text-xs text-gray-500 sm:block">
           行を押すと地図がそこへ寄ります。候補は保存されず、追加したものだけがスポットになります。
         </p>
+        {/* **円の中の収集の進み具合。** 集まっているぶんは一覧に出したうえで、
+            足りない範囲をここで言う —— 「0件」と「まだ集めていない」は別のことで、
+            後者なら集めさせれば済む */}
+        {coverage &&
+          (coverage.missing.length > 0 ? (
+            <div className="mt-1.5 rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">
+              <p>
+                まだ集めていない範囲があります:{" "}
+                <span className="font-medium">{coverage.missing.join("、")}</span>
+              </p>
+              {onCollectMissing && (
+                <button
+                  type="button"
+                  onClick={onCollectMissing}
+                  disabled={collectStarting}
+                  className="mt-1 rounded border border-amber-600 px-2 py-0.5 font-medium text-amber-800 disabled:opacity-50"
+                >
+                  {collectStarting
+                    ? "起動中…"
+                    : `「${coverage.missing[0]}」をいま集める`}
+                </button>
+              )}
+            </div>
+          ) : coverage.areas.length > 0 ? (
+            <p className="mt-1.5 rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+              この範囲({coverage.areas.join("、")})は収集済みです。
+            </p>
+          ) : null)}
         {/* **AIは地図データの結果を出した後ろで動く**ので、待っていることを出さないと
             「もう終わったのか、まだ来るのか」が分からない */}
         {aiPending && (
@@ -240,7 +281,9 @@ export default function AiSpotDiscoveryPanel({
       <ul ref={listRef} className="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto">
         {rows.length === 0 && (
           <li className="p-3 text-xs text-gray-500">
-            候補がありません。「もう一度探す」から検索語・半径を変えて探せます。
+            {collected
+              ? "この範囲からはまだ何も集まっていません。集め終わるとここに並びます。"
+              : "候補がありません。「もう一度探す」から検索語・半径を変えて探せます。"}
           </li>
         )}
         {rows.map((row) => {

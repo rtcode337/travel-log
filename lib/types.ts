@@ -186,11 +186,16 @@ export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
   public_visible: false,
   reviews_enabled: true,
   wikipedia_enabled: true,
-  // ランクは「段階を付けたい種別」だけのものなので既定は使わない。
-  // 使わない種別ではランクは常になし扱いで、色はシリーズが決める
-  rank_enabled: false,
+  // **既定で使う。** スポットを集める種別はたいてい段階を付けたくなるので、
+  // 種別を足すたびに開けさせるより、要らない種別で閉じるほうが手数が少ない。
+  // 使わない種別ではランクは常になし扱いで、色はシリーズが決める。
+  // **ランクの付いていないスポットは見た目が変わらない**(`rankStyleOf(null)`は
+  // どちらでも同じ`NO_RANK_STYLE`)ので、開けても既存のピンは動かない
+  rank_enabled: true,
   // 周辺を探す(地図の右クリック/長押しメニュー)。地図データ(Overture / OSM)とAIの2段で、
-  // 使う種別で明示的に開ける(サーバーに接続先が無ければ開けても出ない)
+  // 使う種別で明示的に開ける(サーバーに接続先が無ければ開けても出ない)。
+  // **既定は閉じる** —— ランクと違って押すとAIの枠を使うので、
+  // 全部の種別のメニューに最初から並んでいてほしいものではない
   ai_discovery_enabled: false,
 };
 
