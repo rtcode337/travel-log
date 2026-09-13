@@ -4,8 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
 import {
   diffDays,
+  FAR_FORECAST_DAYS,
   formatWeatherDateWithDay,
+  isFarForecast,
   outlookScore,
+  precipChanceText,
   shiftDate,
   summarizeDay,
   weatherLook,
@@ -28,6 +31,10 @@ const WINDOW_DAYS = 7;
  * **予報が無い日を空欄にしない。** 予報が出るのは先15日ほどまでなので、
  * 遠い予定では前後1週間のほとんどが範囲外になる。そこを黙って飛ばすと
  * 「候補が無い=悪い日」と読めてしまうため、「予報なし」と書いて数からも外す。
+ *
+ * **先の日ほど確度が落ちることを画面に出す。** 5日以上先はモデルごとに解が割れるので
+ * 薄く表示する(`isFarForecast`)。並びの中で近い日と遠い日が同じ濃さだと、
+ * 「遠いほうが天気が良い」を根拠にして日をずらしてしまう。
  *
  * 日付を選ぶと、**旅程の長さを保ったまま**開始日・終了日をずらす
  * (3日間の旅程なら3日間のまま動く)。
@@ -130,6 +137,10 @@ export default function PlanWeatherFinder({
             <b>いちばん天気の悪いスポットに合わせて</b>表示するので、
             どこか1か所でも雨なら雨として出ます。日付を選ぶと、
             旅程の長さを保ったまま予定日をずらします。
+            <b>{FAR_FORECAST_DAYS}日以上先は薄く出します</b>——
+            そこから先は予報が日替わりで変わるので、日をずらす根拠にはしないでください。
+            「雨の可能性」は<b>気象庁が発表する降水確率とは別の基準</b>なので、
+            数値ではなく段階で出しています。
             予報の出どころはOpen-Meteo(CC BY 4.0)です。
           </HelpTip>
         </p>
@@ -151,6 +162,8 @@ export default function PlanWeatherFinder({
             {days.map((day) => {
               const isPlanned = day.date === date;
               const isBest = best != null && day.date === best.date && !isPlanned;
+              // 確度の落ちる先の日。日付と操作は読めるまま、天気の部分だけ薄くする
+              const far = isFarForecast(day.date);
               return (
                 <li
                   key={day.date}
@@ -167,12 +180,21 @@ export default function PlanWeatherFinder({
                     </span>
                   ) : (
                     <>
-                      <span aria-hidden="true" className="shrink-0 text-base leading-none">
+                      <span
+                        aria-hidden="true"
+                        className={`shrink-0 text-base leading-none ${
+                          far ? "opacity-50" : ""
+                        }`}
+                      >
                         {weatherLook((day.worst as DailyWeather).code).icon}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-xs text-gray-600">
+                      <span
+                        className={`min-w-0 flex-1 truncate text-xs ${
+                          far ? "text-gray-400" : "text-gray-600"
+                        }`}
+                      >
                         {weatherLook((day.worst as DailyWeather).code).text}
-                        {day.pop != null && ` 降水${day.pop}%`}
+                        {day.pop != null && ` ${precipChanceText(day.pop)}`}
                         {day.tmax != null && ` ${Math.round(day.tmax)}℃`}
                         {day.known > 1 && (
                           <span className="text-gray-400">
@@ -213,6 +235,8 @@ export default function PlanWeatherFinder({
             </p>
           )}
           <p className="mt-2 text-[11px] text-gray-400">
+            薄い日は{FAR_FORECAST_DAYS}日以上先で、予報が変わりやすい範囲です。
+            <br />
             予報: Open-Meteo(CC BY 4.0)
           </p>
         </>

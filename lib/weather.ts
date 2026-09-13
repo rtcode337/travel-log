@@ -75,9 +75,17 @@ export function weatherLinkLabel(spotName: string, date: string): string {
 export interface DailyWeather {
   /** WMOの天気コード(0=快晴 … 95=雷雨) */
   code: number;
-  /** 最高・最低気温(℃)と降水確率(%)。欠けることがあるのでnullを許す */
+  /** 最高・最低気温(℃)。欠けることがあるのでnullを許す */
   tmax: number | null;
   tmin: number | null;
+  /**
+   * 上流の`precipitation_probability_max`(%)。
+   * **気象庁の「降水確率」とは別物なので、この数値をそのまま画面に出さない**
+   * (`precipChanceText`で段階に丸めてから出す)。気象庁が発表するのは
+   * 「6時間区切りで1mm以上の降水確率」を10%刻みにしたものだが、こちらは
+   * 「時間ごとの降水確率(閾値0.1mm相当)の、その日の最大値」。
+   * 定義が違うぶん構造的に高く出るので、並べて比べると食い違って見える。
+   */
   pop: number | null;
 }
 
@@ -103,6 +111,60 @@ export function weatherLook(code: number): { icon: string; text: string } {
 }
 
 /**
+ * 降水確率を段階に丸める境目(%)。
+ *
+ * **上流の値をそのまま出さないための丸め。** `DailyWeather.pop`は気象庁の降水確率と
+ * 定義が違い、構造的に高く出る —— 数値で見せると気象庁・民間予報の発表と
+ * 突き合わせられてしまい、同じものだと誤解される。段階なら、定義の差が
+ * 吸収できる粒度でしか言わないことになる。
+ * 境目が40/70と高めなのは、上流の閾値(0.1mm相当)が気象庁(1mm)より低いぶん、
+ * 同じ空模様でも高い値が返るため。
+ */
+const POP_MID = 40;
+const POP_HIGH = 70;
+
+export type PrecipChance = "low" | "mid" | "high";
+
+export function precipChance(pop: number): PrecipChance {
+  if (pop >= POP_HIGH) return "high";
+  if (pop >= POP_MID) return "mid";
+  return "low";
+}
+
+/** 「雨の可能性 中」。`pop`を画面に出すときは必ずこれを通す */
+export function precipChanceText(pop: number): string {
+  const chance = precipChance(pop);
+  return `雨の可能性 ${chance === "high" ? "高" : chance === "mid" ? "中" : "低"}`;
+}
+
+/**
+ * 予報の確度が落ちる境目(何日先か)。
+ *
+ * **これより先はモデルごとに解が割れる。** 気象庁の週間予報も、この辺りから
+ * 信頼度(A/B/C)の低い日が並ぶようになる。数値を消しはしないが、
+ * 言い切っているように見せない(画面では薄く出して、変わりうることを添える)。
+ */
+export const FAR_FORECAST_DAYS = 5;
+
+/**
+ * 今日(JST)の日付キー。**実行環境のTZに依らせない** ——
+ * サーバーとブラウザでTZが違うと、同じ予報が別の「何日先」になる。
+ */
+export function todayKeyJst(): string {
+  return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** 今日(JST)から何日先か。過去はマイナス */
+export function forecastLeadDays(date: string): number {
+  return diffDays(todayKeyJst(), date);
+}
+
+/** 確度の落ちる先の日かどうか(画面で薄く出す対象) */
+export function isFarForecast(date: string): boolean {
+  return forecastLeadDays(date) >= FAR_FORECAST_DAYS;
+}
+
+/**
  * 天気の良し悪しを3段階にする。**旅程で知りたいのは「傘が要るか」**なので、
  * 降るかどうかを境目に置き、くもりは晴れと雨の間に独立して置く。
  */
@@ -112,8 +174,9 @@ export function weatherGrade(weather: DailyWeather): WeatherGrade {
   // 45/48=霧も含めて、降らないが視界・見晴らしが良くないものは fair に寄せる
   if (weather.code >= 51) return "bad";
   if (weather.code === 3 || weather.code === 45 || weather.code === 48) return "fair";
-  // 晴れていても降水確率が高い日は言い切らない(予報の幅を潰さないため)
-  if (weather.pop != null && weather.pop >= 50) return "fair";
+  // 晴れていても雨の可能性が高い日は言い切らない(予報の幅を潰さないため)。
+  // 境目はPOP_HIGHと共有する —— 画面の「雨の可能性 高」と判定がずれないようにする
+  if (weather.pop != null && precipChance(weather.pop) === "high") return "fair";
   return "good";
 }
 
@@ -210,7 +273,7 @@ export function diffDays(from: string, to: string): number {
   return Math.round((b - a) / 86_400_000);
 }
 
-/** 「くもり 26/21℃ 降水20%」。リンクの説明に添える1行 */
+/** 「くもり 26/21℃ 雨の可能性 低」。リンクの説明に添える1行 */
 export function weatherSummary(weather: DailyWeather): string {
   const parts = [weatherLook(weather.code).text];
   if (weather.tmax != null || weather.tmin != null) {
@@ -218,6 +281,6 @@ export function weatherSummary(weather: DailyWeather): string {
     const min = weather.tmin != null ? Math.round(weather.tmin) : "－";
     parts.push(`${max}/${min}℃`);
   }
-  if (weather.pop != null) parts.push(`降水${weather.pop}%`);
+  if (weather.pop != null) parts.push(precipChanceText(weather.pop));
   return parts.join(" ");
 }

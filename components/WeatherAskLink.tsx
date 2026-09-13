@@ -2,6 +2,8 @@
 
 import {
   buildSpotWeatherAskUrl,
+  FAR_FORECAST_DAYS,
+  isFarForecast,
   weatherLinkLabel,
   weatherLook,
   weatherSummary,
@@ -18,6 +20,10 @@ import type { Spot } from "@/lib/types";
  * 合わせている。**予報が無いのに晴れのアイコンを出さない** —— 以前は常に太陽で、
  * 「その日は晴れる」と読めてしまっていた。予報が出るのは先15日ほどまでなので、
  * それより先の予定では「天気」のボタンのまま置く(押せばAIが平年の傾向を答える)。
+ *
+ * **先の日の予報は言い切らない。** 5日以上先はモデルごとに解が割れるので、
+ * アイコンを薄くし、説明にも変わりうることを書く(`isFarForecast`)。
+ * 消さないのは、気温のように先でも揃う要素は見当を付ける役に立つため。
  *
  * **リスト詳細と地図の経路詳細で同じものを出す。** 旅程を見る場所は2つあり、
  * 片方だけに天気があると「地図から見たときだけ調べ直す」ことになる。
@@ -36,8 +42,12 @@ export default function WeatherAskLink({
   className?: string;
 }) {
   const ask = weatherLinkLabel(spot.name, date);
+  const far = isFarForecast(date);
   // 予報の出どころ(Open-Meteo)はCC-BYで出典表示が要る。押す前に読める場所に置く
-  const label = weather ? `${ask}(予報: ${weatherSummary(weather)} / Open-Meteo)` : ask;
+  const note = far ? `${FAR_FORECAST_DAYS}日以上先なので変わることがあります / ` : "";
+  const label = weather
+    ? `${ask}(予報: ${weatherSummary(weather)} / ${note}Open-Meteo)`
+    : ask;
   return (
     <a
       href={buildSpotWeatherAskUrl(spot, date)}
@@ -54,7 +64,9 @@ export default function WeatherAskLink({
       }
     >
       {weather ? (
-        <span aria-hidden="true">{weatherLook(weather.code).icon}</span>
+        <span aria-hidden="true" className={far ? "opacity-50" : undefined}>
+          {weatherLook(weather.code).icon}
+        </span>
       ) : (
         "天気"
       )}
