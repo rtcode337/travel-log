@@ -1,4 +1,5 @@
 import type { SpotType } from "./types";
+import type { DiscoveryBackend, DiscoveryResult } from "./spotDiscovery";
 
 /**
  * 「情報を集めさせる」層の、travel-log側の決まりごと。
@@ -22,13 +23,17 @@ export const COLLECT_SOURCE_SETTING_KEY = "collect_source";
 export const COLLECT_PROMPT_SETTING_KEY = "collect_prompt";
 
 /**
- * 依頼するときの間隔(分)。**実質オンデマンドにするために長く置く**。
+ * 依頼するときの間隔(分)。**数時間に1回**。
  *
- * chiezoの収集は間隔が必須(最小5分)で「手動のみ」が無いので、こちらの使い方
- * (レポートのように、欲しくなったときに1回起こす)に合わせるには長い値を入れて
- * 予定のほうを事実上使わない形にするしかない。起こすのは「いま集める」のほう。
+ * 1回あたりを長く・広く取り、**周回で精度を上げる**使い方に合わせてある ——
+ * 1回で薄く10件ずつ拾っても全国は埋まらないし、間隔を詰めても知識サーバーは
+ * 同時に1本しか走らせない(混んでいれば断られるだけ)。
+ *
+ * 全国を市区町村で舐める規模(約1,700)を3時間ごとに1つずつでは200日を超えるので、
+ * **1回で広い範囲を扱わせる**のがこの間隔の前提(プロンプト側の仕事)。
+ * 足りなければ画面の「いま集める」で予定を待たずに起こせる。
  */
-export const COLLECT_INTERVAL_MINUTES = 60 * 24 * 30;
+export const COLLECT_INTERVAL_MINUTES = 180;
 
 /**
  * 取り出す件数の上限。**取り出しの位置(カーソル)は覚えない** ——
@@ -36,6 +41,14 @@ export const COLLECT_INTERVAL_MINUTES = 60 * 24 * 30;
  * この数だけ取り、追加済みのものは「登録済み」の印で分かるようにする。
  */
 export const COLLECT_FETCH_LIMIT = 50;
+
+/**
+ * 収集の起点(`collect_origin`)。**travel-log側で差し込む** ——
+ * `{cursor}`と`{covered}`は知識サーバーが解決するが、起点はあちらの知らない概念なので、
+ * 依頼を保存するときにこちらが文字列へ置き換えてから渡す。
+ */
+export const COLLECT_ORIGIN_SETTING_KEY = "collect_origin";
+export const COLLECT_ORIGIN_PLACEHOLDER = "{origin}";
 
 /**
  * 種別キーから収集名を作る。**chiezoの制約は「英小文字で始まる2〜31文字
@@ -80,16 +93,93 @@ export function isValidCollectSource(name: string): boolean {
  */
 export function defaultCollectPrompt(typeLabel: string): string {
   return [
-    `{cursor} 以降に見つけた「${typeLabel}」を10件、新しい順に。`,
-    "既に有名で定着しているものより、最近できた・最近話題になったものを優先する。",
+    `日本の「${typeLabel}」を、市区町村を1つずつ回りながら集める。`,
+    "",
+    "起点: {origin}",
+    "今回の範囲: {cursor}",
+    "{covered}",
+    "",
+    `今回の範囲にある「${typeLabel}」を挙げる。`,
+    "**件数は指定しない。その範囲にあるものを、拾えるだけ拾う。**",
+    "**時間を掛けてよい。** 1件ずつ実在と所在地を確かめる。",
+    "",
+    "**手元の知識サーバー(chiezoのMCP)を必ず使う。** web検索より先にこちらを引く ——",
+    "レート制限が無く、地物は実在が確かめられているものだけが入っている。",
+    "",
+    "- 候補を洗い出す: `filter` で `overture_japan`(301万件)や `osm_japan`(155万件)を",
+    "  bbox と種別で引く。名前と座標がそのまま取れる",
+    "- 知名度と説明: `search` / `doc` で `jawiki`(151万件)を引く。",
+    "  `extra.pageviews_month` が月間の閲覧数なので、**有名な順を機械的に決められる**",
+    "- 実在と所在地の確認: 挙げる前に地図辞典に在るかを引く。",
+    "  **辞典に無いものは、webで裏が取れたものだけ入れる**(新しい店はよくある)",
+    "",
+    "**辞典に在るものを全部並べるのではない。** 辞典は「在るもの」しか知らないので、",
+    "記録する価値があるか(名物・老舗・その土地ならでは)を選ぶのはこちらの仕事。",
+    "",
+    "**進み方:**",
+    "",
+    "- 今回の範囲を**拾い切れていないと感じたら、next_cursor に同じ範囲を入れる**。",
+    "  次回も同じところを続けて掘る。拾い切ったと思えたときだけ次へ進む",
+    "- 拾い切ったときは covered にその範囲を入れ、next_cursor には**起点にいちばん近い、",
+    "  まだ回っていない市区町村**を入れる。**遠くへ飛ばない** ——",
+    "  起点から外へ、同心円を広げるように埋めていく",
+    "- 起点の周りを回り終えたら、そこから順に外側へ広げる",
     "",
     "title はスポットの名前だけ(店名・施設名。地域や説明を混ぜない)。",
     "body は1行目に「所在地: 都道府県 市区町村 まで」、2行目以降に2〜3文の紹介。",
     "tags はジャンルを1〜2個。url は出典。",
     "",
     "実在すると確信できるものだけを入れる。所在地が特定できないものは入れない。",
-    "next_cursor には、いちばん新しい話題の日付を YYYY-MM-DD で入れる。",
+    "covered と next_cursor は「東京都新宿区」の形で書く。",
   ].join("\n");
+}
+
+/**
+ * 円が跨いでいる地域を調べるために突くところ。**中心と円周の8方位**。
+ *
+ * 円の中を隙間なく確かめることはできない(地図辞典は地物の点しか持たず、
+ * 市区町村の形は持っていない)ので、**代表点で見る**。中心だけでは、円が境界を
+ * 跨いでいるときに隣の市区町村を見落とす —— 「円の中のすべてで取り終わっているか」
+ * を聞かれている以上、跨ぎを拾えないと答えにならない。
+ *
+ * 8方位なのは、市区町村が円より大きいのが普通だから。これ以上増やしても
+ * 同じ地域を何度も引くだけで、突くたびに知識サーバーへの問い合わせが増える。
+ */
+export function areaProbePoints(
+  center: { lat: number; lng: number },
+  radiusM: number
+): { lat: number; lng: number }[] {
+  const latPerM = 1 / 111_320;
+  const lngPerM = 1 / (111_320 * Math.max(Math.cos((center.lat * Math.PI) / 180), 0.01));
+  const points = [center];
+  for (let i = 0; i < 8; i += 1) {
+    const t = (i / 8) * Math.PI * 2;
+    points.push({
+      lat: center.lat + Math.sin(t) * radiusM * latPerM,
+      lng: center.lng + Math.cos(t) * radiusM * lngPerM,
+    });
+  }
+  return points;
+}
+
+/** 円の中の地域が、収集済みかどうか */
+export interface CollectCoverage {
+  /** 円が跨いでいる地域(「東京都新宿区」の形) */
+  areas: string[];
+  /** そのうち回り終えているもの */
+  covered: string[];
+  /** まだ回り終えていないもの */
+  missing: string[];
+}
+
+/**
+ * 取り出した結果。円を指定したときだけ、その円の収集の進み具合(`coverage`)が付く。
+ *
+ * **`DiscoveryResult`をそのまま広げる** —— 周辺を探すのパネルに同じ器で載せるので、
+ * 候補の形は変えられない。円の話だけを外側に足す。
+ */
+export interface CollectCandidatesResult extends DiscoveryResult {
+  coverage: CollectCoverage | null;
 }
 
 /** 集めた文書1件(chiezoの`recent`が返す形のうち、こちらが読むぶん) */
@@ -136,6 +226,24 @@ export interface ChiezoCollection {
   last_status?: string | null;
   last_error?: string | null;
   requested_by?: string;
+  /** 次に集める地域(知識サーバーの「次はどこ」の印)。空ならAIが決める */
+  cursor?: string;
+  /** 誰に・どのモデルで・どこまで考えさせるか。空なら知識サーバーの既定 */
+  backend?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  /** 回り終えた地域。**1件ぶんの口でしか返らない**(一覧は件数だけ) */
+  covered?: string[];
+  covered_count?: number;
+}
+
+/** いま知識サーバーで取り込み(=収集)が走っているか */
+export interface ChiezoIngestStatus {
+  state: string;
+  running: boolean;
+  source: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface SpotCollectStatus {
@@ -143,8 +251,20 @@ export interface SpotCollectStatus {
   available: boolean;
   /** 溜め先の収集名(chiezoのソース名) */
   source: string;
-  /** いまのプロンプト(未設定なら種別名から作った下書き) */
+  /** いまのプロンプト(未設定なら種別名から作った下書き。`{origin}`は未置換) */
   prompt: string;
+  /** 収集の起点。ここから外へ広げる(空ならAIが決める) */
+  origin: string;
   /** まだ依頼していなければnull */
   collection: ChiezoCollection | null;
+  /**
+   * いま知識サーバーで取り込みが走っているか。**押す前に判断できるように出す** ——
+   * あちらは同時に1本しか受けないので、走っている間に頼んでも断られる
+   */
+  ingest: ChiezoIngestStatus | null;
+  /**
+   * 選べる相手・モデル・深さ(周辺を探すと同じ口から配る)。
+   * **深さは効く** —— 指定しないと浅い既定で走り、1都道府県を3分で切り上げた
+   */
+  backends: DiscoveryBackend[];
 }

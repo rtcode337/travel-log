@@ -18,7 +18,18 @@ import {
   parseCollectedSummary,
   type CollectedDoc,
 } from "@/lib/spotCollect";
-import { chiezo, resolveCollectContext } from "@/lib/spotCollectServer";
+import {
+  areaProbePoints,
+  type CollectCandidatesResult,
+  type CollectCoverage,
+} from "@/lib/spotCollect";
+import {
+  chiezo,
+  fetchCollection,
+  resolveCollectContext,
+} from "@/lib/spotCollectServer";
+import { prefectureFromAreaCode } from "@/lib/overtureNearby";
+import { bboxAround } from "@/lib/osmNearby";
 
 /**
  * 溜まった収集から**スポットの候補を取り出す**(spot_admin/admin専用)。
@@ -54,6 +65,146 @@ interface ChiezoRecentResponse {
 
 interface ChiezoSearchResponse {
   results?: { title?: unknown }[];
+}
+
+interface ChiezoFilterResponse {
+  results?: { extra?: { area?: unknown; locality?: unknown } | null }[];
+}
+
+/** 1点の所在(都道府県と市区町村)。どちらも取れないことがある */
+interface PointArea {
+  prefecture: string | null;
+  municipality: string;
+}
+
+/**
+ * 市区町村らしい名前か。**屑を弾く** —— `locality`には`Tokyo`のような
+ * 英字の広い地名も入っていて、そのまま地域として扱うと同じ場所が二重に数えられる。
+ */
+function looksLikeMunicipality(value: string): boolean {
+  return /[市区町村]$/.test(value) && /[぀-ヿ一-鿿]/.test(value);
+}
+
+/**
+ * その1点がどの地域かを地図辞典から引く。**辞典を2つとも引く**:
+ *
+ * - 市区町村は **Overtureの`locality`**(OSMは持っていない)
+ * - 都道府県は **OSMの`area`** —— Overtureの`area`はJISのコードで、
+ *   しかも**日本ではほぼ空**(このリポジトリが繰り返し踏んでいるところ)。
+ *   実測でも、同じ円の中で「東京都新宿区」と「新宿区」が混ざって出た
+ *
+ * 地物が1つも無い点(海の上・山の中)はnull —— そこは収集の対象でもない。
+ */
+async function areaAt(
+  baseUrl: string,
+  point: { lat: number; lng: number }
+): Promise<PointArea | null> {
+  // 近くに地物が無いこともあるので、狭い枠から広げて2回まで見る
+  for (const radius of [400, 3000]) {
+    const bbox = bboxAround(point, radius);
+    const [overture, osm] = await Promise.all([
+      chiezoGet<ChiezoFilterResponse>(
+        baseUrl,
+        "/v1/overture_japan/filter",
+        new URLSearchParams({ bbox, limit: "30", fields: "title,extra" })
+      ),
+      chiezoGet<ChiezoFilterResponse>(
+        baseUrl,
+        "/v1/osm_japan/filter",
+        new URLSearchParams({ bbox, limit: "30", fields: "title,extra" })
+      ),
+    ]);
+    // **いちばん多いものを採る。** 先頭1件だと、境界のすぐ内側にある隣の
+    // 市区町村の地物を掴んで、点がそちらに居ることになる
+    const municipality = mostCommon(
+      (overture?.results ?? [])
+        .map((r) => str(r.extra?.locality, 60))
+        .filter((v): v is string => !!v && looksLikeMunicipality(v))
+    );
+    if (!municipality) continue;
+    const prefecture =
+      mostCommon(
+        (osm?.results ?? [])
+          .map((r) => str(r.extra?.area, 60))
+          .filter((v): v is string => !!v && (PREFECTURES as readonly string[]).includes(v))
+      ) ??
+      // OSM側が空でも、Overtureにコードが入っていれば拾える(たまに入っている)
+      mostCommon(
+        (overture?.results ?? [])
+          .map((r) => prefectureFromAreaCode(str(r.extra?.area, 10)))
+          .filter((v): v is string => !!v)
+      );
+    return { prefecture, municipality };
+  }
+  return null;
+}
+
+/** いちばん多く出た値。無ければnull */
+function mostCommon(values: string[]): string | null {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [v, n] of counts) {
+    if (n > bestCount) {
+      best = v;
+      bestCount = n;
+    }
+  }
+  return best;
+}
+
+/** 画面と収集に渡す地域の書き方(都道府県が取れていれば付ける) */
+function areaLabel(area: PointArea): string {
+  return area.prefecture ? `${area.prefecture}${area.municipality}` : area.municipality;
+}
+
+/**
+ * その地域を回り終えているか。**書き方の揺れを吸う** —— 回り終えた印はAIが書くので、
+ * 「東京都新宿区」とも「新宿区」とも来る。市区町村が入っていることを必須にし、
+ * 都道府県はこちらが分かっているときだけ併せて見る(同名の市が別の県にあるため)。
+ */
+function isCovered(area: PointArea, covered: string[]): boolean {
+  return covered.some(
+    (c) =>
+      c.includes(area.municipality) &&
+      (!area.prefecture || !hasOtherPrefecture(c, area.prefecture))
+  );
+}
+
+/** その印が、別の都道府県を名乗っているか(名乗っていなければ判断しない) */
+function hasOtherPrefecture(covered: string, prefecture: string): boolean {
+  const named = (PREFECTURES as readonly string[]).find((p) => covered.includes(p));
+  return !!named && named !== prefecture;
+}
+
+/**
+ * 円が跨いでいる地域を出し、収集済みかを見る。
+ *
+ * **中心だけでは足りない** —— 円が境界を跨いでいると隣の市区町村を見落とす。
+ * 「円の中のすべてで取り終わっているか」を聞かれている以上、跨ぎを拾えないと
+ * 答えにならないので、中心と円周8方位を突く(`areaProbePoints`)。
+ */
+async function checkCoverage(
+  baseUrl: string,
+  center: { lat: number; lng: number },
+  radiusM: number,
+  covered: string[]
+): Promise<CollectCoverage> {
+  const found = await Promise.all(
+    areaProbePoints(center, radiusM).map((p) => areaAt(baseUrl, p))
+  );
+  // 同じ地域は1つに畳む(円の中の複数の点が同じ市区町村に落ちるのが普通)
+  const byLabel = new Map<string, PointArea>();
+  for (const area of found) {
+    if (area) byLabel.set(areaLabel(area), area);
+  }
+  const areas = [...byLabel.keys()];
+  return {
+    areas,
+    covered: areas.filter((a) => isCovered(byLabel.get(a)!, covered)),
+    missing: areas.filter((a) => !isCovered(byLabel.get(a)!, covered)),
+  };
 }
 
 interface ChiezoDocResponse {
@@ -240,9 +391,29 @@ export async function GET(request: Request) {
     `/v1/${encodeURIComponent(source)}/recent?limit=${COLLECT_FETCH_LIMIT}` +
       `&fields=title,body,opening,tags,extra,updated_at`
   );
+  // 円を指定されたら、その中が収集済みかも一緒に見る(指定が無ければ全体から取り出す)
+  const { searchParams } = new URL(request.url);
+  const lat = Number(searchParams.get("lat"));
+  const lng = Number(searchParams.get("lng"));
+  const radius = Number(searchParams.get("radius"));
+  const circle =
+    Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(radius) && radius > 0
+      ? { center: { lat, lng }, radius }
+      : null;
+  const coverage = circle
+    ? await checkCoverage(
+        baseUrl,
+        circle.center,
+        circle.radius,
+        (await fetchCollection(baseUrl, source))?.covered ?? []
+      )
+    : null;
+
   if (error) {
     // まだ1回も焼けていないとソース自体が無い。**それは失敗ではない**ので、
-    // 「まだ集まっていない」と読める形で返す(依頼した直後は必ずここを通る)
+    // 「まだ集まっていない」と読める形で返す(依頼した直後は必ずここを通る)。
+    // **円の判定は返す** —— 「まだ集めていない範囲」だと分かるほうが、
+    // 何も出ないことより読める
     if (error.startsWith("404")) {
       return NextResponse.json({
         data: {
@@ -252,7 +423,8 @@ export async function GET(request: Request) {
           model: null,
           searched_at: new Date().toISOString(),
           center_region: null,
-        } satisfies DiscoveryResult,
+          coverage,
+        } satisfies CollectCandidatesResult,
       });
     }
     return NextResponse.json({ error }, { status: 502 });
@@ -313,13 +485,26 @@ export async function GET(request: Request) {
     };
   });
 
-  const result: DiscoveryResult = {
-    candidates,
+  // 円を指定されたら、その中のものだけ返す。**座標の引けなかった候補は所在地で見る**
+  // —— 新しい店は地図辞典に載っていないのが普通で、そこを落とすとこの機能で
+  // 拾いたいものがちょうど落ちる(円の跨ぐ地域に居れば中とみなす)
+  const inCircle = (c: DiscoveryCandidate) => {
+    if (!circle) return true;
+    if (c.lat !== 0 || c.lng !== 0) {
+      return distanceMeters(circle.center, { lat: c.lat, lng: c.lng }) <= circle.radius;
+    }
+    const area = c.address ?? c.region ?? "";
+    return (coverage?.areas ?? []).some((a) => areaWords(a).some((w) => area.includes(w)));
+  };
+
+  const result: CollectCandidatesResult = {
+    candidates: candidates.filter(inCircle),
     source: "collect",
     backend: null,
     model: null,
     searched_at: searchedAt,
     center_region: null,
+    coverage,
   };
   return NextResponse.json({ data: result });
 }

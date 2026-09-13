@@ -25,7 +25,10 @@ import type {
   DiscoveryResult,
   DiscoveryReviewTarget,
 } from "@/lib/spotDiscovery";
-import type { SpotCollectStatus } from "@/lib/spotCollect";
+import type {
+  CollectCandidatesResult,
+  SpotCollectStatus,
+} from "@/lib/spotCollect";
 
 interface Result<T> {
   data: T | null;
@@ -264,21 +267,46 @@ export const api = {
         `/api/spots/collect?type=${encodeURIComponent(type)}`,
         { fresh: true }
       ),
-    /** 依頼する(まだ無ければ作る・あればプロンプトを差し替える) */
-    save: (type: string, prompt: string) =>
+    /**
+     * 依頼する(まだ無ければ作る・あればプロンプトを差し替える)。
+     * `cursor`は次に集める地域(空ならAIが決める)、相手・モデル・深さは
+     * **空文字で「指定しない」**に戻せる
+     */
+    save: (
+      type: string,
+      body: {
+        prompt: string;
+        /** 収集の起点(ここから外へ広げる)。プロンプトの`{origin}`へ差し込まれる */
+        origin?: string;
+        backend?: string;
+        model?: string;
+        effort?: string;
+      }
+    ) =>
       request<unknown>(`/api/spots/collect?type=${encodeURIComponent(type)}`, {
         method: "POST",
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify(body),
       }),
-    /** 予定を待たずに1回集めさせる(向こうで有効にしてあるときだけ通る) */
-    run: (type: string) =>
-      request<unknown>(`/api/spots/collect/run?type=${encodeURIComponent(type)}`, {
-        method: "POST",
-      }),
-    /** 溜まったものからスポットの候補を取り出す */
-    candidates: (type: string) =>
-      request<DiscoveryResult>(
-        `/api/spots/collect/candidates?type=${encodeURIComponent(type)}`,
+    /**
+     * 予定を待たずに1回集めさせる(向こうで有効にしてあるときだけ通る)。
+     * `area`を渡すと、その地域を次に回らせてから起こす
+     */
+    run: (type: string, area?: string) =>
+      request<unknown>(
+        `/api/spots/collect/run?type=${encodeURIComponent(type)}` +
+          (area ? `&area=${encodeURIComponent(area)}` : ""),
+        { method: "POST" }
+      ),
+    /**
+     * 溜まったものからスポットの候補を取り出す。**円を渡すとその中だけ**返し、
+     * あわせて円の中が収集済みかどうか(`coverage`)も返す
+     */
+    candidates: (type: string, circle?: { lat: number; lng: number; radius: number }) =>
+      request<CollectCandidatesResult>(
+        `/api/spots/collect/candidates?type=${encodeURIComponent(type)}` +
+          (circle
+            ? `&lat=${circle.lat}&lng=${circle.lng}&radius=${circle.radius}`
+            : ""),
         { fresh: true }
       ),
   },

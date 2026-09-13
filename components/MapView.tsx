@@ -77,6 +77,7 @@ import FilterBar, {
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
 import AiSpotDiscoverySearchModal from "@/components/AiSpotDiscoverySearchModal";
+import type { CollectCoverage } from "@/lib/spotCollect";
 import AiSpotDiscoveryPanel, {
   discoveryRowSeries,
   type DiscoveryRow,
@@ -130,6 +131,15 @@ const DISCOVERY_MAP_COLOR = "#0284c7"; // sky-600(バッジの bg-sky-100 / text
 const DISCOVERY_AI_COLOR = "#7c3aed"; // violet-600(バッジの bg-violet-100 / text-violet-800 と同系)
 /** 依頼して溜めたものから取り出した候補(その場で探したものと混ざらないよう色を分ける) */
 const DISCOVERY_COLLECT_COLOR = "#0d9488"; // teal-600
+
+/**
+ * 「この周辺の集めた情報」で見る円の半径(m)。
+ *
+ * **周辺を探すより広く取る。** あちらは「いま歩いて行ける範囲」を見るので300mが既定だが、
+ * こちらが答えるのは「この辺りは収集済みか」で、収集の単位は市区町村。
+ * 300mで聞くと、同じ市区町村の中を何度も聞き直すことになる。
+ */
+const COLLECT_CIRCLE_RADIUS = 2000;
 /** 登録済み(もう足しようがない)は色を落とす */
 const DISCOVERY_EXISTING_COLOR = "#6b7280";
 
@@ -3004,39 +3014,70 @@ export default function MapView({
    * 代わりに、取り出したあと候補全体が入るよう地図を寄せる。
    */
   const [collectFetching, setCollectFetching] = useState(false);
-  const openCollected = useCallback(async () => {
-    setCollectFetching(true);
-    const { data, error } = await api.spotCollect.candidates(spotTypeKey);
-    setCollectFetching(false);
-    if (error || !data) {
-      setDiscoveryError(error?.message ?? "集めたものを取り出せませんでした。");
-      setDiscoveryPanelOpen(true);
-      discoveryPanelOpenRef.current = true;
-      return;
-    }
-    // 探す範囲の円は消す(この取り出しには中心が無い)
-    setDiscoveryRange(null);
-    discoverySearchCenterRef.current = null;
-    setDiscoveryRows([]);
-    appendDiscoveryResult(data, {
-      query: "",
-      radius: DEFAULT_DISCOVERY_RADIUS,
-      limit: 0,
-      source: "collect",
-    });
-    const points = data.candidates.filter((c) => c.location_verified);
-    if (points.length > 0) {
-      fitMapToSpots(
-        points.map((c) => ({ lat: c.lat, lng: c.lng }) as Spot)
-      );
-    }
-  }, [appendDiscoveryResult, fitMapToSpots, spotTypeKey]);
+  /** 円の中がどこまで収集済みか(取り出したときだけ入る) */
+  const [collectCoverage, setCollectCoverage] = useState<CollectCoverage | null>(null);
+  const [collectStarting, setCollectStarting] = useState(false);
+  const openCollected = useCallback(
+    async (center: { lat: number; lng: number }, radius: number) => {
+      setCollectFetching(true);
+      setCollectCoverage(null);
+      const { data, error } = await api.spotCollect.candidates(spotTypeKey, {
+        ...center,
+        radius,
+      });
+      setCollectFetching(false);
+      if (error || !data) {
+        setDiscoveryError(error?.message ?? "集めたものを取り出せませんでした。");
+        setDiscoveryPanelOpen(true);
+        discoveryPanelOpenRef.current = true;
+        return;
+      }
+      // **探した範囲の円はそのまま出す。** 「どこまで見ているか」がこの機能の要で、
+      // 収集済みかどうかもその円について答えている
+      discoverySearchCenterRef.current = center;
+      setDiscoveryRange({ ...center, radius });
+      setCollectCoverage(data.coverage);
+      setDiscoveryRows([]);
+      appendDiscoveryResult(data, {
+        query: "",
+        radius,
+        limit: 0,
+        source: "collect",
+      });
+      const points = data.candidates.filter((c) => c.location_verified);
+      if (points.length > 0) {
+        fitMapToSpots(points.map((c) => ({ lat: c.lat, lng: c.lng }) as Spot));
+      }
+    },
+    [appendDiscoveryResult, fitMapToSpots, spotTypeKey]
+  );
+
+  /**
+   * まだ回っていない地域を、予定を待たずに集めさせる。
+   *
+   * **1つずつしか頼めない**(知識サーバーは同時に1本しか走らせない)ので、
+   * 足りない地域のうち先頭を渡す。残りは次の回か、もう一度押したときに進む。
+   */
+  const startCollectingMissing = useCallback(async () => {
+    const area = collectCoverage?.missing[0];
+    if (!area) return;
+    setCollectStarting(true);
+    setDiscoveryError(null);
+    const { error } = await api.spotCollect.run(spotTypeKey, area);
+    setCollectStarting(false);
+    setDiscoveryError(
+      error
+        ? `集められませんでした: ${error.message}`
+        : `「${area}」を集め始めました。集まるまで数分かかります。`
+    );
+  }, [collectCoverage, spotTypeKey]);
 
   const closeDiscovery = useCallback(() => {
     setDiscoveryPanelOpen(false);
     discoveryPanelOpenRef.current = false;
     setDiscoveryRows([]);
     setDiscoveryCategory("");
+    setCollectCoverage(null);
     setDiscoveryFocusedNo(null);
     setDiscoveryError(null);
     setDiscoveryExchange(null);
@@ -5231,13 +5272,16 @@ export default function MapView({
                 {discoveryEnabled && (
                   <button
                     onClick={() => {
-                      openCollected();
+                      openCollected(
+                        { lat: contextMenu.lat, lng: contextMenu.lng },
+                        COLLECT_CIRCLE_RADIUS
+                      );
                       setContextMenu(null);
                     }}
                     disabled={collectFetching}
                     className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50"
                   >
-                    {collectFetching ? "取り出し中…" : "集めた候補を見る"}
+                    {collectFetching ? "取り出し中…" : "この周辺の集めた情報"}
                   </button>
                 )}
               </>
@@ -5347,6 +5391,9 @@ export default function MapView({
           onShowExchange={
             discoveryExchange ? () => setShowDiscoveryExchange(true) : undefined
           }
+          coverage={collectCoverage}
+          onCollectMissing={startCollectingMissing}
+          collectStarting={collectStarting}
           onSearchAgain={() => {
             // 探し直しはいま見えている場所から(地図を動かして別の場所を探せる)
             const center = mapRef.current?.getCenter();

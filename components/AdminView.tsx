@@ -220,6 +220,12 @@ export default function AdminView({
    */
   const [collect, setCollect] = useState<SpotCollectStatus | null>(null);
   const [collectPromptDraft, setCollectPromptDraft] = useState("");
+  /** 収集の起点。ここから外へ同心円を広げるように埋めさせる */
+  const [collectOriginDraft, setCollectOriginDraft] = useState("");
+  /** 相手・モデル・深さ。**深さを上げないと浅く早く切り上げる**(実測で3分・8件) */
+  const [collectBackend, setCollectBackend] = useState("");
+  const [collectModel, setCollectModel] = useState("");
+  const [collectEffort, setCollectEffort] = useState("");
   const [collectBusy, setCollectBusy] = useState<"save" | "run" | null>(null);
   const [collectMessage, setCollectMessage] = useState<string | null>(null);
   const loadCollect = useCallback(async () => {
@@ -227,6 +233,10 @@ export default function AdminView({
     setCollect(data ?? null);
     // **下書きは取得のたびに入れ直さない** —— 書きかけを消してしまう
     setCollectPromptDraft((prev) => prev || (data?.prompt ?? ""));
+    setCollectOriginDraft((prev) => prev || (data?.origin ?? ""));
+    setCollectBackend((prev) => prev || (data?.collection?.backend ?? ""));
+    setCollectModel((prev) => prev || (data?.collection?.model ?? ""));
+    setCollectEffort((prev) => prev || (data?.collection?.effort ?? ""));
   }, [typeKey]);
 
   const handleCollectSave = async () => {
@@ -237,7 +247,13 @@ export default function AdminView({
     }
     setCollectBusy("save");
     setCollectMessage(null);
-    const { error } = await api.spotCollect.save(typeKey, prompt);
+    const { error } = await api.spotCollect.save(typeKey, {
+      prompt,
+      origin: collectOriginDraft.trim(),
+      backend: collectBackend,
+      model: collectModel,
+      effort: collectEffort,
+    });
     setCollectBusy(null);
     if (error) {
       setCollectMessage("依頼に失敗しました: " + error.message);
@@ -289,6 +305,11 @@ export default function AdminView({
       if (data) setSpotTypes(data);
     },
   });
+  /** 選んだ相手の仕様(モデル・深さの選択肢はここから出す) */
+  const collectBackendSpec = useMemo(
+    () => collect?.backends.find((b) => b.id === collectBackend) ?? null,
+    [collect, collectBackend]
+  );
   const currentRegionScope = resolveRegionScope(currentType);
 
 
@@ -651,18 +672,33 @@ export default function AdminView({
     loadSpotTypes();
   };
 
+  /**
+   * スポット種別を消す。**いま開いている種別も消せる**(かつては誤操作を恐れて
+   * ボタン自体を出していなかったが、作っては試す種別ほど「いまここ」で消したくなる)。
+   *
+   * **消したら居場所が無くなる**ので、別の種別の管理画面へ送る ——
+   * URLの`[type]`が消えた状態に留まると、以降の読み込みが全部404になる。
+   */
   const handleDeleteType = async (type: SpotType) => {
+    const deletingCurrent = type.key === typeKey;
     if (
       !confirm(
         `「${type.label}」(${type.key})を削除しますか?このスポット種別に属するスポットが` +
           `残っている場合は、公開・承認待ち・却下・非公開を問わず全件(訪問記録・訪問予定・` +
-          `口コミ・写真も含む)削除してから種別自体を削除します。この操作は取り消せません。`
+          `口コミ・写真も含む)削除してから種別自体を削除します。この操作は取り消せません。` +
+          (deletingCurrent ? "\n\n※ いま開いている種別です。削除後は別の種別へ移動します。" : "")
       )
     )
       return;
     const { error } = await api.spotTypes.delete(type.id);
     if (error) {
       setTypeMessage(`「${type.label}」の削除に失敗しました: ` + error.message);
+      return;
+    }
+    if (deletingCurrent) {
+      // **残っているうちのどれかへ移す。** 1つも無ければ入口(`/`)へ任せる
+      const next = spotTypes.find((t) => t.id !== type.id);
+      router.push(next ? `/${next.key}/admin` : "/");
       return;
     }
     setTypeMessage(`「${type.label}」を削除しました。`);
@@ -2701,7 +2737,50 @@ export default function AdminView({
               <section className="mt-2 space-y-3 rounded-xl border border-gray-200 bg-white p-3">
                 <p className="text-sm text-gray-500">
                   溜め先: <code className="text-gray-700">{collect.source}</code>
+                  {typeof collect.collection?.covered_count === "number" && (
+                    <> / 回り終えた地域: {collect.collection.covered_count}件</>
+                  )}
                 </p>
+                {/* **いま走っているかを出す。** 知識サーバーは同時に1本しか受けないので、
+                    走っている間に頼んでも断られる —— 押してから断られるのと、
+                    押せないことが見えているのとでは別物 */}
+                {collect.ingest && (
+                  <p
+                    className={`rounded-lg p-2 text-sm ${
+                      collect.ingest.running
+                        ? "bg-blue-50 text-blue-800"
+                        : "bg-gray-50 text-gray-600"
+                    }`}
+                  >
+                    {collect.ingest.running ? (
+                      <>
+                        <b>いま収集中</b>(対象: {collect.ingest.source ?? "?"}
+                        {collect.ingest.started_at
+                          ? ` / 開始 ${formatJstDateTime(collect.ingest.started_at)}`
+                          : ""}
+                        )。終わるまで新しく頼んでも断られます。
+                      </>
+                    ) : (
+                      <>
+                        いまは動いていません
+                        {collect.ingest.finished_at
+                          ? `(最後に終わったのは ${formatJstDateTime(collect.ingest.finished_at)}`
+                          : ""}
+                        {collect.ingest.finished_at
+                          ? `${collect.ingest.source ? ` / ${collect.ingest.source}` : ""})`
+                          : ""}
+                        。
+                      </>
+                    )}
+                  </p>
+                )}
+                {/* 回った順に積まれるので、末尾が直近。**どこまで進んだかを読む手掛かり** */}
+                {collect.collection?.covered && collect.collection.covered.length > 0 && (
+                  <p className="text-xs text-gray-500">
+                    直近に回った地域:{" "}
+                    {collect.collection.covered.slice(-8).join("、")}
+                  </p>
+                )}
                 {/* **止まっているあいだは、まずそれを出す。** 依頼しただけでは動かない
                     (有効にできるのは知識サーバー側の管理画面だけ)ので、
                     ここが読めないと「依頼したのに何も集まらない」で止まる */}
@@ -2749,6 +2828,99 @@ export default function AdminView({
                     rows={10}
                     className="w-full rounded-lg border border-gray-300 px-2 py-2 font-mono text-xs"
                   />
+                </div>
+                {/* **始点と深さ。** 指定しないと、都道府県の並び順の先頭(北海道)から
+                    浅い既定で走る —— 実測で1都道府県を3分・8件で切り上げた */}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">
+                      収集の起点
+                      <span className="ml-1 inline-block align-middle">
+                        <HelpTip anchored>
+                          ここから集め始め、<b>外へ同心円を広げるように</b>埋めていく
+                          (遠くへ飛ばない)。
+                          <br />
+                          市区町村まで書くと細かく回る(例:{" "}
+                          <code>東京都新宿区</code>)。空にすると<b>AIが決める</b>。
+                          <br />
+                          いま次に集める地域は下の「次に集める地域」に出る ——
+                          1回で拾い切れなければ、AIは同じ地域に留まって掘り続ける。
+                        </HelpTip>
+                      </span>
+                    </label>
+                    <input
+                      value={collectOriginDraft}
+                      onChange={(e) => setCollectOriginDraft(e.target.value)}
+                      placeholder="例: 東京都新宿区(空ならAIが決める)"
+                      className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                    {collect.collection?.cursor && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        次に集める地域: {collect.collection.cursor}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">
+                      集めさせる相手と深さ
+                      <span className="ml-1 inline-block align-middle">
+                        <HelpTip anchored>
+                          <b>深さを上げないと浅く早く切り上げる</b> —— 指定なしの既定で
+                          走らせたとき、1都道府県を3分・8件で終えた。
+                          時間を掛けてよい収集なので、深いほうを選ぶ。
+                          <br />
+                          相手によっては深さを持たない(その場合は選べない)。
+                        </HelpTip>
+                      </span>
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <select
+                        value={collectBackend}
+                        onChange={(e) => {
+                          setCollectBackend(e.target.value);
+                          // 相手が変われば選べるモデルも深さも変わる
+                          setCollectModel("");
+                          setCollectEffort("");
+                        }}
+                        className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="">相手: 既定</option>
+                        {collect.backends.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.label}
+                          </option>
+                        ))}
+                      </select>
+                      {collectBackendSpec?.models.length ? (
+                        <select
+                          value={collectModel}
+                          onChange={(e) => setCollectModel(e.target.value)}
+                          className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                        >
+                          <option value="">モデル: 既定</option>
+                          {collectBackendSpec.models.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                      {collectBackendSpec?.efforts.length ? (
+                        <select
+                          value={collectEffort}
+                          onChange={(e) => setCollectEffort(e.target.value)}
+                          className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                        >
+                          <option value="">深さ: 既定</option>
+                          {collectBackendSpec.efforts.map((f) => (
+                            <option key={f} value={f}>
+                              {f}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -2859,8 +3031,11 @@ export default function AdminView({
                           <span className="w-12 shrink-0 text-xs text-gray-500">
                             {isPublic ? "公開" : "非公開"}
                           </span>
+                          {/* **いま開いている種別にも削除を出す。** 消したあとは
+                              別の種別へ移す(`handleDeleteType`)。公開中の種別だけは
+                              出さない —— そちらはAPIも断るので、押せても意味が無い */}
                           <span className="w-10 shrink-0 text-right">
-                            {!isPublic && !isCurrent && (
+                            {!isPublic && (
                               <button
                                 type="button"
                                 onClick={() => handleDeleteType(t)}
