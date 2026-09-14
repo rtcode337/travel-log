@@ -12,7 +12,15 @@ import { exportsEnabled } from "@/lib/features";
 import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import { parseRank, type Rank } from "@/lib/rank";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
-import type { SpotCollectStatus } from "@/lib/spotCollect";
+import {
+  SCAN_COVER_DAYS,
+  DEEP_COVER_DAYS,
+  SWEEP_DEEP,
+  SWEEP_ROSTER,
+  SWEEP_SCAN,
+  type CollectExtractDraft,
+  type SpotCollectStatus,
+} from "@/lib/spotCollect";
 import { formatJstDateTime } from "@/lib/spotDiscovery";
 import {
   CATEGORIES_SETTING_KEY,
@@ -129,6 +137,8 @@ export default function AdminView({
   const [flagTextOpen, setFlagTextOpen] = useState(false);
   const [flagClearing, setFlagClearing] = useState(false);
   const [flagMessage, setFlagMessage] = useState<string | null>(null);
+  /** 収集へ割り込ませている最中のスポット(一括のときは`"all"`) */
+  const [flagFocusing, setFlagFocusing] = useState<string | null>(null);
 
   // ルート(スポットを巡った順に矢印で繋ぐ)の一覧とCSVインポート用
   const [routes, setRoutes] = useState<SpotRoute[]>([]);
@@ -219,37 +229,126 @@ export default function AdminView({
    * **周辺を探すの、待たない版** —— 依頼と状態はここ、取り出して選ぶのは地図のパネル。
    */
   const [collect, setCollect] = useState<SpotCollectStatus | null>(null);
-  const [collectPromptDraft, setCollectPromptDraft] = useState("");
-  /** 収集の起点。ここから外へ同心円を広げるように埋めさせる */
-  const [collectOriginDraft, setCollectOriginDraft] = useState("");
+  /**
+   * AIへの依頼文(抽出条件用・「ざっと」のプロンプト用)と、返ってきた案。
+   *
+   * **集めたい軸は種別ごとに違う**ので、どのソースのどのタグを引くかも、
+   * どう調べさせるかも決め打ちにできない。ふつうの言葉で書いて書かせ、
+   * **引いた件数と先頭数件を見てから**依頼する。
+   */
+  const [collectExtractWant, setCollectExtractWant] = useState("");
+  const [collectScanWant, setCollectScanWant] = useState("");
+  const [collectExtractDraft, setCollectExtractDraft] =
+    useState<CollectExtractDraft | null>(null);
+  const [collectScanPrompt, setCollectScanPrompt] = useState("");
+  const [collectDeepPrompt, setCollectDeepPrompt] = useState("");
   /** 相手・モデル・深さ。**深さを上げないと浅く早く切り上げる**(実測で3分・8件) */
   const [collectBackend, setCollectBackend] = useState("");
   const [collectModel, setCollectModel] = useState("");
   const [collectEffort, setCollectEffort] = useState("");
-  const [collectBusy, setCollectBusy] = useState<"save" | "run" | null>(null);
+  const [collectBusy, setCollectBusy] = useState<
+    "save" | "run" | "extract" | "prompt" | null
+  >(null);
   const [collectMessage, setCollectMessage] = useState<string | null>(null);
   const loadCollect = useCallback(async () => {
     const { data } = await api.spotCollect.status(typeKey);
     setCollect(data ?? null);
     // **下書きは取得のたびに入れ直さない** —— 書きかけを消してしまう
-    setCollectPromptDraft((prev) => prev || (data?.prompt ?? ""));
-    setCollectOriginDraft((prev) => prev || (data?.origin ?? ""));
+    setCollectExtractWant((prev) => prev || (data?.draftExtractWant ?? ""));
+    setCollectScanWant((prev) => prev || (data?.draftScanWant ?? ""));
+    setCollectExtractDraft((prev) =>
+      prev ?? (data?.collection?.extract
+        ? { extract: data.collection.extract, total: 0, matched: 0, sample: [] }
+        : null)
+    );
+    setCollectScanPrompt((prev) => prev || (data?.collection?.prompt ?? ""));
+    setCollectDeepPrompt(
+      (prev) =>
+        prev ||
+        (data?.collection?.sweeps?.find((s) => s.name === SWEEP_DEEP) as
+          | { prompt?: string }
+          | undefined)?.prompt ||
+        (data?.defaultDeepPrompt ?? "")
+    );
     setCollectBackend((prev) => prev || (data?.collection?.backend ?? ""));
     setCollectModel((prev) => prev || (data?.collection?.model ?? ""));
     setCollectEffort((prev) => prev || (data?.collection?.effort ?? ""));
   }, [typeKey]);
 
+  /**
+   * 抽出条件をAIに書かせる。**保存はしない** ——
+   * その場で引いた件数と先頭数件が返るので、確かめてから依頼する。
+   */
+  const handleDraftExtract = async () => {
+    const want = collectExtractWant.trim();
+    if (!want) {
+      setCollectMessage("抽出条件の依頼文を入力してください。");
+      return;
+    }
+    setCollectBusy("extract");
+    setCollectMessage(null);
+    const { data, error } = await api.spotCollect.draft(typeKey, "extract", {
+      want,
+      backend: collectBackend,
+      model: collectModel,
+      effort: collectEffort,
+    });
+    setCollectBusy(null);
+    if (error || !data) {
+      setCollectMessage("抽出条件を書けませんでした: " + (error?.message ?? "空の答え"));
+      return;
+    }
+    const draft = data as CollectExtractDraft;
+    setCollectExtractDraft(draft);
+    setCollectMessage(
+      draft.extract
+        ? `抽出条件を書きました(${draft.matched.toLocaleString()}件が当たりました)。`
+        : `機械では引けないと判断されました${draft.reason ? `: ${draft.reason}` : ""}。`
+    );
+  };
+
+  /** 「ざっと」のプロンプトをAIに書かせる。**抽出条件を決めてから押すほうが良くなる** */
+  const handleDraftPrompt = async () => {
+    const want = collectScanWant.trim();
+    if (!want) {
+      setCollectMessage("プロンプトの依頼文を入力してください。");
+      return;
+    }
+    setCollectBusy("prompt");
+    setCollectMessage(null);
+    const { data, error } = await api.spotCollect.draft(typeKey, "prompt", {
+      want,
+      current: collectScanPrompt.trim(),
+    });
+    setCollectBusy(null);
+    const prompt = (data as { prompt?: string } | null)?.prompt;
+    if (error || !prompt) {
+      setCollectMessage("プロンプトを書けませんでした: " + (error?.message ?? "空の答え"));
+      return;
+    }
+    setCollectScanPrompt(prompt);
+    setCollectMessage("プロンプトを書きました。内容を確かめてから依頼してください。");
+  };
+
   const handleCollectSave = async () => {
-    const prompt = collectPromptDraft.trim();
-    if (!prompt) {
-      setCollectMessage("プロンプトを入力してください。");
+    const extract = collectExtractDraft?.extract;
+    if (!extract) {
+      setCollectMessage("先に抽出条件をAIに書かせてください。");
+      return;
+    }
+    const scanPrompt = collectScanPrompt.trim();
+    if (!scanPrompt) {
+      setCollectMessage("「ざっと」のプロンプトを入力してください。");
       return;
     }
     setCollectBusy("save");
     setCollectMessage(null);
     const { error } = await api.spotCollect.save(typeKey, {
-      prompt,
-      origin: collectOriginDraft.trim(),
+      extract,
+      scanPrompt,
+      deepPrompt: collectDeepPrompt.trim(),
+      // **区画の細かさは母集団の件数から逆算する**(下書きが引いた件数)
+      population: collectExtractDraft?.matched || undefined,
       backend: collectBackend,
       model: collectModel,
       effort: collectEffort,
@@ -265,10 +364,11 @@ export default function AdminView({
     );
   };
 
-  const handleCollectRun = async () => {
+  /** 予定を待たずに1回。**巡回を名指しできる**(相手も1回に見る量も巡回ごとに違う) */
+  const handleCollectRun = async (sweep?: string) => {
     setCollectBusy("run");
     setCollectMessage(null);
-    const { error } = await api.spotCollect.run(typeKey);
+    const { error } = await api.spotCollect.run(typeKey, sweep ? { sweep } : undefined);
     setCollectBusy(null);
     if (error) {
       setCollectMessage("集められませんでした: " + error.message);
@@ -276,7 +376,8 @@ export default function AdminView({
     }
     await loadCollect();
     setCollectMessage(
-      "集め始めました。集まるまで数分かかります。地図の「集めた候補を見る」から取り出せます。"
+      `${sweep ? `「${sweep}」を` : ""}集め始めました。集まるまで数分かかります。` +
+        "地図の「この周辺の集めた情報」から取り出せます。"
     );
   };
 
@@ -1179,6 +1280,45 @@ export default function AdminView({
       ].join("\n"),
     [flaggedSpots, currentTypeLabel]
   );
+
+  /**
+   * 報告された内容を、そのまま収集への割り込みの依頼文にする。
+   * **テキストで表示と同じ形**(`- 名前: 理由`)—— 渡す先で必要なのは
+   * 「どれが」「なぜ」で、座標やキーは判断の材料にならない。
+   */
+  const flagFocusNote = useCallback(
+    (items: FlaggedSpot[]) =>
+      [
+        `「${currentTypeLabel}」に間違いの報告がありました。` +
+          "実在するか・所在地は合っているか・二重に入っていないかを確かめて直してください。",
+        ...items.map((f) => (f.reason ? `- ${f.name}: ${f.reason}` : `- ${f.name}`)),
+      ].join("\n"),
+    [currentTypeLabel]
+  );
+
+  /**
+   * 報告のあったスポットを**名指しで**収集に直させる(割り込み)。
+   *
+   * **区画を渡すだけでは、直してほしい1件が差し込みに載る保証がない** ——
+   * その区画の中身が多ければ途中で切られる。走るのは「じっくり」の枠で、
+   * **定時の巡回の予定も区画の巡回記録も動かない**。
+   */
+  const handleFocusFlags = async (items: FlaggedSpot[], key: string) => {
+    if (items.length === 0) return;
+    setFlagFocusing(key);
+    setFlagMessage(null);
+    const { error } = await api.spotCollect.run(typeKey, {
+      titles: items.map((f) => f.name),
+      note: flagFocusNote(items),
+    });
+    setFlagFocusing(null);
+    setFlagMessage(
+      error
+        ? "収集に頼めませんでした: " + error.message
+        : `${items.length}件を収集に直させています。反映まで数分かかります` +
+          "(直ったかは地図の「この周辺の集めた情報」で確かめられます)。"
+    );
+  };
 
   /** 報告を種別ぶんまとめて取り消す(片付けたあとに押す) */
   const handleClearFlags = async () => {
@@ -2367,10 +2507,24 @@ export default function AdminView({
                             {f.reason}
                           </p>
                         )}
-                        <p className="mt-0.5 text-xs text-gray-400">
-                          {f.flagged_by_name ?? "不明"} /{" "}
-                          {new Date(f.created_at).toLocaleString("ja-JP")}
-                        </p>
+                        <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
+                          <p className="text-xs text-gray-400">
+                            {f.flagged_by_name ?? "不明"} /{" "}
+                            {new Date(f.created_at).toLocaleString("ja-JP")}
+                          </p>
+                          {/* **収集を持っている種別だけ。** 持っていない種別では
+                              直させる相手がいない(報告はCSVを直すためのメモに留まる) */}
+                          {collect?.collection && (
+                            <button
+                              type="button"
+                              onClick={() => handleFocusFlags([f], f.id)}
+                              disabled={flagFocusing !== null}
+                              className="rounded-full border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 disabled:opacity-40"
+                            >
+                              {flagFocusing === f.id ? "依頼中…" : "収集に直させる"}
+                            </button>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -2383,6 +2537,20 @@ export default function AdminView({
                     >
                       {flagTextOpen ? "テキストを閉じる" : "テキストで表示"}
                     </button>
+                    {/* **収集に持っている種別なら、CSVを直さずに直させられる。**
+                        報告された理由をそのまま依頼文にして名指しで渡す */}
+                    {collect?.collection && (
+                      <button
+                        type="button"
+                        onClick={() => handleFocusFlags(flaggedSpots.slice(0, 20), "all")}
+                        disabled={flagFocusing !== null}
+                        className="rounded-lg border border-blue-600 bg-white px-3 py-1.5 text-sm font-medium text-blue-600 disabled:opacity-50"
+                      >
+                        {flagFocusing === "all"
+                          ? "依頼中…"
+                          : `収集にまとめて直させる(${Math.min(flaggedSpots.length, 20)}件)`}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={handleClearFlags}
@@ -2737,9 +2905,7 @@ export default function AdminView({
               <section className="mt-2 space-y-3 rounded-xl border border-gray-200 bg-white p-3">
                 <p className="text-sm text-gray-500">
                   溜め先: <code className="text-gray-700">{collect.source}</code>
-                  {typeof collect.collection?.covered_count === "number" && (
-                    <> / 回り終えた地域: {collect.collection.covered_count}件</>
-                  )}
+                  {collect.partitionCount > 0 && <> / 区画: {collect.partitionCount}</>}
                 </p>
                 {/* **いま走っているかを出す。** 知識サーバーは同時に1本しか受けないので、
                     走っている間に頼んでも断られる —— 押してから断られるのと、
@@ -2774,13 +2940,6 @@ export default function AdminView({
                     )}
                   </p>
                 )}
-                {/* 回った順に積まれるので、末尾が直近。**どこまで進んだかを読む手掛かり** */}
-                {collect.collection?.covered && collect.collection.covered.length > 0 && (
-                  <p className="text-xs text-gray-500">
-                    直近に回った地域:{" "}
-                    {collect.collection.covered.slice(-8).join("、")}
-                  </p>
-                )}
                 {/* **止まっているあいだは、まずそれを出す。** 依頼しただけでは動かない
                     (有効にできるのは知識サーバー側の管理画面だけ)ので、
                     ここが読めないと「依頼したのに何も集まらない」で止まる */}
@@ -2788,11 +2947,8 @@ export default function AdminView({
                   collect.collection.enabled ? (
                     <p className="rounded-lg bg-emerald-50 p-2 text-sm text-emerald-800">
                       有効です。
-                      {collect.collection.last_run_at
-                        ? `前回: ${formatJstDateTime(collect.collection.last_run_at)}(${collect.collection.last_status ?? "?"})`
-                        : "まだ1回も集めていません。"}
                       {collect.collection.last_error
-                        ? ` / 直前のエラー: ${collect.collection.last_error}`
+                        ? `直前のエラー: ${collect.collection.last_error}`
                         : ""}
                     </p>
                   ) : (
@@ -2804,122 +2960,240 @@ export default function AdminView({
                   )
                 ) : (
                   <p className="rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                    まだ依頼していません。下のプロンプトを整えて「依頼する」を押してください。
+                    まだ依頼していません。下の①②を順に整えて「依頼する」を押してください。
                   </p>
                 )}
-                <div>
-                  <label className="mb-1 block text-sm font-medium">
-                    集めさせる内容(プロンプト)
+                {/* **一周の進み具合は区画で数える。** 区画は数え上げられるので
+                    「一周した」が言える —— カーソル1本では言えなかったところ */}
+                {collect.collection?.sweeps && collect.collection.sweeps.length > 0 && (
+                  <ul className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 text-xs">
+                    {collect.collection.sweeps.map((sweep) => {
+                      const lap = collect.laps.find((l) => l.name === sweep.name);
+                      return (
+                        <li key={sweep.name} className="flex flex-wrap items-baseline gap-x-2 px-2 py-1.5">
+                          <span className="font-medium text-gray-700">{sweep.name}</span>
+                          <span className="text-gray-500">
+                            {sweep.on_demand
+                              ? "頼まれたときだけ"
+                              : sweep.use_extract
+                                ? "機械で引く(週1)"
+                                : sweep.cover_days
+                                  ? `${sweep.cover_days}日で一周`
+                                  : "定時"}
+                          </span>
+                          {lap && lap.total > 0 && (
+                            <span className="text-gray-500">
+                              {lap.visited}/{lap.total}区画
+                            </span>
+                          )}
+                          {sweep.after && (
+                            <span className="text-gray-400">
+                              (「{sweep.after}」が一周するまで待つ)
+                            </span>
+                          )}
+                          <span className="ml-auto text-gray-400">
+                            {sweep.last_run_at
+                              ? `前回 ${formatJstDateTime(sweep.last_run_at)}(${sweep.last_status ?? "?"})`
+                              : "まだ走っていません"}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {/* ---- ① 抽出条件 ------------------------------------------------ */}
+                <div className="rounded-lg border border-gray-200 p-2">
+                  <p className="mb-1 text-sm font-medium">
+                    ① 名簿の抽出条件をAIに書かせる
                     <span className="ml-1 inline-block align-middle">
                       <HelpTip anchored>
-                        <b>{"{cursor}"}</b>には前回どこまで集めたかが入る(相手が
-                        <b>next_cursor</b>で次の位置を返す)。
+                        最初の名簿は<b>AIではなく機械で埋める</b> ——
+                        地図辞典(overture_japan・osm_japan)から名前と所在地を引くだけなので、
+                        AIに書かせると存在しないものが混ざるうえ毎回違うものが返る。
+                        <br />
+                        <b>どの辞典のどのタグを引くか</b>は種別ごとに違うので、
+                        ふつうの言葉で書いた依頼文からAIに書き起こさせる。
+                        <b>タグは完全一致でしか引けない</b>ので、当たった件数を必ず確かめること
+                        (それらしい名前を書かれると静かな0件になる)。
+                        <br />
+                        この条件は<b>区画の母集団にも使う</b>(どこを細かく割るか)。
+                      </HelpTip>
+                    </span>
+                  </p>
+                  <textarea
+                    value={collectExtractWant}
+                    onChange={(e) => setCollectExtractWant(e.target.value)}
+                    rows={5}
+                    className="w-full rounded-lg border border-gray-300 px-2 py-2 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleDraftExtract}
+                    disabled={collectBusy !== null}
+                    className="mt-1 rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 disabled:opacity-50"
+                  >
+                    {collectBusy === "extract"
+                      ? "書かせています…(数十秒〜数分)"
+                      : "AIに書かせる"}
+                  </button>
+                  {collectExtractDraft?.extract && (
+                    <div className="mt-2 rounded bg-gray-50 p-2 text-xs">
+                      <p className="text-gray-700">
+                        <code>{collectExtractDraft.extract.source}</code> /{" "}
+                        タグ: <code>{collectExtractDraft.extract.tag || "(なし)"}</code>
+                        {collectExtractDraft.matched > 0 && (
+                          <> / 当たり {collectExtractDraft.matched.toLocaleString()}件</>
+                        )}
+                      </p>
+                      {collectExtractDraft.sample.length > 0 && (
+                        <p className="mt-1 text-gray-500">
+                          例: {collectExtractDraft.sample.slice(0, 5).map((d) => d.title).join("、")}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {/* **0件のときは実在するタグを出す。** 書いた本人には確かめようがない */}
+                  {collectExtractDraft?.candidates &&
+                    collectExtractDraft.candidates.length > 0 && (
+                      <p className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
+                        当たりませんでした。実在するタグ:{" "}
+                        {collectExtractDraft.candidates
+                          .slice(0, 10)
+                          .map((c) => c.tag)
+                          .join("、")}
+                      </p>
+                    )}
+                </div>
+
+                {/* ---- ② ざっとのプロンプト --------------------------------------- */}
+                <div className="rounded-lg border border-gray-200 p-2">
+                  <p className="mb-1 text-sm font-medium">
+                    ② 「{SWEEP_SCAN}」のプロンプトをAIに書かせる
+                    <span className="ml-1 inline-block align-middle">
+                      <HelpTip anchored>
+                        全区画を<b>{SCAN_COVER_DAYS}日で一周</b>して、名簿に並んだものを
+                        順に精査する回のプロンプト。
+                        <b>{"{partition}"}</b>に今回見る範囲、<b>{"{current}"}</b>に
+                        その範囲のいまの中身が差し込まれる ——
+                        範囲の選び方をAIに決めさせてはいけない(区画を配るのは知識サーバー)。
                         <br />
                         取り出す側は<b>title を名前</b>、
                         <b>body の「所在地: …」を座標を引く手掛かり</b>、
                         <b>tags の先頭をジャンル</b>、<b>url を出典</b>として読む。
                         座標は書かせない(地図データから引き直すため)。
+                        <br />
+                        <b>①を決めてから押すほうが良い文になる</b>
+                        (どの辞典から引いた名簿を精査するのかを書けるため)。
+                      </HelpTip>
+                    </span>
+                  </p>
+                  <textarea
+                    value={collectScanWant}
+                    onChange={(e) => setCollectScanWant(e.target.value)}
+                    rows={5}
+                    className="w-full rounded-lg border border-gray-300 px-2 py-2 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleDraftPrompt}
+                    disabled={collectBusy !== null}
+                    className="mt-1 rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 disabled:opacity-50"
+                  >
+                    {collectBusy === "prompt"
+                      ? "書かせています…(数十秒〜数分)"
+                      : "AIに書かせる"}
+                  </button>
+                  <textarea
+                    value={collectScanPrompt}
+                    onChange={(e) => setCollectScanPrompt(e.target.value)}
+                    rows={10}
+                    placeholder="AIに書かせるか、直接書く"
+                    className="mt-2 w-full rounded-lg border border-gray-300 px-2 py-2 font-mono text-xs"
+                  />
+                </div>
+
+                {/* ---- ③ じっくりのプロンプト ------------------------------------- */}
+                <details className="rounded-lg border border-gray-200 p-2">
+                  <summary className="cursor-pointer select-none text-sm font-medium">
+                    ③ 「{SWEEP_DEEP}」のプロンプト(既定のまま使える)
+                  </summary>
+                  <p className="mt-1 text-xs text-gray-500">
+                    全区画を{DEEP_COVER_DAYS}日で一周して、1件ずつ疑う回。
+                    「{SWEEP_SCAN}」が一周し終えるまで走りません。
+                    <b>種別ごとに違うのは「何を集めるか」であって「どう疑うか」ではない</b>
+                    ので、ここはAIに書かせず定型にしてあります。
+                  </p>
+                  <textarea
+                    value={collectDeepPrompt}
+                    onChange={(e) => setCollectDeepPrompt(e.target.value)}
+                    rows={12}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-2 font-mono text-xs"
+                  />
+                </details>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    集めさせる相手と深さ
+                    <span className="ml-1 inline-block align-middle">
+                      <HelpTip anchored>
+                        <b>深さを上げないと浅く早く切り上げる</b> —— 指定なしの既定で
+                        走らせたとき、1都道府県を3分・8件で終えた。
+                        時間を掛けてよい収集なので、深いほうを選ぶ。
+                        <br />
+                        「{SWEEP_DEEP}」と「割り込み」は、指定しなければ
+                        <b>high</b>で走る(1件ずつ調べる回のため)。
+                        <br />
+                        相手によっては深さを持たない(その場合は選べない)。
                       </HelpTip>
                     </span>
                   </label>
-                  <textarea
-                    value={collectPromptDraft}
-                    onChange={(e) => setCollectPromptDraft(e.target.value)}
-                    rows={10}
-                    className="w-full rounded-lg border border-gray-300 px-2 py-2 font-mono text-xs"
-                  />
-                </div>
-                {/* **始点と深さ。** 指定しないと、都道府県の並び順の先頭(北海道)から
-                    浅い既定で走る —— 実測で1都道府県を3分・8件で切り上げた */}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium">
-                      収集の起点
-                      <span className="ml-1 inline-block align-middle">
-                        <HelpTip anchored>
-                          ここから集め始め、<b>外へ同心円を広げるように</b>埋めていく
-                          (遠くへ飛ばない)。
-                          <br />
-                          市区町村まで書くと細かく回る(例:{" "}
-                          <code>東京都新宿区</code>)。空にすると<b>AIが決める</b>。
-                          <br />
-                          いま次に集める地域は下の「次に集める地域」に出る ——
-                          1回で拾い切れなければ、AIは同じ地域に留まって掘り続ける。
-                        </HelpTip>
-                      </span>
-                    </label>
-                    <input
-                      value={collectOriginDraft}
-                      onChange={(e) => setCollectOriginDraft(e.target.value)}
-                      placeholder="例: 東京都新宿区(空ならAIが決める)"
-                      className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                    />
-                    {collect.collection?.cursor && (
-                      <p className="mt-1 text-xs text-gray-500">
-                        次に集める地域: {collect.collection.cursor}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium">
-                      集めさせる相手と深さ
-                      <span className="ml-1 inline-block align-middle">
-                        <HelpTip anchored>
-                          <b>深さを上げないと浅く早く切り上げる</b> —— 指定なしの既定で
-                          走らせたとき、1都道府県を3分・8件で終えた。
-                          時間を掛けてよい収集なので、深いほうを選ぶ。
-                          <br />
-                          相手によっては深さを持たない(その場合は選べない)。
-                        </HelpTip>
-                      </span>
-                    </label>
-                    <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <select
+                      value={collectBackend}
+                      onChange={(e) => {
+                        setCollectBackend(e.target.value);
+                        // 相手が変われば選べるモデルも深さも変わる
+                        setCollectModel("");
+                        setCollectEffort("");
+                      }}
+                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    >
+                      <option value="">相手: 既定</option>
+                      {collect.backends.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                    {collectBackendSpec?.models.length ? (
                       <select
-                        value={collectBackend}
-                        onChange={(e) => {
-                          setCollectBackend(e.target.value);
-                          // 相手が変われば選べるモデルも深さも変わる
-                          setCollectModel("");
-                          setCollectEffort("");
-                        }}
+                        value={collectModel}
+                        onChange={(e) => setCollectModel(e.target.value)}
                         className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
                       >
-                        <option value="">相手: 既定</option>
-                        {collect.backends.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.label}
+                        <option value="">モデル: 既定</option>
+                        {collectBackendSpec.models.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
                           </option>
                         ))}
                       </select>
-                      {collectBackendSpec?.models.length ? (
-                        <select
-                          value={collectModel}
-                          onChange={(e) => setCollectModel(e.target.value)}
-                          className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                        >
-                          <option value="">モデル: 既定</option>
-                          {collectBackendSpec.models.map((m) => (
-                            <option key={m} value={m}>
-                              {m}
-                            </option>
-                          ))}
-                        </select>
-                      ) : null}
-                      {collectBackendSpec?.efforts.length ? (
-                        <select
-                          value={collectEffort}
-                          onChange={(e) => setCollectEffort(e.target.value)}
-                          className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                        >
-                          <option value="">深さ: 既定</option>
-                          {collectBackendSpec.efforts.map((f) => (
-                            <option key={f} value={f}>
-                              {f}
-                            </option>
-                          ))}
-                        </select>
-                      ) : null}
-                    </div>
+                    ) : null}
+                    {collectBackendSpec?.efforts.length ? (
+                      <select
+                        value={collectEffort}
+                        onChange={(e) => setCollectEffort(e.target.value)}
+                        className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="">深さ: 既定</option>
+                        {collectBackendSpec.efforts.map((f) => (
+                          <option key={f} value={f}>
+                            {f}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -2935,16 +3209,20 @@ export default function AdminView({
                         ? "内容を更新する"
                         : "依頼する"}
                   </button>
-                  {/* 予定を待たずに1回。**止まっていると向こうが断る**ので、
-                      そのときは理由をそのまま出す */}
-                  <button
-                    type="button"
-                    onClick={handleCollectRun}
-                    disabled={collectBusy !== null || !collect.collection}
-                    className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 disabled:opacity-50"
-                  >
-                    {collectBusy === "run" ? "起動中…" : "いま集める"}
-                  </button>
+                  {/* 予定を待たずに1回。**巡回ごとに押せる** ——
+                      相手も1回に見る量も巡回ごとに違うので、分けて持った意味が
+                      名指しできないと半分になる。**止まっていると向こうが断る** */}
+                  {[SWEEP_ROSTER, SWEEP_SCAN, SWEEP_DEEP].map((sweep) => (
+                    <button
+                      key={sweep}
+                      type="button"
+                      onClick={() => handleCollectRun(sweep)}
+                      disabled={collectBusy !== null || !collect.collection}
+                      className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 disabled:opacity-50"
+                    >
+                      {collectBusy === "run" ? "起動中…" : `「${sweep}」をいま1回`}
+                    </button>
+                  ))}
                   <button
                     type="button"
                     onClick={loadCollect}

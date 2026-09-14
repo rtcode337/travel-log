@@ -27,6 +27,8 @@ import type {
 } from "@/lib/spotDiscovery";
 import type {
   CollectCandidatesResult,
+  CollectExtract,
+  CollectExtractDraft,
   SpotCollectStatus,
 } from "@/lib/spotCollect";
 
@@ -268,16 +270,39 @@ export const api = {
         { fresh: true }
       ),
     /**
-     * 依頼する(まだ無ければ作る・あればプロンプトを差し替える)。
-     * `cursor`は次に集める地域(空ならAIが決める)、相手・モデル・深さは
-     * **空文字で「指定しない」**に戻せる
+     * 抽出条件(`kind: "extract"`)かプロンプト(`kind: "prompt"`)をAIに書かせる。
+     * **保存はしない** —— 返ってきた案を画面で確かめてから`save`で依頼する。
+     * **AIが1回動くぶん待つ**(十数秒〜数分)
+     */
+    draft: (
+      type: string,
+      kind: "extract" | "prompt",
+      body: {
+        want: string;
+        current?: string;
+        feedback?: string;
+        backend?: string;
+        model?: string;
+        effort?: string;
+      }
+    ) =>
+      request<CollectExtractDraft | { prompt: string }>(
+        `/api/spots/collect/draft?type=${encodeURIComponent(type)}&kind=${kind}`,
+        { method: "POST", body: JSON.stringify(body) }
+      ),
+    /**
+     * 依頼する(まだ無ければ作る・あれば差し替える)。
+     * 抽出条件とプロンプトはAIが書いたものを渡し、区画と巡回はサーバーが組む。
+     * `population`は下書きが引いた件数で、**区画の細かさの逆算に使う**。
+     * 相手・モデル・深さは**空文字で「指定しない」**に戻せる
      */
     save: (
       type: string,
       body: {
-        prompt: string;
-        /** 収集の起点(ここから外へ広げる)。プロンプトの`{origin}`へ差し込まれる */
-        origin?: string;
+        extract: CollectExtract;
+        scanPrompt: string;
+        deepPrompt?: string;
+        population?: number;
         backend?: string;
         model?: string;
         effort?: string;
@@ -289,13 +314,26 @@ export const api = {
       }),
     /**
      * 予定を待たずに1回集めさせる(向こうで有効にしてあるときだけ通る)。
-     * `area`を渡すと、その地域を次に回らせてから起こす
+     *
+     * - `sweep`だけ → その巡回を1回
+     * - `partition` → **この範囲を先に見て**(地図で見ている区画)
+     * - `titles` → **この1件を直して**(間違い報告のあったスポット)
+     *
+     * 後ろの2つは割り込み(`focus`)で、**定時の巡回の予定も区画の巡回記録も動かない**。
+     * 走らせる枠は「じっくり」(割り込み専用の巡回は置いていない)
      */
-    run: (type: string, area?: string) =>
+    run: (
+      type: string,
+      opts?: { sweep?: string; partition?: string; titles?: string[]; note?: string }
+    ) =>
       request<unknown>(
         `/api/spots/collect/run?type=${encodeURIComponent(type)}` +
-          (area ? `&area=${encodeURIComponent(area)}` : ""),
-        { method: "POST" }
+          (opts?.sweep ? `&sweep=${encodeURIComponent(opts.sweep)}` : "") +
+          (opts?.partition ? `&partition=${encodeURIComponent(opts.partition)}` : ""),
+        {
+          method: "POST",
+          body: JSON.stringify({ titles: opts?.titles ?? [], note: opts?.note ?? "" }),
+        }
       ),
     /**
      * 溜まったものからスポットの候補を取り出す。**円を渡すとその中だけ**返し、

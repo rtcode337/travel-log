@@ -19,9 +19,8 @@ import {
   type CollectedDoc,
 } from "@/lib/spotCollect";
 import {
-  areaProbePoints,
+  partitionCoverage,
   type CollectCandidatesResult,
-  type CollectCoverage,
 } from "@/lib/spotCollect";
 import {
   chiezo,
@@ -154,58 +153,16 @@ function mostCommon(values: string[]): string | null {
   return best;
 }
 
-/** 画面と収集に渡す地域の書き方(都道府県が取れていれば付ける) */
-function areaLabel(area: PointArea): string {
-  return area.prefecture ? `${area.prefecture}${area.municipality}` : area.municipality;
-}
-
 /**
- * その地域を回り終えているか。**書き方の揺れを吸う** —— 回り終えた印はAIが書くので、
- * 「東京都新宿区」とも「新宿区」とも来る。市区町村が入っていることを必須にし、
- * 都道府県はこちらが分かっているときだけ併せて見る(同名の市が別の県にあるため)。
- */
-function isCovered(area: PointArea, covered: string[]): boolean {
-  return covered.some(
-    (c) =>
-      c.includes(area.municipality) &&
-      (!area.prefecture || !hasOtherPrefecture(c, area.prefecture))
-  );
-}
-
-/** その印が、別の都道府県を名乗っているか(名乗っていなければ判断しない) */
-function hasOtherPrefecture(covered: string, prefecture: string): boolean {
-  const named = (PREFECTURES as readonly string[]).find((p) => covered.includes(p));
-  return !!named && named !== prefecture;
-}
-
-/**
- * 円が跨いでいる地域を出し、収集済みかを見る。
+ * 円の中が収集済みかは、**区画の巡回記録で見る**(`partitionCoverage`)。
+ * かつては円周8方位を突いて市区町村を引き、回り終えた印(AIが書いた地名)と
+ * 突き合わせていたが、「東京都新宿区」と「新宿区」の揺れを吸う処理が要った。
+ * 区画は矩形なので、そこに表記の入り込む余地が無い。
  *
- * **中心だけでは足りない** —— 円が境界を跨いでいると隣の市区町村を見落とす。
- * 「円の中のすべてで取り終わっているか」を聞かれている以上、跨ぎを拾えないと
- * 答えにならないので、中心と円周8方位を突く(`areaProbePoints`)。
+ * 中心の地域(`areaAt`)はいまも引く —— **座標を引き当てられなかった候補**が
+ * 円の中の話かを見るのに要る(新しい店は地図辞典に載っていないのが普通で、
+ * そこを落とすとこの機能で拾いたいものがちょうど落ちる)。
  */
-async function checkCoverage(
-  baseUrl: string,
-  center: { lat: number; lng: number },
-  radiusM: number,
-  covered: string[]
-): Promise<CollectCoverage> {
-  const found = await Promise.all(
-    areaProbePoints(center, radiusM).map((p) => areaAt(baseUrl, p))
-  );
-  // 同じ地域は1つに畳む(円の中の複数の点が同じ市区町村に落ちるのが普通)
-  const byLabel = new Map<string, PointArea>();
-  for (const area of found) {
-    if (area) byLabel.set(areaLabel(area), area);
-  }
-  const areas = [...byLabel.keys()];
-  return {
-    areas,
-    covered: areas.filter((a) => isCovered(byLabel.get(a)!, covered)),
-    missing: areas.filter((a) => !isCovered(byLabel.get(a)!, covered)),
-  };
-}
 
 interface ChiezoDocResponse {
   title?: unknown;
@@ -400,14 +357,16 @@ export async function GET(request: Request) {
     Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(radius) && radius > 0
       ? { center: { lat, lng }, radius }
       : null;
+  // **区画の巡回記録から見る。** 円に重なる区画のうち、「ざっと」が一度でも
+  // 見たものがいくつか —— 地名の突き合わせが要らないのがこの方式の要
+  const collection = circle ? await fetchCollection(baseUrl, source) : null;
   const coverage = circle
-    ? await checkCoverage(
-        baseUrl,
-        circle.center,
-        circle.radius,
-        (await fetchCollection(baseUrl, source))?.covered ?? []
-      )
+    ? partitionCoverage(circle.center, circle.radius, collection?.partitions ?? [])
     : null;
+  // 座標を引き当てられなかった候補が円の中の話かを見るための、中心の地域。
+  // **中心1点だけでよい** —— 円が跨ぐ隣まで拾う必要があったのは収集済みの
+  // 判定のほうで、そちらは区画が答えるようになった
+  const circleArea = circle ? await areaAt(baseUrl, circle.center) : null;
 
   if (error) {
     // まだ1回も焼けていないとソース自体が無い。**それは失敗ではない**ので、
@@ -493,8 +452,9 @@ export async function GET(request: Request) {
     if (c.lat !== 0 || c.lng !== 0) {
       return distanceMeters(circle.center, { lat: c.lat, lng: c.lng }) <= circle.radius;
     }
+    if (!circleArea) return true;
     const area = c.address ?? c.region ?? "";
-    return (coverage?.areas ?? []).some((a) => areaWords(a).some((w) => area.includes(w)));
+    return area.includes(circleArea.municipality);
   };
 
   const result: CollectCandidatesResult = {

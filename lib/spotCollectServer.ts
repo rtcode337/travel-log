@@ -8,6 +8,8 @@ import {
   resolveCollectSource,
   type ChiezoCollection,
   type ChiezoIngestStatus,
+  type CollectChoice,
+  type CollectExtractDraft,
   type SpotCollectStatus,
 } from "@/lib/spotCollect";
 
@@ -21,14 +23,18 @@ import {
 
 // 相手はローカルのSQLiteとAIの設定ファイルなので速いが、落ちていることはある
 const CHIEZO_TIMEOUT_MS = 8_000;
+/**
+ * 下書きを書かせるときの待ち。**AIが1回動くぶん**待つ(十数秒〜数分)。
+ * 周辺を探すと同じ180秒 —— 待たされた末に失敗するより、早く諦めて
+ * 依頼文を変えて出し直せるほうがよい。
+ */
+const CHIEZO_DRAFT_TIMEOUT_MS = 180_000;
 const USER_AGENT = "travel-log-personal-app/1.0";
-
-
 
 export async function chiezo<T>(
   baseUrl: string,
   path: string,
-  init?: RequestInit
+  init?: RequestInit & { timeoutMs?: number }
 ): Promise<{ data: T | null; error: string | null }> {
   try {
     const res = await fetch(`${baseUrl}${path}`, {
@@ -39,7 +45,7 @@ export async function chiezo<T>(
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
         ...init?.headers,
       },
-      signal: AbortSignal.timeout(CHIEZO_TIMEOUT_MS),
+      signal: AbortSignal.timeout(init?.timeoutMs ?? CHIEZO_TIMEOUT_MS),
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) {
@@ -93,6 +99,49 @@ export async function fetchIngestStatus(
 ): Promise<ChiezoIngestStatus | null> {
   const { data } = await chiezo<ChiezoIngestStatus>(baseUrl, "/v1/ingest/status");
   return data ?? null;
+}
+
+/**
+ * 抽出条件をAIに書かせる。**保存はしない** ——
+ * その場で引いた件数と先頭数件が付いて返るので、確かめてから依頼する。
+ *
+ * **タグは完全一致でしか引けない**ので、それらしい名前を書かれると静かな0件になる。
+ * 0件のときchiezoは実在するタグ名を候補として返すため、画面はそれを出して
+ * 依頼文を書き直させる。
+ */
+export async function draftExtract(
+  baseUrl: string,
+  args: { want: string; name?: string } & CollectChoice
+): Promise<{ data: CollectExtractDraft | null; error: string | null }> {
+  return chiezo<CollectExtractDraft>(baseUrl, "/v1/collect/draft-extract", {
+    method: "POST",
+    timeoutMs: CHIEZO_DRAFT_TIMEOUT_MS,
+    body: JSON.stringify(pruneEmpty(args)),
+  });
+}
+
+/**
+ * 巡回のプロンプトをAIに書かせる。**保存はしない**。
+ *
+ * 返させるJSONの形・`{partition}`の使い方・titleが重複の鍵であること、は
+ * chiezo側がsystemで教えるので、こちらが渡すのは「何を集めたいか」だけでよい。
+ */
+export async function draftPrompt(
+  baseUrl: string,
+  args: { want: string; current?: string; feedback?: string; name?: string }
+): Promise<{ data: { prompt: string } | null; error: string | null }> {
+  return chiezo<{ prompt: string }>(baseUrl, "/v1/collect/draft", {
+    method: "POST",
+    timeoutMs: CHIEZO_DRAFT_TIMEOUT_MS,
+    body: JSON.stringify(pruneEmpty(args)),
+  });
+}
+
+/** 空文字・undefinedの項目を落とす(向こうは「書かなければ既定」で読む) */
+function pruneEmpty(obj: object): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined && v !== "")
+  );
 }
 
 export async function findCollection(

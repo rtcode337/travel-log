@@ -8,17 +8,23 @@ import {
   fetchIngestStatus,
   findCollection,
   resolveCollectContext,
-  type SpotCollectStatus,
 } from "@/lib/spotCollectServer";
 import {
-  COLLECT_INTERVAL_MINUTES,
-  COLLECT_ORIGIN_PLACEHOLDER,
-  COLLECT_ORIGIN_SETTING_KEY,
-  COLLECT_PROMPT_SETTING_KEY,
+  buildPartition,
+  buildSweeps,
   COLLECT_SOURCE_SETTING_KEY,
-  defaultCollectPrompt,
+  defaultDeepPrompt,
+  defaultExtractWant,
+  defaultScanWant,
   isValidCollectSource,
-  resolveCollectSource,
+  partitionTarget,
+  RETIRED_COLLECT_SETTING_KEYS,
+  SWEEP_DEEP,
+  SWEEP_SCAN,
+  type ChiezoCollection,
+  type CollectExtract,
+  type CollectLap,
+  type SpotCollectStatus,
 } from "@/lib/spotCollect";
 
 /**
@@ -33,10 +39,19 @@ import {
  * AIが動かないことが、あの口を外へ開けておける理由なので、こちらもそれに乗る。
  * 画面は止まっている間その旨を出す。
  *
- * **プロンプトはこちらに持つ**(`collect_prompt`)。何を集めさせるかは種別の設定の
- * 一部で、種別を作り直したときに向こうへ取りに行かずに済む。chiezo側にも同じものが
- * 渡るが、正はこちら。
+ * **正はchiezo側**(`lib/spotCollect.ts`)。プロンプト2本・抽出条件・区画と増えたので、
+ * こちらへ写すとどちらが正か決められなくなる。こちらに残すのは収集名だけ。
  */
+
+/** 巡回ごとの一周の進み具合。**区画の記録から数える** */
+function lapsOf(collection: ChiezoCollection | null): CollectLap[] {
+  const partitions = collection?.partitions ?? [];
+  return [SWEEP_SCAN, SWEEP_DEEP].map((name) => ({
+    name,
+    total: partitions.length,
+    visited: partitions.filter((p) => p.visits?.[name]).length,
+  }));
+}
 
 export async function GET(request: Request) {
   const ctx = await resolveCollectContext(request);
@@ -48,18 +63,21 @@ export async function GET(request: Request) {
         data: {
           available: false,
           source: "",
-          prompt: "",
-          origin: "",
           collection: null,
+          partitionCount: 0,
+          laps: [],
           ingest: null,
           backends: [],
+          draftExtractWant: "",
+          draftScanWant: "",
+          defaultDeepPrompt: "",
         },
       });
     }
     return ctx.error;
   }
   const { spotType, baseUrl, source } = ctx;
-  // **1件ぶんの口で引く**(回り終えた地域まで返るのはこちらだけ)。
+  // **1件ぶんの口で引く**(区画の一覧が返るのはこちらだけ)。
   // 取り込みの状態と一緒に引くので、どちらも並列でよい
   const [collection, ingest, backends] = await Promise.all([
     fetchCollection(baseUrl, source),
@@ -71,22 +89,30 @@ export async function GET(request: Request) {
   const data: SpotCollectStatus = {
     available: !!getSpotTypeSetting(spotType, "ai_discovery_enabled"),
     source,
-    prompt:
-      spotType.settings?.[COLLECT_PROMPT_SETTING_KEY]?.trim() ||
-      defaultCollectPrompt(spotType.label),
-    origin: spotType.settings?.[COLLECT_ORIGIN_SETTING_KEY] ?? "",
     collection,
+    partitionCount: collection?.partitions?.length ?? 0,
+    laps: lapsOf(collection),
     ingest,
     backends,
+    draftExtractWant: defaultExtractWant(spotType.label),
+    draftScanWant: defaultScanWant(
+      spotType.label,
+      collection?.extract?.source || "overture_japan"
+    ),
+    defaultDeepPrompt: defaultDeepPrompt(spotType.label),
   };
   return NextResponse.json({ data });
 }
 
 /**
- * 依頼する(まだ無ければ作る・あればプロンプトを差し替える)。
+ * 依頼する(まだ無ければ作る・あれば差し替える)。
  *
  * **作り直さず差し替える。** 収集はソースそのものなので、作り直すと溜めたものが消える
  * (chiezo側に削除の口はあるが、こちらから消しにいくものではない)。
+ *
+ * **区画も巡回もここで組んで渡す。** 抽出条件とプロンプトはAIが書いたものを通すだけだが、
+ * 「どう回すか」(週1の名簿・3日で一周のざっと・7日で一周のじっくり)はアプリの決め事なので
+ * こちらが決める —— 種別ごとにばらつくと、画面に出す進み具合の読み方も種別ごとに変わる。
  */
 export async function POST(request: Request) {
   const ctx = await resolveCollectContext(request);
@@ -100,78 +126,92 @@ export async function POST(request: Request) {
     );
   }
   const body = await request.json().catch(() => null);
-  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
-  if (!prompt) {
-    return NextResponse.json({ error: "プロンプトを入力してください。" }, { status: 400 });
-  }
   const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-  // **収集の起点**。ここから外へ同心円を広げるように埋めさせる。
-  // `{origin}`は知識サーバーの知らない印なので、**渡す前にこちらで置き換える**
-  // (`{cursor}`・`{covered}`はあちらが解決する)
-  const origin = text(body?.origin);
-  const sentPrompt = prompt.split(COLLECT_ORIGIN_PLACEHOLDER).join(
-    origin || "(指定なし。どこから始めてもよい)"
-  );
-  // **次に集める地域**。空ならAIに決めさせる
-  const cursor = text(body?.cursor) || origin;
+  const scanPrompt = text(body?.scanPrompt);
+  const deepPrompt = text(body?.deepPrompt) || defaultDeepPrompt(spotType.label);
+  const extract = (body?.extract ?? null) as CollectExtract | null;
+  if (!scanPrompt) {
+    return NextResponse.json(
+      { error: "「ざっと」のプロンプトを入力してください。" },
+      { status: 400 }
+    );
+  }
+  if (!extract?.source) {
+    return NextResponse.json(
+      { error: "抽出条件がありません。先にAIに書かせてください。" },
+      { status: 400 }
+    );
+  }
+  if (!text(extract.tag)) {
+    // **区画はタグでしか絞れない。** ソース全体を母集団にすると50万点の上限に
+    // 当たってchiezoが断るので、投げる前にこちらで理由を伝える
+    return NextResponse.json(
+      {
+        error:
+          "抽出条件にタグが入っていません。区画は母集団をタグで絞る必要があるので、" +
+          "依頼文でジャンルを具体的に書いて書き直させてください。",
+      },
+      { status: 400 }
+    );
+  }
   // 相手・モデル・深さ。**空文字は「指定しない」**として向こうへ渡す
-  // (あちらのPATCHが空文字をnullへ倒すので、選び直して外せる)
   const choice = {
     backend: text(body?.backend),
     model: text(body?.model),
     effort: text(body?.effort),
+  };
+  // **区画の細かさは母集団の件数から逆算する**(下書きが引いた件数が来る)。
+  // 分からなければ書かず、chiezoの既定に任せる
+  const population = Number(body?.population);
+  const target = Number.isFinite(population) && population > 0
+    ? partitionTarget(population)
+    : undefined;
+
+  const definition = {
+    description: `${spotType.label}のスポット候補`,
+    prompt: scanPrompt,
+    // **網羅**(ある括りの全部を集めて精査し続ける)。流れではないので期限で落とさない
+    kind: "stock",
+    extract,
+    partition: buildPartition(extract, target),
+    sweeps: buildSweeps({ deepPrompt, choice }),
+    ...choice,
   };
 
   const existing = await findCollection(baseUrl, source);
   const { error } = existing
     ? await chiezo(baseUrl, `/v1/collect/${encodeURIComponent(source)}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          prompt: sentPrompt,
-          description: `${spotType.label}のスポット候補`,
-          interval_minutes: COLLECT_INTERVAL_MINUTES,
-          cursor,
-          ...choice,
-        }),
+        body: JSON.stringify(definition),
       })
     : await chiezo(baseUrl, "/v1/collect", {
         method: "POST",
         body: JSON.stringify({
           name: source,
-          description: `${spotType.label}のスポット候補`,
-          prompt: sentPrompt,
-          interval_minutes: COLLECT_INTERVAL_MINUTES,
-          ...choice,
+          ...definition,
+          // 巡回が自分の時計を持つので、収集そのものの間隔は使われない
+          interval_minutes: 360,
+          // 新しい店は地図辞典に無いので、外を見られるようにしておく
+          web: true,
           // **出どころを名乗る。** 有効にするか決めるのは向こうの人なので、
           // どのアプリのどの種別が頼んだのかが一覧から読めるようにする
           requested_by: `travel-log/${spotType.key}`,
         }),
       });
   if (error) return NextResponse.json({ error }, { status: 502 });
-  // 作った直後は`cursor`を渡せない(あちらの作成は受け取らない)ので、
-  // **始点が指定されていれば作ったあとに入れる**
-  if (!existing && cursor) {
-    await chiezo(baseUrl, `/v1/collect/${encodeURIComponent(source)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ cursor }),
-    });
-  }
 
-  // プロンプトと収集名はこちらが正。**依頼が通ってから保存する** ——
+  // 収集名はこちらが正。**依頼が通ってから保存する** ——
   // 先に保存すると、断られた設定が残って次から差分が出なくなる
-  // **こちらに残すのは置き換える前のプロンプト**(`{origin}`のまま)。
-  // 起点を変えたときに差し込み直せるようにするため
-  for (const [key, value] of [
-    [COLLECT_PROMPT_SETTING_KEY, prompt],
-    [COLLECT_SOURCE_SETTING_KEY, source],
-    [COLLECT_ORIGIN_SETTING_KEY, origin],
-  ] as const) {
-    await query(
-      `insert into spot_type_settings (spot_type_id, key, value)
-       values ($1, $2, $3)
-       on conflict (spot_type_id, key) do update set value = excluded.value`,
-      [spotType.id, key, value]
-    );
-  }
-  return NextResponse.json({ data: await findCollection(baseUrl, source) });
+  await query(
+    `insert into spot_type_settings (spot_type_id, key, value)
+     values ($1, $2, $3)
+     on conflict (spot_type_id, key) do update set value = excluded.value`,
+    [spotType.id, COLLECT_SOURCE_SETTING_KEY, source]
+  );
+  // 市区町村カーソル方式だった頃の設定を片付ける(読む側はもう無い)
+  await query(`delete from spot_type_settings where spot_type_id = $1 and key = any($2)`, [
+    spotType.id,
+    RETIRED_COLLECT_SETTING_KEYS,
+  ]);
+  return NextResponse.json({ data: await fetchCollection(baseUrl, source) });
 }
