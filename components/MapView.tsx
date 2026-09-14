@@ -3053,22 +3053,26 @@ export default function MapView({
   );
 
   /**
-   * まだ回っていない地域を、予定を待たずに集めさせる。
+   * まだ見ていない区画を、予定を待たずに集めさせる。
    *
    * **1つずつしか頼めない**(知識サーバーは同時に1本しか走らせない)ので、
-   * 足りない地域のうち先頭を渡す。残りは次の回か、もう一度押したときに進む。
+   * 見ていない区画のうち先頭を渡す。残りは次の回か、もう一度押したときに進む。
+   *
+   * **割り込みで頼む**(`partition`)ので、定時の巡回の予定も区画の巡回記録も
+   * 動かない —— 地図で見ている範囲を先に見させるたびに一周が伸びたり、
+   * 見ていない区画に印が付いたりしない。
    */
   const startCollectingMissing = useCallback(async () => {
-    const area = collectCoverage?.missing[0];
-    if (!area) return;
+    const partition = collectCoverage?.pending[0];
+    if (!partition) return;
     setCollectStarting(true);
     setDiscoveryError(null);
-    const { error } = await api.spotCollect.run(spotTypeKey, area);
+    const { error } = await api.spotCollect.run(spotTypeKey, { partition });
     setCollectStarting(false);
     setDiscoveryError(
       error
         ? `集められませんでした: ${error.message}`
-        : `「${area}」を集め始めました。集まるまで数分かかります。`
+        : "この範囲を集め始めました。集まるまで数分かかります。"
     );
   }, [collectCoverage, spotTypeKey]);
 

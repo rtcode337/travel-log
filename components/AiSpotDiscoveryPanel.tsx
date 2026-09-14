@@ -245,11 +245,17 @@ export default function AiSpotDiscoveryPanel({
             足りない範囲をここで言う —— 「0件」と「まだ集めていない」は別のことで、
             後者なら集めさせれば済む */}
         {coverage &&
-          (coverage.missing.length > 0 ? (
+          (coverage.total === 0 ? (
+            <p className="mt-1.5 rounded bg-gray-100 px-2 py-1 text-xs text-gray-600">
+              この範囲には区画がありません(まだ区画を割っていないか、対象の外です)。
+            </p>
+          ) : coverage.pending.length > 0 ? (
             <div className="mt-1.5 rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">
               <p>
-                まだ集めていない範囲があります:{" "}
-                <span className="font-medium">{coverage.missing.join("、")}</span>
+                まだ集めていない区画があります:{" "}
+                <span className="font-medium">
+                  {coverage.total - coverage.scanned}/{coverage.total}区画
+                </span>
               </p>
               {onCollectMissing && (
                 <button
@@ -258,17 +264,17 @@ export default function AiSpotDiscoveryPanel({
                   disabled={collectStarting}
                   className="mt-1 rounded border border-amber-600 px-2 py-0.5 font-medium text-amber-800 disabled:opacity-50"
                 >
-                  {collectStarting
-                    ? "起動中…"
-                    : `「${coverage.missing[0]}」をいま集める`}
+                  {collectStarting ? "起動中…" : "この範囲をいま集める"}
                 </button>
               )}
             </div>
-          ) : coverage.areas.length > 0 ? (
+          ) : (
             <p className="mt-1.5 rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
-              この範囲({coverage.areas.join("、")})は収集済みです。
+              この範囲({coverage.total}区画)は収集済みです。
+              {coverage.deep < coverage.total &&
+                ` 詳細調査は ${coverage.deep}/${coverage.total} 区画まで進んでいます。`}
             </p>
-          ) : null)}
+          ))}
         {/* **AIは地図データの結果を出した後ろで動く**ので、待っていることを出さないと
             「もう終わったのか、まだ来るのか」が分からない */}
         {aiPending && (
