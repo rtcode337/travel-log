@@ -444,9 +444,13 @@ export interface VisitPlanList {
   spot_type_id: string;
   title: string;
   description: string | null;
-  /** 訪問予定期間(`YYYY-MM-DD`)。終了日未入力時は開始日と同じ(=単日) */
-  start_date: string;
-  end_date: string;
+  /**
+   * 訪問予定期間(`YYYY-MM-DD`)。終了日未入力時は開始日と同じ(=単日)。
+   * **nullは「訪問日未定」**で、開始日と終了日は必ずセット(両方入るか両方null)。
+   * 未定のリストは一覧の末尾に並び、天気(予定日の予報)は出さない
+   */
+  start_date: string | null;
+  end_date: string | null;
   /** 経由スポット(seq順)。訪問済みのものも消さずにここへ残る */
   spot_ids: string[];
   /** `spot_ids` のうち訪問済みのもの。経路(地図の矢印・Google マップ)から外す判定に使う */

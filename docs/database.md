@@ -250,8 +250,8 @@ erDiagram
         uuid spot_type_id FK
         text title
         text description
-        date start_date
-        date end_date
+        date start_date "訪問予定日(null=訪問日未定)"
+        date end_date "終了日。単日なら開始日と同じ(null=訪問日未定)"
         timestamptz archived_at "アーカイブした日時(null=通常のリスト)"
     }
     visit_plan_list_items {
@@ -293,6 +293,11 @@ erDiagram
 - **`visit_plan_lists.archived_at` はアーカイブの印**(null なら通常のリスト)。
   削除と違って中身は残り、一覧APIが `?archived=1` のときだけ返すので、
   通常の一覧・地図の経路・「リストに追加」からは外れる
+- **`visit_plan_lists` の日付の null は「訪問日未定」**(行き先だけ決めて日取りは
+  これから、という旅程)。**開始日と終了日はセットで**、両方入るか両方 null の
+  どちらかにする(`visit_plan_lists_dates_ck`)—— 片方だけでは期間が決まらず、
+  一覧の並び順や天気の基準日も定まらないため。一覧は開始日の昇順で、未定は末尾。
+  未定の旅程には予定日の天気を出さない(基準になる日が無いため)
 - **`export_jobs` は訪問記録エクスポートのジョブ**。管理者が対象ユーザーを指定して
   実行し、生成はバックグラウンドで進む(`running` → `done` / `failed`)。ZIP本体は
   `/data/exports`(ホストの `data/exports`)に置き、ここには相対パスだけを持つ
