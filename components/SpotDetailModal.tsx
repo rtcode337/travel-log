@@ -77,6 +77,15 @@ function GoogleMapsIcon({ className }: { className?: string }) {
   );
 }
 
+/** 画像アイコン(Google Material Symbols「image」、Apache License 2.0) */
+function GoogleImagesIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
+    </svg>
+  );
+}
+
 /** 星アイコン(Google Material Symbols「star」/「star_border」、Apache License 2.0) */
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
   return (
@@ -817,6 +826,24 @@ export default function SpotDetailModal({
                   className="rounded p-1 text-blue-600 hover:bg-blue-50"
                 >
                   <GeminiIcon className="size-5" />
+                </a>
+                {/* Google の画像検索(`udm=2`が画像タブ。AIモードの`udm=50`と同じ渡し方)。
+                    **文章より写真のほうが早い場面がある** —— 見た目が分かれば
+                    「行くかどうか」も「着いたときにそれと分かるか」も判断できる。
+                    **検索語に座標は入れない**(名前と所在地で引く) ——
+                    地図・経路と違って画像検索は座標を地名として扱わないため、
+                    数字が混ざるとかえって関係のない画像が並ぶ */}
+                <a
+                  href={`https://www.google.com/search?udm=2&q=${encodeURIComponent(
+                    [spot.name, spot.region].filter(Boolean).join(" ")
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Google 画像検索でこのスポットを見る"
+                  title="Google 画像検索でこのスポットを見る"
+                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
+                >
+                  <GoogleImagesIcon className="size-5" />
                 </a>
               </div>
             </div>
