@@ -3,8 +3,7 @@ import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import type { VisitPlanList } from "@/lib/types";
 import { PLAN_LIST_COLUMNS } from "@/lib/visitPlanListSql";
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+import { normalizePlanDates } from "@/lib/visitPlanListDates";
 
 /**
  * 現在のユーザーの、指定スポット種別の訪問予定リスト一覧。各リストの経由スポットは
@@ -39,10 +38,11 @@ export async function GET(request: Request) {
       group by l.id
       order by ${
         // アーカイブの一覧は「最近しまったもの」から見たいので archived_at 順。
-        // 通常の一覧は従来どおり訪問予定期間の新しい順
+        // 通常の一覧はこれから回る順に読めるよう開始日の昇順(開始日を持たない
+        // リストは末尾へ)。同じ開始日なら作った順
         archived
           ? "l.archived_at desc"
-          : "l.start_date desc, l.created_at desc"
+          : "l.start_date asc nulls last, l.created_at asc"
       }`,
     [userId, typeKey]
   );
@@ -63,9 +63,8 @@ export async function POST(request: Request) {
     typeof body?.description === "string" && body.description.trim()
       ? body.description.trim()
       : null;
-  const startDate = body?.start_date;
-  // 終了日が空なら開始日と同じ(=単日)にする
-  const endDate = body?.end_date || startDate;
+  // 日付は未指定なら「訪問日未定」(両方null)。終了日だけの指定は断る
+  const dates = normalizePlanDates(body ?? {});
   const spotIds: string[] = Array.isArray(body?.spot_ids)
     ? body.spot_ids.filter((s: unknown): s is string => typeof s === "string")
     : [];
@@ -76,17 +75,8 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
-    return NextResponse.json(
-      { error: "訪問予定期間の日付が不正です。" },
-      { status: 400 }
-    );
-  }
-  if (endDate < startDate) {
-    return NextResponse.json(
-      { error: "終了日は開始日以降にしてください。" },
-      { status: 400 }
-    );
+  if (!dates.ok) {
+    return NextResponse.json({ error: dates.error }, { status: 400 });
   }
 
   const typeRow = await query<{ id: string }>(
@@ -106,7 +96,7 @@ export async function POST(request: Request) {
        (user_id, spot_type_id, title, description, start_date, end_date)
      values ($1, $2, $3, $4, $5, $6)
      returning id`,
-    [userId, spotTypeId, title, description, startDate, endDate]
+    [userId, spotTypeId, title, description, dates.start, dates.end]
   );
   const listId = rows[0].id;
 

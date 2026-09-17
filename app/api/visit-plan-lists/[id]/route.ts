@@ -3,8 +3,7 @@ import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import type { VisitPlanList } from "@/lib/types";
 import { PLAN_LIST_COLUMNS } from "@/lib/visitPlanListSql";
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+import { normalizePlanDates } from "@/lib/visitPlanListDates";
 
 /** 指定リスト(本人)のspot_ids付き1件を返すSELECT(GET/PATCHの返却で共用) */
 const LIST_SELECT = `
@@ -51,8 +50,8 @@ export async function PATCH(
     typeof body?.description === "string" && body.description.trim()
       ? body.description.trim()
       : null;
-  const startDate = body?.start_date;
-  const endDate = body?.end_date || startDate;
+  // 日付は未指定なら「訪問日未定」(両方null)。終了日だけの指定は断る
+  const dates = normalizePlanDates(body ?? {});
   const spotIds: string[] = Array.isArray(body?.spot_ids)
     ? body.spot_ids.filter((s: unknown): s is string => typeof s === "string")
     : [];
@@ -60,17 +59,8 @@ export async function PATCH(
   if (!title) {
     return NextResponse.json({ error: "title は必須です。" }, { status: 400 });
   }
-  if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
-    return NextResponse.json(
-      { error: "訪問予定期間の日付が不正です。" },
-      { status: 400 }
-    );
-  }
-  if (endDate < startDate) {
-    return NextResponse.json(
-      { error: "終了日は開始日以降にしてください。" },
-      { status: 400 }
-    );
+  if (!dates.ok) {
+    return NextResponse.json({ error: dates.error }, { status: 400 });
   }
 
   // 本人のリストであることを確認する(存在しなければ404)
@@ -87,7 +77,7 @@ export async function PATCH(
     `update visit_plan_lists
         set title = $1, description = $2, start_date = $3, end_date = $4
       where id = $5`,
-    [title, description, startDate, endDate, id]
+    [title, description, dates.start, dates.end, id]
   );
 
   // 経由スポットは丸ごと置き換える(重複除去+存在するスポットに限定)。

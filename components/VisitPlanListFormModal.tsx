@@ -16,6 +16,7 @@ function todayKey(): string {
 /**
  * 訪問予定リストの作成・編集モーダル(基本情報の入力)。タイトル・説明(任意)・
  * 訪問予定期間(開始日〜終了日。終了日未入力なら開始日と同じ=単日)を入力する。
+ * **「訪問日は未定」にすると日付を持たないリストになる**(行き先だけ先に決める使い方)。
  * 出口は2つで、**どちらも基本情報の入力は同じ**:
  *
  * - **保存** …… 経由スポットには触らずその場で保存する(新規はPOST、編集はPATCH)。
@@ -48,10 +49,13 @@ export default function VisitPlanListFormModal({
   const router = useRouter();
   const [title, setTitle] = useState(edit?.title ?? "");
   const [description, setDescription] = useState(edit?.description ?? "");
+  // 訪問日未定(日付を持たないリスト)。編集時は元の状態を引き継ぐ。
+  // 未定でも日付欄の値は今日のまま持っておき、チェックを外せばすぐ入力に戻れる
+  const [undecided, setUndecided] = useState(edit ? !edit.start_date : false);
   const [startDate, setStartDate] = useState(edit?.start_date ?? todayKey());
-  // 単日(開始=終了)は終了日欄を空表示にする(新規と同じ扱い)
+  // 単日(開始=終了)と訪問日未定は終了日欄を空表示にする(新規と同じ扱い)
   const [endDate, setEndDate] = useState(
-    edit && edit.end_date !== edit.start_date ? edit.end_date : ""
+    edit?.end_date && edit.end_date !== edit.start_date ? edit.end_date : ""
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -66,8 +70,13 @@ export default function VisitPlanListFormModal({
       setError("タイトルを入力してください。");
       return null;
     }
+    const base = { title: t, description: description.trim() || null };
+    // 訪問日未定は開始日・終了日をどちらも持たせない(片方だけの状態は作らない)
+    if (undecided) {
+      return { ...base, start: null, end: null };
+    }
     if (!startDate) {
-      setError("開始日を入力してください。");
+      setError("開始日を入力するか、「訪問日は未定」を選んでください。");
       return null;
     }
     // 終了日が空なら開始日と同じ(単日)にする
@@ -76,7 +85,7 @@ export default function VisitPlanListFormModal({
       setError("終了日は開始日以降にしてください。");
       return null;
     }
-    return { title: t, description: description.trim() || null, end };
+    return { ...base, start: startDate, end };
   };
 
   /** 経由スポットに触らずその場で保存する(地図へは行かない) */
@@ -88,7 +97,7 @@ export default function VisitPlanListFormModal({
     const input = {
       title: v.title,
       description: v.description,
-      start_date: startDate,
+      start_date: v.start,
       end_date: v.end,
       // 編集は既存の経由スポットを送り直す(PATCHは丸ごと置き換えるため)。
       // 新規はスポット詳細から渡された種のスポットだけ
@@ -114,7 +123,7 @@ export default function VisitPlanListFormModal({
       editingId: edit?.id ?? null,
       title: v.title,
       description: v.description,
-      start_date: startDate,
+      start_date: v.start,
       end_date: v.end,
       // 編集時は既存の経由スポットを引き継ぐ。新規作成でスポット詳細から来た場合は
       // そのスポットを最初の経由スポットとして入れておく
@@ -174,30 +183,45 @@ export default function VisitPlanListFormModal({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={undecided}
+            onChange={(e) => setUndecided(e.target.checked)}
+            className="h-4 w-4"
+          />
+          訪問日は未定
+        </label>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="mb-1 block text-sm font-medium">開始日 *</label>
+            <label className="mb-1 block text-sm font-medium">
+              開始日{!undecided && " *"}
+            </label>
             <input
-              required
+              required={!undecided}
+              disabled={undecided}
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400"
             />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">終了日</label>
             <input
               type="date"
+              disabled={undecided}
               value={endDate}
               min={startDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400"
             />
           </div>
         </div>
         <p className="text-xs text-gray-400">
-          終了日を空にすると、開始日と同じ日(単日)になります。
+          {undecided
+            ? "日付なしで保存します。一覧では日付の決まったリストより後ろに並び、天気は出ません。"
+            : "終了日を空にすると、開始日と同じ日(単日)になります。"}
         </p>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex gap-2 pt-1">

@@ -9,9 +9,9 @@ export interface PlanListDraft {
   editingId: string | null;
   title: string;
   description: string | null;
-  /** `YYYY-MM-DD` */
-  start_date: string;
-  end_date: string;
+  /** `YYYY-MM-DD`。**nullは「訪問日未定」**で、開始日と終了日は必ずセット */
+  start_date: string | null;
+  end_date: string | null;
   /** 選択済みスポットのID(選んだ順) */
   spotIds: string[];
 }
@@ -23,11 +23,20 @@ function formatPlanDate(d: string): string {
   return `${m[1]}年${Number(m[2])}月${Number(m[3])}日`;
 }
 
-/** 訪問予定期間の表記。開始日=終了日なら単日、違えば「開始〜終了」 */
-export function formatPlanDateRange(start: string, end: string): string {
-  return start === end
+/**
+ * 訪問予定期間の表記。開始日=終了日なら単日、違えば「開始〜終了」。
+ * 日付を持たないリストは「訪問日未定」(空欄にすると、日付を消し忘れたのか
+ * 決めていないのかが読み手に伝わらない)
+ */
+export function formatPlanDateRange(
+  start: string | null,
+  end: string | null
+): string {
+  if (!start) return "訪問日未定";
+  const e = end || start;
+  return start === e
     ? formatPlanDate(start)
-    : `${formatPlanDate(start)}〜${formatPlanDate(end)}`;
+    : `${formatPlanDate(start)}〜${formatPlanDate(e)}`;
 }
 
 const PREFIX = "travel-log:plan-list-draft:";
@@ -38,19 +47,17 @@ export function loadPlanListDraft(typeKey: string): PlanListDraft | null {
     const raw = localStorage.getItem(PREFIX + typeKey);
     if (!raw) return null;
     const d = JSON.parse(raw) as Partial<PlanListDraft>;
-    if (
-      typeof d?.title !== "string" ||
-      typeof d?.start_date !== "string" ||
-      typeof d?.end_date !== "string"
-    ) {
+    if (typeof d?.title !== "string") {
       return null;
     }
+    // 開始日が無ければ訪問日未定として扱う(終了日だけが残った下書きも同じ)
+    const start = typeof d.start_date === "string" ? d.start_date : null;
     return {
       editingId: typeof d.editingId === "string" ? d.editingId : null,
       title: d.title,
       description: typeof d.description === "string" ? d.description : null,
-      start_date: d.start_date,
-      end_date: d.end_date,
+      start_date: start,
+      end_date: start && typeof d.end_date === "string" ? d.end_date : start,
       spotIds: Array.isArray(d.spotIds)
         ? d.spotIds.filter((s): s is string => typeof s === "string")
         : [],

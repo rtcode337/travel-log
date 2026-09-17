@@ -342,15 +342,21 @@ create table visit_plan_lists (
   spot_type_id  uuid not null references spot_types (id) on delete cascade,
   title         text not null,
   description   text,
-  start_date    date not null,
-  end_date      date not null,
+  -- 訪問予定日。null は「訪問日未定」(行き先だけ決めて日取りはこれからのリスト)。
+  -- 開始日と終了日はセットで、両方入るか両方nullのどちらか(下のcheck制約)
+  start_date    date,
+  end_date      date,
   -- アーカイブした日時(nullなら通常のリスト)。回り終わった旅程を一覧から
   -- 下げるための印で、消すのとは違い中身はそのまま残る。アーカイブ済みは
   -- 通常の一覧・地図の経路・「リストに追加」の対象から外れ、
   -- アーカイブの一覧(スポット画面の訪問予定リストから開く)にだけ出る
   archived_at   timestamptz,
   created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+  updated_at    timestamptz not null default now(),
+  -- 片方だけ日付が入った状態を作らない(「開始日なしの終了日」は意味を持たないうえ、
+  -- 一覧の並び順・天気の基準日がどちらを見るかで変わってしまう)
+  constraint visit_plan_lists_dates_ck
+    check ((start_date is null) = (end_date is null))
 );
 
 create index visit_plan_lists_user_id_idx on visit_plan_lists (user_id);

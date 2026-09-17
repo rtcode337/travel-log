@@ -4214,8 +4214,9 @@ export default function MapView({
        *  ルートと訪問順は済んだ話で、これから行く日が無い(天気を聞く意味が無い) */
       weatherSpot?: Spot;
     }[];
-    /** 天気を聞く日(訪問予定リストのときだけ)。開始日→終了日→今日 */
-    weatherDate?: string;
+    /** 天気を聞く日(訪問予定リストのときだけ)。開始日→終了日。
+     *  訪問日未定のリストはnullで、その場合は天気を出さない */
+    weatherDate?: string | null;
   } | null = detailRoute
     ? {
         title: detailRoute.name,

@@ -91,7 +91,7 @@ export default function VisitPlanListDetailModal({
   }, [list, spotsById]);
 
   const visitedIds = new Set(list?.visited_spot_ids ?? []);
-  // 天気を見る日(開始日→終了日→今日)。リストが読めるまでは今日として扱う
+  // 天気を見る日(開始日→終了日)。訪問日未定のリストはnullになり、天気を出さない
   const weatherDate = planWeatherDate(list ?? {});
   // その日の予報を、並んでいるスポットぶんまとめて1回で引く
   const weatherPoints = (list?.spot_ids ?? [])
@@ -346,8 +346,9 @@ export default function VisitPlanListDetailModal({
                         </HelpTip>
                       </div>
                     )}
-                    {/* そのスポットの、予定の日の天気(地図の経路詳細にも同じものを出す) */}
-                    {spot && (
+                    {/* そのスポットの、予定の日の天気(地図の経路詳細にも同じものを出す)。
+                        訪問日未定のリストでは日が決まらないので出さない */}
+                    {spot && weatherDate && (
                       <WeatherAskLink
                         spot={spot}
                         date={weatherDate}
@@ -411,14 +412,18 @@ export default function VisitPlanListDetailModal({
             )}
 
             {/* 予定日の前後1週間の天気。予定を立てたあとに雨予報になったとき、
-                近い日にずらせるかをこの画面で確かめられるようにする */}
-            <PlanWeatherFinder
-              points={weatherPoints}
-              date={weatherDate}
-              endDate={list.end_date}
-              onPick={movePlanDate}
-              saving={movingDate}
-            />
+                近い日にずらせるかをこの画面で確かめられるようにする。
+                訪問日未定のリストは中心に置く日が無いので出さない
+                (日を決めるのは編集画面から) */}
+            {weatherDate && (
+              <PlanWeatherFinder
+                points={weatherPoints}
+                date={weatherDate}
+                endDate={list.end_date ?? weatherDate}
+                onPick={movePlanDate}
+                saving={movingDate}
+              />
+            )}
 
             {/* 残りのスポットをGoogle マップの経路検索で開く(途中のスポットは経由地、
                 最後のスポットは目的地になる)。読み込めていないスポットは飛ばし、

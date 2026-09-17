@@ -35,21 +35,17 @@ export function buildSpotWeatherAskUrl(spot: Spot, date: string): string {
 }
 
 /**
- * 天気を聞く対象の日。**開始日 → 終了日 → 今日**の順に決める
- * (現在のDBでは開始日は必須だが、入っていない場合の順序を決めておく)。
+ * 天気を聞く対象の日。**開始日 → 終了日**の順に決め、どちらも無ければnull。
+ *
+ * **訪問日未定のリストでは今日で代用しない。** 天気は「その日その場所」を聞くものなので、
+ * 日が決まっていないのに今日の予報を出すと、今日行く予定だと読めてしまう。
+ * 呼び出し側はnullのときに天気の表示ごと出さない。
  */
 export function planWeatherDate(list: {
   start_date?: string | null;
   end_date?: string | null;
-}): string {
-  return list.start_date || list.end_date || todayKey();
-}
-
-/** 今日のローカル日付(`YYYY-MM-DD`)。VisitPlanListFormModalと同じ決め方 */
-function todayKey(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}): string | null {
+  return list.start_date || list.end_date || null;
 }
 
 /** 「8/20」。リンクの説明に添える短い表記 */

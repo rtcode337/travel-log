@@ -605,8 +605,9 @@ export const api = {
       type: string;
       title: string;
       description: string | null;
-      start_date: string;
-      end_date: string;
+      /** 訪問日未定ならどちらもnull(片方だけのnullはAPIが400で断る) */
+      start_date: string | null;
+      end_date: string | null;
       spot_ids: string[];
     }) =>
       request<VisitPlanList>("/api/visit-plan-lists", {
@@ -618,8 +619,9 @@ export const api = {
       input: {
         title: string;
         description: string | null;
-        start_date: string;
-        end_date: string;
+        /** 訪問日未定ならどちらもnull(片方だけのnullはAPIが400で断る) */
+        start_date: string | null;
+        end_date: string | null;
         spot_ids: string[];
       }
     ) =>
