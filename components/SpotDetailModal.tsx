@@ -41,7 +41,6 @@ import AddSpotModal from "@/components/AddSpotModal";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
 import AddToPlanListModal from "@/components/AddToPlanListModal";
-import AskAiButton from "@/components/AskAiButton";
 import CopyTextButton from "@/components/CopyTextButton";
 import { DirectionsIcon } from "@/components/GoogleMapsRouteLink";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
@@ -743,27 +742,20 @@ export default function SpotDetailModal({
             )}
 
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              {readOnly ? (
-                // 重ね表示から開いた別種別のスポットは、表示中の種別の地図では
-                // 表示できないため、元のスポット種別の地図へのリンクを出す。
-                // fromに今表示中の種別を渡すと、遷移先の地図に「元の地図に戻る」
-                // リンクが出る(戻り先の表示位置はMapViewのlastViewsが復元する)
-                currentSpotType && (
-                  <Link
-                    href={`/${currentSpotType.key}/map?spot=${spot.id}${
-                      typeKey ? `&from=${encodeURIComponent(typeKey)}` : ""
-                    }`}
-                    className="inline-block text-sm text-blue-600 underline"
-                  >
-                    「{currentSpotType.label}」の地図で開く
-                  </Link>
-                )
-              ) : (
+              {/* 重ね表示から開いた別種別のスポットは、表示中の種別の地図では
+                  表示できないため、元のスポット種別の地図へのリンクを出す。
+                  fromに今表示中の種別を渡すと、遷移先の地図に「元の地図に戻る」
+                  リンクが出る(戻り先の表示位置はMapViewのlastViewsが復元する)。
+                  同じ種別のスポットは今開いている地図にそのまま出るので、
+                  ここから地図へ移す導線は置いていない */}
+              {readOnly && currentSpotType && (
                 <Link
-                  href={`${typeKey ? `/${typeKey}` : ""}/map?spot=${spot.id}`}
+                  href={`/${currentSpotType.key}/map?spot=${spot.id}${
+                    typeKey ? `&from=${encodeURIComponent(typeKey)}` : ""
+                  }`}
                   className="inline-block text-sm text-blue-600 underline"
                 >
-                  地図で開く
+                  「{currentSpotType.label}」の地図で開く
                 </Link>
               )}
               {wikipediaEnabled && (
@@ -777,11 +769,6 @@ export default function SpotDetailModal({
                   <WikipediaIcon className="size-5" />
                 </button>
               )}
-              {/* スポットについてAIに聞く。質問文(所在地・座標・スポット種別つき)を
-                  入れた状態で開く。相手は押してから選ぶ(components/AskAiButton.tsx)。
-                  Wikipedia記事が無いスポットでも何か分かるように、Wikipediaの有無に
-                  関わらず出す */}
-              <AskAiButton spot={spot} spotType={currentSpotType} />
               <div className="ml-auto flex items-center gap-1 text-sm text-gray-500">
                 Google:
                 <a
@@ -812,21 +799,6 @@ export default function SpotDetailModal({
                 >
                   <DirectionsIcon className="size-5" />
                 </a>
-                {/* 検索のAIモード(udm=50)。gemini.google.com はURLで質問文を渡せない
-                    という事情もあるが、**「AIに聞く」ボタンとは別に Google の並びへ
-                    置いている**のは性格が違うため —— こちらは会話履歴を残さずに引ける
-                    Web検索に近く、地図・経路と同じ「Googleで調べる」の一員。
-                    相手を選んで会話するほうは AskAiButton の側(lib/askAi.ts) */}
-                <a
-                  href={buildGeminiAskUrl(spot, currentSpotType)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Geminiにこのスポットについて聞く"
-                  title="Geminiにこのスポットについて聞く"
-                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
-                >
-                  <GeminiIcon className="size-5" />
-                </a>
                 {/* Google の画像検索(`udm=2`が画像タブ。AIモードの`udm=50`と同じ渡し方)。
                     **文章より写真のほうが早い場面がある** —— 見た目が分かれば
                     「行くかどうか」も「着いたときにそれと分かるか」も判断できる。
@@ -844,6 +816,20 @@ export default function SpotDetailModal({
                   className="rounded p-1 text-blue-600 hover:bg-blue-50"
                 >
                   <GoogleImagesIcon className="size-5" />
+                </a>
+                {/* 検索のAIモード(udm=50)。gemini.google.com はURLで質問文を渡せない
+                    ため、同じGeminiが答えるAIモードに質問文を渡す(lib/askAi.ts)。
+                    **Googleの並びの最後に置く** —— 地図・経路・画像は押せばすぐ答えが
+                    出るのに対し、これは読むのに時間がかかる。軽いものから重いものへ並べる */}
+                <a
+                  href={buildGeminiAskUrl(spot, currentSpotType)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Geminiにこのスポットについて聞く"
+                  title="Geminiにこのスポットについて聞く"
+                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
+                >
+                  <GeminiIcon className="size-5" />
                 </a>
               </div>
             </div>
