@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { readPhotoTakenAt } from "@/lib/exif";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitPhotoFields from "@/components/VisitPhotoFields";
 
@@ -38,6 +39,42 @@ export default function VisitFields({
   const takenAtValue = earliestTakenAt
     ? toDateTimeLocalValue(earliestTakenAt)
     : null;
+  // 「写真から読む」の結果(日時が入っていなかった・読めなかったときの断り)
+  const [readNote, setReadNote] = useState<string | null>(null);
+
+  /**
+   * 手元の写真ファイルから撮影日時だけを読んで訪問日時に入れる。**写真は添付しない**。
+   *
+   * **保存済みの写真からは読めない。** 添付した写真は保存前にcanvasで縮小・再圧縮して
+   * いるので、その時点でExifごと落ちている(`lib/visitPhoto.ts`)。あとから記録を開いて
+   * 日時を直したいときに頼れるのは手元に残っている元ファイルのほうなので、
+   * **写真を足さずに日時だけ拾う入口**を別に置いてある。
+   *
+   * こちらは利用者がそのために選んだファイルなので、**確認のボタンを挟まず直接入れる**
+   * (添付した写真から読むほうは「入れるかどうか」が別の意思なのでボタンのまま)。
+   */
+  const handleReadTakenAt = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setReadNote(null);
+    try {
+      const takenAts = await Promise.all(files.map(readPhotoTakenAt));
+      // 複数枚選んだときは最も古いもの(添付した写真から読むときと同じ扱い)
+      const earliest = takenAts.reduce<Date | null>(
+        (found, takenAt) =>
+          takenAt && (!found || takenAt < found) ? takenAt : found,
+        null
+      );
+      if (!earliest) {
+        setReadNote("この写真には撮影日時が入っていませんでした。");
+        return;
+      }
+      onVisitedOnChange(toDateTimeLocalValue(earliest));
+    } catch {
+      setReadNote("写真を読み込めませんでした。");
+    }
+  };
 
   return (
     <>
@@ -62,11 +99,26 @@ export default function VisitFields({
             </button>
           )}
         </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {/* 手元の写真から日時だけ読む。保存済みの写真にはExifが残っていないので、
+              あとから日時を直すときはこちらから元ファイルを選ぶ */}
+          <label className="cursor-pointer rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-600">
+            写真から読む
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleReadTakenAt}
+              className="hidden"
+            />
+          </label>
+          {readNote && <span className="text-xs text-gray-500">{readNote}</span>}
+        </div>
         {earliestTakenAt && takenAtValue && takenAtValue !== visitedOn && (
           <button
             type="button"
             onClick={() => onVisitedOnChange(takenAtValue)}
-            className="mt-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700"
+            className="mt-1.5 block rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700"
           >
             写真の撮影日時にする(
             {earliestTakenAt.toLocaleString("ja-JP", {
