@@ -96,7 +96,8 @@ import {
   type DiscoverySource,
 } from "@/lib/spotDiscovery";
 import AiExchangeDialog from "@/components/AiExchangeDialog";
-import SpotDetailModal, { WikipediaIcon } from "@/components/SpotDetailModal";
+import SpotDetailModal from "@/components/SpotDetailModal";
+import WikipediaIcon from "@/components/WikipediaIcon";
 import SpotInfoModal from "@/components/SpotInfoModal";
 import VisitDateCalendar from "@/components/VisitDateCalendar";
 import SpotDownloadDialogs, {
