@@ -4367,8 +4367,10 @@ export default function MapView({
   // 左下の種別チップのタップで切り替えられる他の種別(現在の種別を除く)。
   // public_visible=falseの種別はAPI側でadmin/spot_admin以外には返らない
   const otherTypes = spotTypes.filter((t) => t.key !== spotTypeKey);
-  // 「◯◯」の地図で開くで種別を切り替えて来たときの戻り先(?from=)。spotTypesに
-  // 見つかる種別だけリンク化する(不正なキー・閲覧できない種別はここで弾かれる)
+  // ?from=付きで来たときの戻り先。spotTypesに見つかる種別だけリンク化する
+  // (不正なキー・閲覧できない種別はここで弾かれる)。**いまこのパラメータを付ける
+  // 導線はアプリ側に無い**(スポット詳細の「「◯◯」の地図で開く」を外したため)が、
+  // 共有・ブックマークされたURLでも戻れるように受ける側は残してある
   const returnType =
     returnTypeKey && returnTypeKey !== spotTypeKey
       ? spotTypes.find((t) => t.key === returnTypeKey) ?? null
