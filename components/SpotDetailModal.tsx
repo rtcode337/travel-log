@@ -37,7 +37,6 @@ import { formatSpotMeta } from "@/lib/spotMeta";
 import VisitFormModal from "@/components/VisitFormModal";
 import VisitNoteFormModal from "@/components/VisitNoteFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
-import SpotInfoModal from "@/components/SpotInfoModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
 import AddToPlanListModal from "@/components/AddToPlanListModal";
 import CopyTextButton from "@/components/CopyTextButton";
@@ -197,7 +196,6 @@ export default function SpotDetailModal({
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   // Wikipediaから取得したスポット情報(写真+概要)のモーダル表示
-  const [showInfo, setShowInfo] = useState(false);
   // 「訪問予定リストへ追加」モーダルの表示
   const [showAddToList, setShowAddToList] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
@@ -442,6 +440,36 @@ export default function SpotDetailModal({
     [currentSpotType]
   );
 
+  /**
+   * 説明文の末尾に括弧書きで付いている出どころ(`(出典: …)`・`(掲載元: …)`)を、
+   * 本文と切り離して別の行に出すための分解。**括弧のまま本文に続けると、
+   * 説明の一部のように読めるうえ行が伸びる**。URLは`%28`/`%29`で書く決まりなので、
+   * 閉じ括弧までを出どころとして切ってよい(travel-log-data側の決まり)。
+   */
+  const { descriptionBody, descriptionSource, sourceLabel } = useMemo(() => {
+    const text = spot?.description ?? "";
+    const m = text.match(/\s*\((出典|掲載元):\s*([^()]*)\)\s*$/);
+    if (!m) return { descriptionBody: text, descriptionSource: null, sourceLabel: null };
+    return {
+      descriptionBody: text.slice(0, m.index).trim(),
+      descriptionSource: `${m[1]}: ${m[2].trim()}`,
+      sourceLabel: m[1],
+    };
+  }, [spot?.description]);
+
+  /**
+   * そのスポット自身のWikipedia記事へのリンク。**説明文に記事そのものへのリンクが
+   * 無いときだけ出す** —— `掲載元`は「◯◯の観光地」のような一覧ページを指していて
+   * スポット自身の記事へは辿れないが、`出典`は記事そのもののURLなので二重になる。
+   * 記事名は種別の`wikipedia_title_source`に従う(シリーズ名で引く種別があるため)。
+   */
+  const articleTitle =
+    wikipediaTitleSource === "series" && spot?.series ? spot.series : spot?.name;
+  const articleUrl =
+    wikipediaEnabled && articleTitle && sourceLabel !== "出典"
+      ? `https://${wikipediaLang}.wikipedia.org/wiki/${encodeURIComponent(articleTitle)}`
+      : null;
+
   const loadReviews = useCallback(
     async (page: number) => {
       const { data } = await api.reviews.list(spotId, page);
@@ -632,9 +660,32 @@ export default function SpotDetailModal({
               </div>
             </div>
 
-            {spot.description && (
-              <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">
-                <LinkedText text={spot.description} />
+            {descriptionBody && (
+              <p className="mb-2 whitespace-pre-wrap text-sm text-gray-700">
+                <LinkedText text={descriptionBody} />
+              </p>
+            )}
+
+            {/* 出どころは括弧に押し込めず、本文の下に1行ずつ出す。
+                説明文の末尾に「(掲載元: …)」と括弧書きで続いていると、本文の
+                一部のように見えるうえ行が長くなる */}
+            {(articleUrl || descriptionSource) && (
+              <p className="mb-3 space-y-0.5 text-xs text-gray-500">
+                {articleUrl && (
+                  <a
+                    href={articleUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-blue-600 underline"
+                  >
+                    Wikipedia: {articleTitle}
+                  </a>
+                )}
+                {descriptionSource && (
+                  <span className="block">
+                    <LinkedText text={descriptionSource} />
+                  </span>
+                )}
               </p>
             )}
 
@@ -743,17 +794,6 @@ export default function SpotDetailModal({
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
               {/* この行は地図・Googleのアイコンだけにしてある。文字のリンクを混ぜると
                   狭い画面で折り返し、アイコンの列が2行に割れて読みにくくなる */}
-              {wikipediaEnabled && (
-                <button
-                  type="button"
-                  onClick={() => setShowInfo(true)}
-                  aria-label="Wikipediaでスポット詳細を開く"
-                  title="Wikipediaでスポット詳細を開く"
-                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
-                >
-                  <WikipediaIcon className="size-5" />
-                </button>
-              )}
               <div className="ml-auto flex items-center gap-1 text-sm text-gray-500">
                 Google:
                 <a
@@ -1204,18 +1244,6 @@ export default function SpotDetailModal({
             setEditingNote(null);
             load();
           }}
-        />
-      )}
-
-      {showInfo && spot && (
-        <SpotInfoModal
-          spotName={spot.name}
-          region={spot.region}
-          lang={wikipediaLang}
-          primaryTitle={
-            wikipediaTitleSource === "series" ? spot.series : null
-          }
-          onClose={() => setShowInfo(false)}
         />
       )}
 
