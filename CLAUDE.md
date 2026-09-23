@@ -566,6 +566,31 @@ Maps URLsの`waypoints`は9件までのため、それを超える経路は**並
 
 `/[type]/admin`のadmin専用セクション「GitHubリポジトリからスポット種別取り込み」(**左カラムの先頭**。データを入れ直すたびに通る入口なので、畳まずに一番上へ置く)(`AdminView`の`handleGithubOpen`/`handleGithubApply`)。リポジトリ(`owner/リポジトリ名`、既定`rtcode337/travel-log-data`)を入力して「開く」を押すと、`raw.githubusercontent.com`(mainブランチ固定、CORS可。**キャッシュを必ず外して取る** —— `Cache-Control: max-age=300`とCDNのキャッシュがあり、素の`fetch`ではpush直後の取り込みが古いファイルを読むうえ、差分インポートは「変更なし」で正常終了するので気づけない。`cache: "no-store"`に加え、共有キャッシュ向けにURLへ時刻を付ける)からブラウザが直接リポジトリ直下の`catalog.json`(`{ "spot_types": [ { "key", "label" }, ... ] }`形式のスポット種別カタログ)を取得して一覧表示する(既存種別かどうかを「上書き」「新規作成」バッジで示す)。一覧から種別を選んで「適用」すると、そのフォルダの `<キー>/settings.json`・`<キー>/spots.csv`・`<キー>/excluded_candidates/exclude.txt`・`<キー>/routes.csv` を取得し、この順に適用する。settings.jsonだけは必須(無ければ中止)で、他は無ければスキップ。種別が無ければ作成し、あればlabel・設定・シリーズ・カテゴリを上書きする(`applyTypeDefinition`。settings.jsonのkeyとフォルダ名の不一致は中止)。**settings.jsonを読む経路は3つある**(GitHub取り込みの`applyTypeDefinition`、JSONアップロードでの新規作成`handleCreateTypeFromJson`、既存種別への反映`handleApplyTypeFromJson`)ので、`parseSpotTypeDefinition`が返すフィールドを増やしたら3つとも`settingsToApply`へ積むこと。取り出し忘れても取り込みは成功扱いのまま進み、その設定だけが黙って落ちる(かつて`category_styles`を足したときに実際に踏んだ)。spots.csv・routes.csvは個別インポートと同じ差分更新ロジックを共通関数(`runSpotsCsvImport`/`runRouteCsvImport` — 個別インポートのハンドラもこれらの薄いラッパー)で対象種別に対して実行し、exclude.txtは「キー一覧を指定して削除」と同じAPIで削除件数の確認ダイアログにOKしたときだけ実行する(キャンセルしても後続のroutes.csvは続行)。routes.csvの検証用スポットはspots.csv適用後に取り直す。バックエンドに専用エンドポイントは無く、既存APIの組み合わせのみ。
 
+### ZIPファイルからの取り込み
+
+`/[type]/admin`のadmin専用セクション「ZIPファイルからスポット種別取り込み」
+(`AdminView`の`handleZipOpen`/`handleZipApply`、ZIPの読み取りは`lib/zipReader.ts`)。
+**中身はGitHubからの取り込みと同じ形**(`<キー>/settings.json`・`spots.csv`・
+`excluded_candidates/exclude.txt`・`routes.csv`)で、**取る先が手元のファイルか
+リポジトリかの違いしかない**。リポジトリに置いていないデータ —— tazunaが知識サーバーの
+収集から書き出したものなど —— を入れるための道。
+
+- **適用処理は共用する**(`applySpotTypeFiles`)。settings.json → spots.csv →
+  exclude.txt → routes.csvの順に当てるところは1つだけ書く —— 経路ごとに書くと
+  片方だけ古くなり、**settings.jsonの新しい項目を取り出し忘れる類の漏れは
+  成功したように見えて黙って落ちる**(かつて`category_styles`で踏んだ)
+- **ZIPの中の種別は一覧にして、選んだものだけ適用する**(GitHubのカタログと同じ見せ方)。
+  目印は`settings.json`で、書庫の直下でも`<キー>/`の下でもよい。
+  **キーはsettings.jsonに書いてあるほうを使う**(フォルダ名は書き出す側の都合で変わる)
+- **展開にライブラリを足さない。** 標準の`DecompressionStream("deflate-raw")`があるので、
+  自前で読むのは入れ物(どこに何バイトあるか)だけ。対応するのは`stored`と`deflate`の2つで、
+  それ以外は方式の番号を挙げて断る(黙って空として通すと「0件」という顔で終わる)。
+  ZIP64は読まない
+- **生成側(`lib/zip.ts`)とはファイルを分ける。** あちらは訪問記録のエクスポート用で
+  `Buffer`を使うサーバー専用のモジュール
+- **macOSが足す`__MACOSX/`は読み飛ばす**(同じ名前のメタデータが入っていて、
+  JSONとして読むと壊れて見える)
+
 ### 間違い報告(`spot_flags`)
 
 公開スポットの中身が怪しい(位置がずれている・説明が別物・そもそも場所ではない)と
