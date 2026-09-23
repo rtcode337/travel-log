@@ -520,6 +520,25 @@ export default function SpotDetailModal({
           <>
             <div className="mb-3 flex items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
+                {/* 訪問予定のブックマーク風★トグル(塗り=予定あり)。**×の隣に置かない**
+                    —— 指で押す端末では、閉じるつもりが予定に入る誤爆が起きる。
+                    行の反対側の端(バッジの左)なら、押し間違えても被害が無い */}
+                {!readOnly && (
+                  <button
+                    onClick={toggleVisitPlan}
+                    disabled={planUpdating}
+                    aria-label={planned ? "訪問予定をはずす" : "訪問予定にする"}
+                    title={planned ? "訪問予定をはずす" : "訪問予定にする"}
+                    aria-pressed={planned}
+                    className={`shrink-0 rounded p-1 disabled:opacity-50 ${
+                      planned
+                        ? "text-amber-400 hover:bg-amber-50"
+                        : "text-gray-400 hover:bg-gray-50"
+                    }`}
+                  >
+                    <StarIcon filled={planned} className="size-6" />
+                  </button>
+                )}
                 <SpotBadge
                   rank={spot.rank}
                   series={spot.series}
@@ -588,27 +607,10 @@ export default function SpotDetailModal({
                   </p>
                 </div>
               </div>
-              {/* ×ボタンと、その左に訪問予定のブックマーク風★トグル(塗り=予定あり)。
-                  一時期×を外して外側タップだけにしていたが、このモーダルは画面の
-                  ほぼ全体を占めるため外側の余白が狭すぎて閉じにくく、復活させた。
-                  スポット名のコピーは名前の直後(h2の中)に置いてある */}
+              {/* 右端は×だけにする。一時期×を外して外側タップだけにしていたが、
+                  このモーダルは画面のほぼ全体を占めるため外側の余白が狭すぎて
+                  閉じにくく、復活させた。スポット名のコピーは名前の直後(h2の中) */}
               <div className="flex shrink-0 items-center gap-1">
-                {!readOnly && (
-                  <button
-                    onClick={toggleVisitPlan}
-                    disabled={planUpdating}
-                    aria-label={planned ? "訪問予定をはずす" : "訪問予定にする"}
-                    title={planned ? "訪問予定をはずす" : "訪問予定にする"}
-                    aria-pressed={planned}
-                    className={`rounded p-1 disabled:opacity-50 ${
-                      planned
-                        ? "text-amber-400 hover:bg-amber-50"
-                        : "text-gray-400 hover:bg-gray-50"
-                    }`}
-                  >
-                    <StarIcon filled={planned} className="size-6" />
-                  </button>
-                )}
                 <button
                   onClick={onClose}
                   className="rounded-full px-2 text-xl leading-none text-gray-400"
