@@ -178,14 +178,12 @@ export interface SpotType {
 export type SpotTypeSettingKey =
   | "public_visible"
   | "reviews_enabled"
-  | "wikipedia_enabled"
   | "rank_enabled"
   | "ai_discovery_enabled";
 
 export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
   public_visible: false,
   reviews_enabled: true,
-  wikipedia_enabled: true,
   // **既定で使う。** スポットを集める種別はたいてい段階を付けたくなるので、
   // 種別を足すたびに開けさせるより、要らない種別で閉じるほうが手数が少ない。
   // 使わない種別ではランクは常になし扱いで、色はシリーズが決める。
@@ -204,7 +202,6 @@ export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
 export const SPOT_TYPE_SETTING_LABELS: Record<SpotTypeSettingKey, string> = {
   public_visible: "一般公開(管理者以外も閲覧可能にする)",
   reviews_enabled: "口コミ",
-  wikipedia_enabled: "Wikipediaリンク",
   rank_enabled: "ランク(A〜E。ピンの色と大きさを決める)",
   ai_discovery_enabled:
     "周辺を探す(管理者の地図メニューに出す。地図データとAIの2段。サーバーに接続先が要る)",

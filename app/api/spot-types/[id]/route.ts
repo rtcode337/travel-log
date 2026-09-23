@@ -8,11 +8,7 @@ import { parseSeriesStyles, SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle"
 import { CATEGORIES_SETTING_KEY, parseCategories } from "@/lib/category";
 import {
   isValidRegionScope,
-  isValidWikipediaLang,
   REGION_SCOPE_SETTING_KEY,
-  WIKIPEDIA_LANG_SETTING_KEY,
-  WIKIPEDIA_TITLE_SOURCE_SETTING_KEY,
-  isValidWikipediaTitleSource,
 } from "@/lib/region";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
@@ -55,8 +51,8 @@ export async function PATCH(
     return NextResponse.json({ data: rows[0] });
   }
 
-  // スポット種別ごとの追加設定(口コミ・Wikipediaリンク・管理者以外閲覧不可・
-  // シリーズ設定・対象地域・Wikipedia言語等)。spot_typesに列を増やさずキーを増やせる
+  // スポット種別ごとの追加設定(口コミ・管理者以外閲覧不可・シリーズ設定・
+  // 対象地域等)。spot_typesに列を増やさずキーを増やせる
   // よう、spot_type_settings(key, value)へupsertする。値はboolean('true'/'false'の
   // 文字列で保存)か、series_styles等のような文字列(そのまま保存)のどちらか
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
@@ -92,26 +88,6 @@ export async function PATCH(
       return NextResponse.json(
         {
           error: `${REGION_SCOPE_SETTING_KEY}は 'jp'・'world'・ISO 3166-1の国コード小文字のいずれかである必要があります。`,
-        },
-        { status: 400 }
-      );
-    }
-    if (
-      key === WIKIPEDIA_LANG_SETTING_KEY &&
-      (typeof value !== "string" || !isValidWikipediaLang(value))
-    ) {
-      return NextResponse.json(
-        { error: `${WIKIPEDIA_LANG_SETTING_KEY}は 'ja'・'en' のような言語コードである必要があります。` },
-        { status: 400 }
-      );
-    }
-    if (
-      key === WIKIPEDIA_TITLE_SOURCE_SETTING_KEY &&
-      (typeof value !== "string" || !isValidWikipediaTitleSource(value))
-    ) {
-      return NextResponse.json(
-        {
-          error: `${WIKIPEDIA_TITLE_SOURCE_SETTING_KEY}は 'name'・'series' のいずれかである必要があります。`,
         },
         { status: 400 }
       );

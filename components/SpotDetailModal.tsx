@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
-import { useRouteOrigin } from "@/lib/useRouteOrigin";
 import {
   countedVisits,
   formatVisitedOn,
@@ -22,17 +21,11 @@ import {
   type VisitPlanList,
 } from "@/lib/types";
 import { formatPlanDateRange } from "@/lib/planListDraft";
-import { buildGeminiAskUrl } from "@/lib/askAi";
 import SpotBadge from "@/components/SpotBadge";
 import MiniMap from "@/components/MiniMap";
 import PhotoLightbox from "@/components/PhotoLightbox";
 import LinkedText from "@/components/LinkedText";
-import WikipediaIcon from "@/components/WikipediaIcon";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
-import {
-  resolveWikipediaLang,
-  resolveWikipediaTitleSource,
-} from "@/lib/region";
 import { resolveCategories } from "@/lib/category";
 import { formatSpotMeta } from "@/lib/spotMeta";
 import VisitFormModal from "@/components/VisitFormModal";
@@ -41,36 +34,9 @@ import AddSpotModal from "@/components/AddSpotModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
 import AddToPlanListModal from "@/components/AddToPlanListModal";
 import CopyTextButton from "@/components/CopyTextButton";
-import { DirectionsIcon } from "@/components/GoogleMapsRouteLink";
+import GoogleSpotLinks from "@/components/GoogleSpotLinks";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
-
-/** Google Geminiの公式ロゴマーク(Simple Icons、CC0) */
-function GeminiIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
-    </svg>
-  );
-}
-
-/** Google マップの公式ロゴマーク(Simple Icons、CC0) */
-function GoogleMapsIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M19.527 4.799c1.212 2.608.937 5.678-.405 8.173-1.101 2.047-2.744 3.74-4.098 5.614-.619.858-1.244 1.75-1.669 2.727-.141.325-.263.658-.383.992-.121.333-.224.673-.34 1.008-.109.314-.236.684-.627.687h-.007c-.466-.001-.579-.53-.695-.887-.284-.874-.581-1.713-1.019-2.525-.51-.944-1.145-1.817-1.79-2.671L19.527 4.799zM8.545 7.705l-3.959 4.707c.724 1.54 1.821 2.863 2.871 4.18.247.31.494.622.737.936l4.984-5.925-.029.01c-1.741.601-3.691-.291-4.392-1.987a3.377 3.377 0 0 1-.209-.716c-.063-.437-.077-.761-.004-1.198l.001-.007zM5.492 3.149l-.003.004c-1.947 2.466-2.281 5.88-1.117 8.77l4.785-5.689-.058-.05-3.607-3.035zM14.661.436l-3.838 4.563a.295.295 0 0 1 .027-.01c1.6-.551 3.403.15 4.22 1.626.176.319.323.683.377 1.045.068.446.085.773.012 1.22l-.003.016 3.836-4.561A8.382 8.382 0 0 0 14.67.439l-.009-.003zM9.466 5.868L14.162.285l-.047-.012A8.31 8.31 0 0 0 11.986 0a8.439 8.439 0 0 0-6.169 2.766l-.016.018 3.665 3.084z" />
-    </svg>
-  );
-}
-
-/** 画像アイコン(Google Material Symbols「image」、Apache License 2.0) */
-function GoogleImagesIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
-    </svg>
-  );
-}
 
 /** 星アイコン(Google Material Symbols「star」/「star_border」、Apache License 2.0) */
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
@@ -184,7 +150,6 @@ export default function SpotDetailModal({
   // 編集対象の訪問記録(訪問履歴の「編集」から開く。VisitFormModalの編集モード)
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
-  // Wikipediaから取得したスポット情報(写真+概要)のモーダル表示
   // 「訪問予定リストへ追加」モーダルの表示
   const [showAddToList, setShowAddToList] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
@@ -208,7 +173,6 @@ export default function SpotDetailModal({
     index: number;
   } | null>(null);
   // 「Google マップで経路を表示」のorigin(出発地)に使う現在地
-  const routeOrigin = useRouteOrigin();
 
   // 訪問記録IDごとの追記(APIが古い順で返すので、この順のまま下に積む)
   const notesByVisit = useMemo(() => {
@@ -410,23 +374,6 @@ export default function SpotDetailModal({
       spot?.status !== "private" &&
       getSpotTypeSetting(currentSpotType, "reviews_enabled"),
     [currentSpotType, spot]
-  );
-
-  // 大半のスポットにWikipedia記事が存在しない種別では、リンクが機能しないため出さない
-  const wikipediaEnabled = useMemo(
-    () => getSpotTypeSetting(currentSpotType, "wikipedia_enabled"),
-    [currentSpotType]
-  );
-  // 参照するWikipediaの言語版(種別ごとのwikipedia_lang設定、既定'ja')
-  const wikipediaLang = useMemo(
-    () => resolveWikipediaLang(currentSpotType),
-    [currentSpotType]
-  );
-  // 記事を「何の名前」で探すか(種別ごとのwikipedia_title_source設定、既定'name')。
-  // 'series'の種別ではシリーズ名(アニメ聖地なら作品名)の記事を優先して開く
-  const wikipediaTitleSource = useMemo(
-    () => resolveWikipediaTitleSource(currentSpotType),
-    [currentSpotType]
   );
 
   const loadReviews = useCallback(
@@ -730,71 +677,11 @@ export default function SpotDetailModal({
             )}
 
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              {/* この行は地図・Googleのアイコンだけにしてある。文字のリンクを混ぜると
-                  狭い画面で折り返し、アイコンの列が2行に割れて読みにくくなる */}
-              <div className="ml-auto flex items-center gap-1 text-sm text-gray-500">
-                Google:
-                <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                    `${spot.name} ${spot.lat},${spot.lng}`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Google マップで開く"
-                  title="Google マップで開く"
-                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
-                >
-                  <GoogleMapsIcon className="size-5" />
-                </a>
-                <a
-                  href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-                    `${spot.lat},${spot.lng}`
-                  )}${
-                    routeOrigin
-                      ? `&origin=${encodeURIComponent(`${routeOrigin.lat},${routeOrigin.lng}`)}`
-                      : ""
-                  }`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Google マップで経路を表示"
-                  title="Google マップで経路を表示"
-                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
-                >
-                  <DirectionsIcon className="size-5" />
-                </a>
-                {/* Google の画像検索(`udm=2`が画像タブ。AIモードの`udm=50`と同じ渡し方)。
-                    **文章より写真のほうが早い場面がある** —— 見た目が分かれば
-                    「行くかどうか」も「着いたときにそれと分かるか」も判断できる。
-                    **検索語に座標は入れない**(名前と所在地で引く) ——
-                    地図・経路と違って画像検索は座標を地名として扱わないため、
-                    数字が混ざるとかえって関係のない画像が並ぶ */}
-                <a
-                  href={`https://www.google.com/search?udm=2&q=${encodeURIComponent(
-                    [spot.name, spot.region].filter(Boolean).join(" ")
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Google 画像検索でこのスポットを見る"
-                  title="Google 画像検索でこのスポットを見る"
-                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
-                >
-                  <GoogleImagesIcon className="size-5" />
-                </a>
-                {/* 検索のAIモード(udm=50)。gemini.google.com はURLで質問文を渡せない
-                    ため、同じGeminiが答えるAIモードに質問文を渡す(lib/askAi.ts)。
-                    **Googleの並びの最後に置く** —— 地図・経路・画像は押せばすぐ答えが
-                    出るのに対し、これは読むのに時間がかかる。軽いものから重いものへ並べる */}
-                <a
-                  href={buildGeminiAskUrl(spot, currentSpotType)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Geminiにこのスポットについて聞く"
-                  title="Geminiにこのスポットについて聞く"
-                  className="rounded p-1 text-blue-600 hover:bg-blue-50"
-                >
-                  <GeminiIcon className="size-5" />
-                </a>
-              </div>
+              <GoogleSpotLinks
+                spot={spot}
+                spotType={currentSpotType}
+                className="ml-auto"
+              />
             </div>
 
             {/* 訪問履歴 */}

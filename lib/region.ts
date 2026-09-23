@@ -15,48 +15,8 @@ import { PREFECTURES, type SpotType } from "./types";
 export const REGION_SCOPE_SETTING_KEY = "region_scope";
 export const DEFAULT_REGION_SCOPE = "jp";
 
-/**
- * スポット種別ごとのWikipedia言語版('ja'既定)。wikipedia_enabledな種別で
- * スポット情報モーダルが参照する https://<lang>.wikipedia.org を切り替える。
- * こちらも文字列値のためspot_type_settingsに直接保存する。
- */
-export const WIKIPEDIA_LANG_SETTING_KEY = "wikipedia_lang";
-export const DEFAULT_WIKIPEDIA_LANG = "ja";
-
-/**
- * スポット詳細のWikipedia検索が「何の名前」で記事を探すかの設定。
- * - 'name'(既定): 従来どおりスポット名で探す
- * - 'series': そのスポットのシリーズ名で探す。アニメの聖地のように
- *   **1つの作品が各地に複数のスポットを持ち、開きたい記事は場所ではなく作品**
- *   という種別向け。シリーズ名の記事が見つからないときはスポット名にフォールバックする
- *   (作品に紐づかない施設のような、シリーズ名が記事にならない行があるため)
- */
-export const WIKIPEDIA_TITLE_SOURCE_SETTING_KEY = "wikipedia_title_source";
-export const DEFAULT_WIKIPEDIA_TITLE_SOURCE = "name";
-export const WIKIPEDIA_TITLE_SOURCES = ["name", "series"] as const;
-export type WikipediaTitleSource = (typeof WIKIPEDIA_TITLE_SOURCES)[number];
-
-export function isValidWikipediaTitleSource(value: string): boolean {
-  return (WIKIPEDIA_TITLE_SOURCES as readonly string[]).includes(value);
-}
-
-/** 種別のsettingsからWikipedia検索の起点を解決する。未設定・不正な値は'name' */
-export function resolveWikipediaTitleSource(
-  type: Pick<SpotType, "settings"> | null | undefined
-): WikipediaTitleSource {
-  const raw = type?.settings?.[WIKIPEDIA_TITLE_SOURCE_SETTING_KEY];
-  if (raw === undefined || !isValidWikipediaTitleSource(raw))
-    return DEFAULT_WIKIPEDIA_TITLE_SOURCE;
-  return raw as WikipediaTitleSource;
-}
-
 export function isValidRegionScope(value: string): boolean {
   return value === "world" || /^[a-z]{2}$/.test(value);
-}
-
-/** Wikipediaのサブドメインとして使える形か('ja'、'zh-yue'のような形式のみ許可) */
-export function isValidWikipediaLang(value: string): boolean {
-  return /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/.test(value);
 }
 
 /** 種別のsettingsから対象地域スコープを解決する。未設定・不正な値は'jp' */
@@ -65,15 +25,6 @@ export function resolveRegionScope(
 ): string {
   const raw = type?.settings?.[REGION_SCOPE_SETTING_KEY];
   if (raw === undefined || !isValidRegionScope(raw)) return DEFAULT_REGION_SCOPE;
-  return raw;
-}
-
-/** 種別のsettingsからWikipedia言語を解決する。未設定・不正な値は'ja' */
-export function resolveWikipediaLang(
-  type: Pick<SpotType, "settings"> | null | undefined
-): string {
-  const raw = type?.settings?.[WIKIPEDIA_LANG_SETTING_KEY];
-  if (raw === undefined || !isValidWikipediaLang(raw)) return DEFAULT_WIKIPEDIA_LANG;
   return raw;
 }
 
