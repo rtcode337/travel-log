@@ -41,10 +41,6 @@ services:
       # 公開URL(任意)。本番と同じ挙動を手元で試したいときだけ設定する
       # (lib/auth/request-url.ts)
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
-      # 周辺のAI探索(任意)。本番と同じ(.env.example の説明参照)
-      CHIEZO_BASE_URL: ${CHIEZO_BASE_URL:-}
-      CHIEZO_AI_BACKEND: ${CHIEZO_AI_BACKEND:-}
-      CHIEZO_AI_TIMEOUT_SECONDS: ${CHIEZO_AI_TIMEOUT_SECONDS:-}
       # スマホ実機など、LAN内の別端末から開発サーバを開くときに許可するホスト名・IP
       # (カンマ区切り)。未設定だと/_next配下の開発用リソースが403になり真っ白になる
       # (next.config.tsのallowedDevOrigins)。手元の.envに書く。
