@@ -138,9 +138,7 @@ export default function VisitFormModal({
                 />
                 未訪問記録にする(訪問済みにしない)
               </label>
-              {/* モーダル自身がoverflow-y-autoで吹き出しを切り取るため、
-                  箱の外へ描くanchored(「?」の位置に合わせたfixed)で出す */}
-              <HelpTip anchored>
+              <HelpTip>
                 休みや時間の都合でちゃんと見られなかったときや、事前の下調べのメモに。
                 訪問日時を入れると「訪れたが改めて来たい」記録としてその日の経路に含まれ、
                 訪問予定からも外れます。訪問日時が空欄なら下調べのメモになり、
