@@ -2109,82 +2109,6 @@ export default function AdminView({
         {/* 左カラム: スポットの管理(日常的に触るほう。狭い画面ではタブ「スポット」) */}
         <div className={adminTab === "spots" ? "" : "hidden lg:block"}>
           <div className="flex flex-col gap-6">
-          {/* ZIPファイルからの取り込み。中身はGitHub取り込みと同じ形なので、
-              適用処理(applySpotTypeFiles)は共用する */}
-          {isAdmin && (
-            <div>
-              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
-                ZIPファイルからスポット種別取り込み
-                <HelpTip>
-                  travel-log-dataと同じ形(&lt;キー&gt;/settings.json・spots.csv・
-                  excluded_candidates/exclude.txt・routes.csv)で固めたZIPを読み込む。
-                  GitHubからの取り込みと同じものを、手元のファイルから入れる道で、
-                  リポジトリに置いていないデータ(tazunaが書き出した収集など)を
-                  取り込むのに使う。ZIPに入っている種別を一覧にし、選んだものだけ適用する。
-                  種別が無ければ作成し、あれば設定・スポット・経路を上書きする
-                  (それぞれ個別インポートと同じ差分更新)。
-                </HelpTip>
-              </h2>
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
-                <label className="inline-block cursor-pointer rounded-lg border border-blue-600 bg-white px-3 py-1.5 text-sm font-medium text-blue-600">
-                  ZIPファイルを選ぶ
-                  <input
-                    type="file"
-                    accept=".zip,application/zip"
-                    className="hidden"
-                    disabled={zipImporting}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleZipOpen(file);
-                      // 同じファイルを選び直せるようにする
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-                {zipFolders && (
-                  <ul className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-                    {zipFolders.map((folder) => (
-                      <li
-                        key={folder.key}
-                        className="flex items-center gap-3 px-3 py-2"
-                      >
-                        <span className="min-w-0 flex-1 text-sm">
-                          {folder.label}{" "}
-                          <span className="text-gray-400">({folder.key})</span>
-                          {spotTypes.some((t) => t.key === folder.key) ? (
-                            <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
-                              上書き
-                            </span>
-                          ) : (
-                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
-                              新規作成
-                            </span>
-                          )}
-                        </span>
-                        <button
-                          type="button"
-                          disabled={zipImporting}
-                          onClick={() => handleZipApply(folder)}
-                          className="shrink-0 rounded-lg border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 disabled:opacity-50"
-                        >
-                          適用
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {zipProgress && (
-                  <p className="mt-2 text-sm text-gray-500">{zipProgress}</p>
-                )}
-                {zipMessage && (
-                  <p className="mt-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                    {zipMessage}
-                  </p>
-                )}
-              </section>
-            </div>
-          )}
-
           {/* データリポジトリからの取り込み。ここが日々の入口なので一番上に置く */}
           {isAdmin && (
             <div>
@@ -3370,6 +3294,78 @@ export default function AdminView({
                       }}
                     />
                   </label>
+                </div>
+                {/* ZIPファイルからの取り込み。JSONファイルからの追加の続きとして置く
+                    —— どちらも「手元のファイルから種別を入れる」道で、
+                    ZIPはそれにスポットと経路が付いてくる形 */}
+                <div className="mt-3 border-t border-gray-100 pt-3">
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                    ZIPファイルから種別とスポットを取り込む
+                    <HelpTip>
+                      travel-log-dataと同じ形(&lt;キー&gt;/settings.json・spots.csv・
+                      excluded_candidates/exclude.txt・routes.csv)で固めたZIPを読み込む。
+                      GitHubからの取り込みと同じものを、手元のファイルから入れる道で、
+                      リポジトリに置いていないデータ(tazunaが書き出した収集など)を
+                      取り込むのに使う。ZIPに入っている種別を一覧にし、選んだものだけ適用する。
+                      種別が無ければ作成し、あれば設定・スポット・経路を上書きする
+                      (それぞれ個別インポートと同じ差分更新)。
+                    </HelpTip>
+                  </p>
+                  <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                    {zipImporting ? "読み込み中…" : "ZIPファイルを選ぶ"}
+                    <input
+                      type="file"
+                      accept=".zip,application/zip"
+                      className="hidden"
+                      disabled={zipImporting}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleZipOpen(file);
+                        // 同じファイルを選び直せるようにする
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {zipFolders && (
+                    <ul className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                      {zipFolders.map((folder) => (
+                        <li
+                          key={folder.key}
+                          className="flex items-center gap-3 px-3 py-2"
+                        >
+                          <span className="min-w-0 flex-1 text-sm">
+                            {folder.label}{" "}
+                            <span className="text-gray-400">({folder.key})</span>
+                            {spotTypes.some((t) => t.key === folder.key) ? (
+                              <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                                上書き
+                              </span>
+                            ) : (
+                              <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
+                                新規作成
+                              </span>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={zipImporting}
+                            onClick={() => handleZipApply(folder)}
+                            className="shrink-0 rounded-lg border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 disabled:opacity-50"
+                          >
+                            適用
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {zipProgress && (
+                    <p className="mt-2 text-sm text-gray-500">{zipProgress}</p>
+                  )}
+                  {zipMessage && (
+                    <p className="mt-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                      {zipMessage}
+                    </p>
+                  )}
                 </div>
               </section>
             </details>

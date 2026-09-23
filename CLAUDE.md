@@ -568,8 +568,11 @@ Maps URLsの`waypoints`は9件までのため、それを超える経路は**並
 
 ### ZIPファイルからの取り込み
 
-`/[type]/admin`のadmin専用セクション「ZIPファイルからスポット種別取り込み」
-(`AdminView`の`handleZipOpen`/`handleZipApply`、ZIPの読み取りは`lib/zipReader.ts`)。
+`/[type]/admin`の「別のスポット種別の管理」(admin専用)の中、**「JSONファイルから種別を追加」の
+すぐ下**にある「ZIPファイルから種別とスポットを取り込む」(`AdminView`の
+`handleZipOpen`/`handleZipApply`、ZIPの読み取りは`lib/zipReader.ts`)。
+**手元のファイルから種別を入れる道を並べてある** —— JSONは設定だけ、ZIPはそれに
+スポットと経路が付いてくる形。
 **中身はGitHubからの取り込みと同じ形**(`<キー>/settings.json`・`spots.csv`・
 `excluded_candidates/exclude.txt`・`routes.csv`)で、**取る先が手元のファイルか
 リポジトリかの違いしかない**。リポジトリに置いていないデータ —— tazunaが知識サーバーの
