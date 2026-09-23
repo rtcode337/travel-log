@@ -2003,6 +2003,94 @@ export default function AdminView({
         {/* 左カラム: スポットの管理(日常的に触るほう。狭い画面ではタブ「スポット」) */}
         <div className={adminTab === "spots" ? "" : "hidden lg:block"}>
           <div className="flex flex-col gap-6">
+          {/* データリポジトリからの取り込み。ここが日々の入口なので一番上に置く */}
+          {isAdmin && (
+            <div>
+              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+                GitHubリポジトリからスポット種別取り込み
+                <HelpTip>
+                  データリポジトリ(travel-log-data形式)の catalog.json から
+                  スポット種別の一覧を取得して表示する(mainブランチ)。一覧から
+                  種別を選ぶと、そのフォルダの settings.json・spots.csv・
+                  exclude.txt・routes.csv が順に適用される。スポット種別が
+                  無ければ作成し、あれば設定・スポット・経路を上書きする
+                  (それぞれ個別インポートと同じ差分更新)。exclude.txtによる削除は、
+                  削除件数の確認ダイアログにOKしたときだけ実行される。
+                </HelpTip>
+              </h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <form
+                  onSubmit={handleGithubOpen}
+                  className="flex flex-wrap items-end gap-2"
+                >
+                  <div>
+                    <label className="mb-1 block text-xs font-medium">
+                      リポジトリ(owner/リポジトリ名)
+                    </label>
+                    <input
+                      required
+                      value={githubRepo}
+                      onChange={(e) => {
+                        setGithubRepo(e.target.value);
+                        // 別のリポジトリの一覧が残らないよう、入力を変えたら閉じる
+                        setGithubCatalog(null);
+                      }}
+                      placeholder="rtcode337/travel-log-data"
+                      className="w-64 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={githubOpening || githubImporting}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {githubOpening ? "取得中…" : "開く"}
+                  </button>
+                </form>
+                {githubCatalog && (
+                  <ul className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                    {githubCatalog.map((entry) => (
+                      <li
+                        key={entry.key}
+                        className="flex items-center gap-3 px-3 py-2"
+                      >
+                        <span className="min-w-0 flex-1 text-sm">
+                          {entry.label}{" "}
+                          <span className="text-gray-400">({entry.key})</span>
+                          {spotTypes.some((t) => t.key === entry.key) ? (
+                            <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                              上書き
+                            </span>
+                          ) : (
+                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
+                              新規作成
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={githubImporting}
+                          onClick={() => handleGithubApply(entry)}
+                          className="shrink-0 rounded-lg border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 disabled:opacity-50"
+                        >
+                          適用
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {githubProgress && (
+                  <p className="mt-2 text-sm text-gray-500">{githubProgress}</p>
+                )}
+                {githubMessage && (
+                  <p className="mt-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {githubMessage}
+                  </p>
+                )}
+              </section>
+            </div>
+          )}
+
             {isAdmin && currentType && (
               <details>
                 <summary className="cursor-pointer select-none text-base font-bold">
@@ -2618,93 +2706,6 @@ export default function AdminView({
               </section>
             </details>
 
-          {isAdmin && (
-            <div>
-              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
-                GitHubリポジトリからスポット種別取り込み
-                <HelpTip>
-                  データリポジトリ(travel-log-data形式)の catalog.json から
-                  スポット種別の一覧を取得して表示する(mainブランチ)。一覧から
-                  種別を選ぶと、そのフォルダの settings.json・spots.csv・
-                  exclude.txt・routes.csv が順に適用される。スポット種別が
-                  無ければ作成し、あれば設定・スポット・経路を上書きする
-                  (それぞれ個別インポートと同じ差分更新)。exclude.txtによる削除は、
-                  削除件数の確認ダイアログにOKしたときだけ実行される。
-                </HelpTip>
-              </h2>
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
-                <form
-                  onSubmit={handleGithubOpen}
-                  className="flex flex-wrap items-end gap-2"
-                >
-                  <div>
-                    <label className="mb-1 block text-xs font-medium">
-                      リポジトリ(owner/リポジトリ名)
-                    </label>
-                    <input
-                      required
-                      value={githubRepo}
-                      onChange={(e) => {
-                        setGithubRepo(e.target.value);
-                        // 別のリポジトリの一覧が残らないよう、入力を変えたら閉じる
-                        setGithubCatalog(null);
-                      }}
-                      placeholder="rtcode337/travel-log-data"
-                      className="w-64 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={githubOpening || githubImporting}
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-                  >
-                    {githubOpening ? "取得中…" : "開く"}
-                  </button>
-                </form>
-                {githubCatalog && (
-                  <ul className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-                    {githubCatalog.map((entry) => (
-                      <li
-                        key={entry.key}
-                        className="flex items-center gap-3 px-3 py-2"
-                      >
-                        <span className="min-w-0 flex-1 text-sm">
-                          {entry.label}{" "}
-                          <span className="text-gray-400">({entry.key})</span>
-                          {spotTypes.some((t) => t.key === entry.key) ? (
-                            <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
-                              上書き
-                            </span>
-                          ) : (
-                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
-                              新規作成
-                            </span>
-                          )}
-                        </span>
-                        <button
-                          type="button"
-                          disabled={githubImporting}
-                          onClick={() => handleGithubApply(entry)}
-                          className="shrink-0 rounded-lg border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 disabled:opacity-50"
-                        >
-                          適用
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {githubProgress && (
-                  <p className="mt-2 text-sm text-gray-500">{githubProgress}</p>
-                )}
-                {githubMessage && (
-                  <p className="mt-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                    {githubMessage}
-                  </p>
-                )}
-              </section>
-            </div>
-          )}
-
           {collect?.available && (
             <details>
               <summary className="cursor-pointer select-none text-base font-bold">
@@ -3221,16 +3222,24 @@ export default function AdminView({
             </details>
           )}
 
+          {/* 一度決めたら滅多に変えない設定なので、他の節と同じく畳んでおく */}
           {isAdmin && (
-            <div>
-              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+            <details>
+              {/* 「?」を押しただけで開閉しないよう、クリックはこのspanで止める
+                  (「別のスポット種別の管理」と同じ体裁) */}
+              <summary className="cursor-pointer select-none text-base font-bold">
                 ログイン後に自動で開く種別
-                <HelpTip>
-                  ログイン後・ルート(/)アクセス時に自動で開く地図/リストの既定(全ユーザー共通)。
-                  ここでの選択は既定を切り替えるだけで、他の種別を非表示にするものではない。
-                </HelpTip>
-              </h2>
-              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <span
+                  className="ml-1.5 inline-flex align-middle"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <HelpTip>
+                    ログイン後・ルート(/)アクセス時に自動で開く地図/リストの既定(全ユーザー共通)。
+                    ここでの選択は既定を切り替えるだけで、他の種別を非表示にするものではない。
+                  </HelpTip>
+                </span>
+              </summary>
+              <section className="mt-2 rounded-xl border border-gray-200 bg-white p-3">
                 {defaultTypeMessage && (
                   <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
                     {defaultTypeMessage}
@@ -3253,7 +3262,7 @@ export default function AdminView({
                     ))}
                 </select>
               </section>
-            </div>
+            </details>
           )}
           </div>
         </div>
