@@ -66,9 +66,13 @@ export default function LinkedText({ text }: { text: string }) {
           href={`https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title)}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-baseline gap-1 text-blue-600 underline"
+          className="text-blue-600 underline"
         >
-          <WikipediaIcon className="size-3.5 self-center" />
+          {/* アイコンは文字の並びの一部として置く(inline-flexで組まない)。
+              下線はリンクの箱いっぱいに引かれるので、アイコンの下にも続く ——
+              flexの子にすると絵と文字の間に隙間が入り、下線も切れて見える。
+              位置はベースライン揃え(既定)で、絵の下端が文字と同じ線に乗る */}
+          <WikipediaIcon className="inline size-3.5" />
           {title}
         </a>
       );
