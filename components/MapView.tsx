@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import PlanBuildPanel from "@/components/PlanBuildPanel";
 import HelpTip from "@/components/HelpTip";
 import LinkedText from "@/components/LinkedText";
+import GoogleSpotLinks from "@/components/GoogleSpotLinks";
 import WeatherAskLink from "@/components/WeatherAskLink";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 import { useNavVisibility } from "@/components/AppFrame";
@@ -29,8 +30,6 @@ import { useRegionScope } from "@/lib/useRegionScope";
 import {
   DEFAULT_REGION_SCOPE,
   regionFieldLabel,
-  resolveWikipediaLang,
-  resolveWikipediaTitleSource,
 } from "@/lib/region";
 import { countedVisits, getSpotTypeSetting, SPOT_ADMIN_ROLES } from "@/lib/types";
 import type {
@@ -97,8 +96,6 @@ import {
 } from "@/lib/spotDiscovery";
 import AiExchangeDialog from "@/components/AiExchangeDialog";
 import SpotDetailModal from "@/components/SpotDetailModal";
-import WikipediaIcon from "@/components/WikipediaIcon";
-import SpotInfoModal from "@/components/SpotInfoModal";
 import VisitDateCalendar from "@/components/VisitDateCalendar";
 import SpotDownloadDialogs, {
   DownloadProgressDialog,
@@ -1910,9 +1907,6 @@ export default function MapView({
   // ピンをタップして「リストに追加しますか?」を確認中のスポットID
   const [buildDraft, setBuildDraft] = useState<PlanListDraft | null>(null);
   const [addCandidate, setAddCandidate] = useState<string | null>(null);
-  // 追加の確認中に開くWikipediaの概要(SpotInfoModal)。確認ダイアログを閉じるときに
-  // 一緒に閉じるため、対象は addCandidate 側に持たせず真偽値だけを持つ
-  const [addCandidateInfo, setAddCandidateInfo] = useState(false);
   const [savingList, setSavingList] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
   // 作成モードのパネルで押した行のスポット。地図をそこへ寄せ、丸を敷いて目立たせる
@@ -2248,12 +2242,10 @@ export default function MapView({
     [addCandidate, spotById, overlaySpotById, pathExtraSpots]
   );
   /**
-   * 確認ダイアログで説明とWikipediaの入口を出すために取り直した全項目。
+   * 確認ダイアログで説明を出すために取り直した全項目。
    * **公開スポットは手元の値では足りない** —— IndexedDBキャッシュは容量のため
-   * `description`も`spot_type_id`も保存しておらず、`expandSpot`が
-   * null・空文字のプレースホルダーを入れて返すため(`lib/spotCacheDb.ts`)。
-   * 空の`spot_type_id`のまま種別を引くと必ず見つからず、Wikipediaの可否が
-   * 種別の設定ではなく既定値(true)で決まってしまう。
+   * `description`を保存しておらず、`expandSpot`が空文字のプレースホルダーを
+   * 入れて返すため(`lib/spotCacheDb.ts`)。
    */
   const [addCandidateDetail, setAddCandidateDetail] = useState<Spot | null>(
     null
@@ -2272,15 +2264,14 @@ export default function MapView({
     };
   }, [addCandidate]);
   const addCandidateSpot = addCandidateDetail ?? addCandidateCached;
+  // Geminiへの質問に添える種別(取り直しが済むまではnull=種別なしで組む)
   const addCandidateSpotType = useMemo(
     () =>
       spotTypes.find((t) => t.id === addCandidateDetail?.spot_type_id) ?? null,
     [spotTypes, addCandidateDetail]
   );
-  // 確認ダイアログを閉じるときは、その上に開いているWikipediaの概要も一緒に閉じる
   const closeAddCandidate = useCallback(() => {
     setAddCandidate(null);
-    setAddCandidateInfo(false);
   }, []);
 
   // 作成中パネルに渡す解決用マップ。本体スポットに重ね表示スポットと、IDから
@@ -5139,8 +5130,8 @@ export default function MapView({
       )}
 
       {/* 作成モード中にピンをタップしたとき: リストへ追加するか確認するダイアログ。
-          名前だけでは入れるか決められないため、スポットの説明とWikipediaの概要への
-          入口も出す(Wikipediaはスポット詳細と同じくその種別で有効なときだけ) */}
+          名前だけでは入れるか決められないため、スポットの説明とGoogleの導線
+          (地図・経路・画像検索・Gemini)も出す。スポット詳細と同じ並び */}
       {addCandidate && buildDraft && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
@@ -5166,21 +5157,15 @@ export default function MapView({
                       <LinkedText text={spot.description} />
                     </p>
                   )}
-                  {/* 取り直しが済むまでは出さない(種別が分かるまで可否を
-                      決められず、既定値で出すと後から消えてちらつくため) */}
-                  {addCandidateDetail &&
-                    getSpotTypeSetting(
-                      addCandidateSpotType,
-                      "wikipedia_enabled"
-                    ) && (
-                    <button
-                      type="button"
-                      onClick={() => setAddCandidateInfo(true)}
-                      className="inline-flex items-center gap-1 rounded p-1 text-sm text-blue-600 hover:bg-blue-50"
-                    >
-                      <WikipediaIcon className="size-5" />
-                      Wikipediaで見る
-                    </button>
+                  {/* スポット詳細と同じ体裁: 上に区切り線を引いて右へ寄せる */}
+                  {spot && (
+                    <div className="flex border-t border-gray-100 pt-3">
+                      <GoogleSpotLinks
+                        spot={spot}
+                        spotType={addCandidateSpotType}
+                        className="ml-auto"
+                      />
+                    </div>
                   )}
                   <div className="flex gap-2">
                     <button
@@ -5211,22 +5196,6 @@ export default function MapView({
             })()}
           </div>
         </div>
-      )}
-
-      {/* 追加の確認から開くWikipediaの概要。確認ダイアログより後ろに置くことで
-          同じ z-[60] でも上に重なる(閉じると確認ダイアログに戻る) */}
-      {addCandidateInfo && addCandidateSpot && (
-        <SpotInfoModal
-          spotName={addCandidateSpot.name}
-          region={addCandidateSpot.region}
-          lang={resolveWikipediaLang(addCandidateSpotType)}
-          primaryTitle={
-            resolveWikipediaTitleSource(addCandidateSpotType) === "series"
-              ? addCandidateSpot.series
-              : null
-          }
-          onClose={() => setAddCandidateInfo(false)}
-        />
       )}
 
       {/* 右クリック/長押しメニュー */}

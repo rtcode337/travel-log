@@ -32,15 +32,9 @@ import {
 } from "@/lib/category";
 import {
   countryDisplayName,
-  DEFAULT_WIKIPEDIA_LANG,
-  isValidWikipediaLang,
   REGION_SCOPE_SETTING_KEY,
   regionFieldLabel,
   resolveRegionScope,
-  resolveWikipediaLang,
-  WIKIPEDIA_LANG_SETTING_KEY,
-  WIKIPEDIA_TITLE_SOURCE_SETTING_KEY,
-  resolveWikipediaTitleSource,
 } from "@/lib/region";
 import {
   type FlaggedSpot,
@@ -207,17 +201,12 @@ export default function AdminView({
     string | null
   >(null);
 
-  // 対象地域(region_scope)・Wikipedia言語(wikipedia_lang)の編集用下書き。
+  // 対象地域(region_scope)の編集用下書き。
   // セレクトで「国を指定」を選んだときだけ国コード入力欄を出す
   const [regionScopeKind, setRegionScopeKind] = useState<
     "jp" | "country" | "world"
   >("jp");
   const [regionCountryCode, setRegionCountryCode] = useState("");
-  const [wikiLangDraft, setWikiLangDraft] = useState(DEFAULT_WIKIPEDIA_LANG);
-  // Wikipedia記事を「スポット名」と「シリーズ名」のどちらで探すか
-  const [wikiTitleSourceDraft, setWikiTitleSourceDraft] = useState<
-    "name" | "series"
-  >("name");
   const [savingRegionSettings, setSavingRegionSettings] = useState(false);
 
   // この種別で使うカテゴリ一覧(カンマ区切り)の編集用下書き
@@ -428,8 +417,6 @@ export default function AdminView({
       scope === "jp" ? "jp" : scope === "world" ? "world" : "country"
     );
     setRegionCountryCode(scope === "jp" || scope === "world" ? "" : scope);
-    setWikiLangDraft(resolveWikipediaLang(currentType));
-    setWikiTitleSourceDraft(resolveWikipediaTitleSource(currentType));
     setCategoriesDraft(resolveCategories(currentType).join("、"));
   }, [currentType]);
 
@@ -724,18 +711,9 @@ export default function AdminView({
       );
       return;
     }
-    const lang = wikiLangDraft.trim().toLowerCase();
-    if (!isValidWikipediaLang(lang)) {
-      setTypeSettingsMessage(
-        "Wikipedia言語は 'ja'・'en' のような言語コードで入力してください。"
-      );
-      return;
-    }
     setSavingRegionSettings(true);
     const { error } = await api.spotTypes.applySettings(currentType.id, {
       [REGION_SCOPE_SETTING_KEY]: scope,
-      [WIKIPEDIA_LANG_SETTING_KEY]: lang,
-      [WIKIPEDIA_TITLE_SOURCE_SETTING_KEY]: wikiTitleSourceDraft,
     });
     setSavingRegionSettings(false);
     if (error) {
@@ -745,7 +723,7 @@ export default function AdminView({
     setTypeSettingsMessage(
       `「${currentType.label}」の対象地域を「${
         scope === "jp" ? "日本" : scope === "world" ? "世界" : countryDisplayName(scope)
-      }」、Wikipedia言語を「${lang}」にしました。`
+      }」にしました。`
     );
     loadSpotTypes();
   };
@@ -2121,14 +2099,10 @@ export default function AdminView({
                   className="mt-3 border-t border-gray-100 pt-3"
                 >
                   <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                    対象地域とWikipedia言語
+                    対象地域
                     <HelpTip>
-                      対象地域は、地図の地名検索の対象国と、スポットの「地域」欄の扱い
+                      地図の地名検索の対象国と、スポットの「地域」欄の扱い
                       (日本=都道府県、国を指定=その国の州・県、世界=国ごと)を決める。
-                      Wikipedia言語は、スポット詳細から開くWikipedia検索の言語版
-                      (ja・enなどのサブドメイン)。「Wikipediaを探す名前」を
-                      シリーズ名にすると、場所ではなくシリーズ(アニメ聖地なら作品)の
-                      記事を開く。シリーズ名の記事が無い行はスポット名で探し直す。
                     </HelpTip>
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
@@ -2162,31 +2136,6 @@ export default function AdminView({
                         )}
                       </>
                     )}
-                    <label className="flex items-center gap-1 text-sm">
-                      <span className="text-xs text-gray-500">Wikipediaを探す名前</span>
-                      <select
-                        value={wikiTitleSourceDraft}
-                        onChange={(e) =>
-                          setWikiTitleSourceDraft(
-                            e.target.value as "name" | "series"
-                          )
-                        }
-                        className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                      >
-                        <option value="name">スポット名(既定)</option>
-                        <option value="series">シリーズ名</option>
-                      </select>
-                    </label>
-                    <label className="flex items-center gap-1 text-sm">
-                      <span className="text-xs text-gray-500">Wikipedia言語</span>
-                      <input
-                        value={wikiLangDraft}
-                        onChange={(e) => setWikiLangDraft(e.target.value)}
-                        placeholder="ja"
-                        autoComplete="off"
-                        className="w-20 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                      />
-                    </label>
                     <button
                       type="submit"
                       disabled={savingRegionSettings}
