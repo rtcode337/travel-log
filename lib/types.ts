@@ -178,8 +178,7 @@ export interface SpotType {
 export type SpotTypeSettingKey =
   | "public_visible"
   | "reviews_enabled"
-  | "rank_enabled"
-  | "ai_discovery_enabled";
+  | "rank_enabled";
 
 export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
   public_visible: false,
@@ -190,11 +189,6 @@ export const SPOT_TYPE_SETTING_DEFAULTS: Record<SpotTypeSettingKey, boolean> = {
   // **ランクの付いていないスポットは見た目が変わらない**(`rankStyleOf(null)`は
   // どちらでも同じ`NO_RANK_STYLE`)ので、開けても既存のピンは動かない
   rank_enabled: true,
-  // 周辺を探す(地図の右クリック/長押しメニュー)。地図データ(Overture / OSM)とAIの2段で、
-  // 使う種別で明示的に開ける(サーバーに接続先が無ければ開けても出ない)。
-  // **既定は閉じる** —— ランクと違って押すとAIの枠を使うので、
-  // 全部の種別のメニューに最初から並んでいてほしいものではない
-  ai_discovery_enabled: false,
 };
 
 /** 管理画面のチェックボックス・メッセージに使う短い名前(名詞句。
@@ -203,8 +197,6 @@ export const SPOT_TYPE_SETTING_LABELS: Record<SpotTypeSettingKey, string> = {
   public_visible: "一般公開(管理者以外も閲覧可能にする)",
   reviews_enabled: "口コミ",
   rank_enabled: "ランク(A〜E。ピンの色と大きさを決める)",
-  ai_discovery_enabled:
-    "周辺を探す(管理者の地図メニューに出す。地図データとAIの2段。サーバーに接続先が要る)",
 };
 
 export const SPOT_TYPE_SETTING_KEYS = Object.keys(

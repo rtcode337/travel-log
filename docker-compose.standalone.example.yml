@@ -64,11 +64,6 @@ x-google-client-secret: &google-client-secret ""
 # 組まれて認証に失敗する。そのときはここに公開URLを書いて明示する。
 # 直接 http://<ホスト>:7040 で使うなら空のままでよい。
 x-public-base-url: &public-base-url ""
-# 周辺のAI探索(任意。例: "http://chiezo.example.lan:7010")。知識サーバー chiezo の
-# 場所と、中継先で使う相手(/v1/ai/backends に出る id。空なら antigravity)。
-# 空のままなら機能そのものが出ない
-x-chiezo-base-url: &chiezo-base-url ""
-x-chiezo-ai-backend: &chiezo-ai-backend ""
 # 同じホストで chiezo が動いているのに届かない(「時間内に応答しなかった」になる)ときは、
 # コンテナからホストの公開ポートへ戻る経路が塞がれている(NASのファイアウォール等)。
 # そのときは chiezo のネットワークに相乗りする(ホストのポートを経由しない)。
@@ -151,8 +146,6 @@ services:
       GOOGLE_CLIENT_ID: *google-client-id
       GOOGLE_CLIENT_SECRET: *google-client-secret
       PUBLIC_BASE_URL: *public-base-url
-      CHIEZO_BASE_URL: *chiezo-base-url
-      CHIEZO_AI_BACKEND: *chiezo-ai-backend
       NODE_ENV: production
       # 訪問記録の写真置き場(lib/photoStorage.ts)。DBには相対パスのみ保存される
       PHOTOS_DIR: /data/photos

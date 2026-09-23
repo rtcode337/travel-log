@@ -75,26 +75,6 @@ import FilterBar, {
   type VisitedValue,
 } from "@/components/FilterBar";
 import AddSpotModal from "@/components/AddSpotModal";
-import AiSpotDiscoverySearchModal from "@/components/AiSpotDiscoverySearchModal";
-import type { CollectCoverage } from "@/lib/spotCollect";
-import AiSpotDiscoveryPanel, {
-  discoveryRowSeries,
-  type DiscoveryRow,
-} from "@/components/AiSpotDiscoveryPanel";
-import {
-  DEFAULT_DISCOVERY_RADIUS,
-  buildDiscoveredDescription,
-  distanceMeters,
-  normalizeSpotName,
-  type DiscoveryChoice,
-  type DiscoveryDepth,
-  type DiscoveryExchange,
-  type DiscoveryResult,
-  type DiscoveryReview,
-  type DiscoveryReviewTarget,
-  type DiscoverySource,
-} from "@/lib/spotDiscovery";
-import AiExchangeDialog from "@/components/AiExchangeDialog";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import VisitDateCalendar from "@/components/VisitDateCalendar";
 import SpotDownloadDialogs, {
@@ -120,89 +100,6 @@ const STACK_BADGE_LAYER_ID = "spots-stack-badge";
 const FOCUS_SOURCE_ID = "spot-focus";
 const FOCUS_LAYER_ID = "spot-focus-halo";
 
-/**
- * 周辺を探した候補の印の色。**探し方で分ける** —— 同じ一覧に地図データとAIの候補が
- * 混ざるので、地図の側でも一目で見分けられないと「これはAIが言っているだけの店か」が
- * 分からない。**パネルの出どころバッジと同じ色**にしてある(片方だけ変えると対応が切れる)
- */
-const DISCOVERY_MAP_COLOR = "#0284c7"; // sky-600(バッジの bg-sky-100 / text-sky-800 と同系)
-const DISCOVERY_AI_COLOR = "#7c3aed"; // violet-600(バッジの bg-violet-100 / text-violet-800 と同系)
-/** 依頼して溜めたものから取り出した候補(その場で探したものと混ざらないよう色を分ける) */
-const DISCOVERY_COLLECT_COLOR = "#0d9488"; // teal-600
-
-/**
- * 「この周辺の集めた情報」で見る円の半径(m)。
- *
- * **周辺を探すより広く取る。** あちらは「いま歩いて行ける範囲」を見るので300mが既定だが、
- * こちらが答えるのは「この辺りは収集済みか」で、収集の単位は市区町村。
- * 300mで聞くと、同じ市区町村の中を何度も聞き直すことになる。
- */
-const COLLECT_CIRCLE_RADIUS = 2000;
-/** 登録済み(もう足しようがない)は色を落とす */
-const DISCOVERY_EXISTING_COLOR = "#6b7280";
-
-/** 周辺を探す: 探す範囲の円と、候補の印 */
-const DISCOVERY_RANGE_SOURCE_ID = "discovery-range";
-const DISCOVERY_RANGE_FILL_LAYER_ID = "discovery-range-fill";
-const DISCOVERY_RANGE_LINE_LAYER_ID = "discovery-range-line";
-const DISCOVERY_SOURCE_ID = "discovery-candidates";
-const DISCOVERY_CIRCLE_LAYER_ID = "discovery-candidate-circle";
-const DISCOVERY_LABEL_LAYER_ID = "discovery-candidate-label";
-
-/**
- * 中心と半径から円のポリゴンを作る(メートル指定の円をMapLibreは持たないため)。
- *
- * **`circle-radius`は画面のピクセルなので使えない** —— 拡大縮小しても大きさが
- * 変わらず、「半径500m」を表せない。地面に貼り付いた円が要るのでポリゴンで描く。
- */
-function circlePolygon(
-  center: { lat: number; lng: number },
-  radiusM: number,
-  steps = 96
-): GeoJSON.Feature<GeoJSON.Polygon> {
-  const latPerM = 1 / 111_320;
-  const lngPerM = 1 / (111_320 * Math.max(Math.cos((center.lat * Math.PI) / 180), 0.01));
-  const ring: [number, number][] = [];
-  for (let i = 0; i <= steps; i += 1) {
-    const t = (i / steps) * Math.PI * 2;
-    ring.push([
-      center.lng + Math.cos(t) * radiusM * lngPerM,
-      center.lat + Math.sin(t) * radiusM * latPerM,
-    ]);
-  }
-  return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
-}
-
-/**
- * 地図の上に敷いたパネルを避けて、**見えている側の中心**へ寄せるための`offset`
- * ([x, y]のピクセル。`offset`は「最終的な中心を container の中心からどれだけ
- * ずらすか」を指す)。
- *
- * **渡す先は`easeTo`にすること。`flyTo`では効かないことがある** ——
- * MapLibreの`flyTo`は端末が「視差効果を減らす」設定のときに`jumpTo`へ落ち、
- * そのとき引き継ぐのは`center`・`zoom`・`bearing`・`pitch`・`roll`・`elevation`・
- * `padding`だけで、**`offset`は黙って捨てられる**。落ちた先では寄せ先が地図の
- * ど真ん中になり、下から敷く帯のときはそこがちょうどパネルの上端なので、
- * **押した候補が半分隠れる**(実機で再現。手元のブラウザはこの設定を持たないので出ない)。
- * `easeTo`は同じ設定で`duration`を0にするだけなので、`offset`はそのまま効く。
- *
- * パネルは狭い画面では下から敷く帯、広い画面では右の帯になる。**どちらかは
- * 画面幅で決め打ちせず実寸から判定する** —— 決め打ちすると、パネル側の
- * 折り返し位置を変えたときにここが取り残される。
- */
-function visibleCenterOffset(
-  container: DOMRect | undefined,
-  panel: DOMRect | undefined
-): [number, number] {
-  if (!container || !panel || panel.width === 0 || panel.height === 0) return [0, 0];
-  // 幅をほぼ覆っていれば下から敷く帯、そうでなければ右の帯
-  if (panel.width >= container.width * 0.9) {
-    const visibleBottom = Math.max(container.top, panel.top);
-    return [0, (visibleBottom - container.bottom) / 2];
-  }
-  const visibleRight = Math.max(container.left, panel.left);
-  return [(visibleRight - container.right) / 2, 0];
-}
 
 /**
  * 空を除いた重複なしの一覧を**出てきた順のまま**返す。`distinctValues`(lib/types.ts)は
@@ -719,11 +616,6 @@ function moveOverlayLayersToTop(map: maplibregl.Map, typeKeys: string[]) {
   for (const id of ordered) {
     if (map.getLayer(id)) map.moveLayer(id);
   }
-  // **探索の候補は重ね表示より更に上へ。** 探している間はそれが主役で、
-  // 半透明の別種別に隠れると番号が読めなくなる
-  for (const id of [DISCOVERY_CIRCLE_LAYER_ID, DISCOVERY_LABEL_LAYER_ID]) {
-    if (map.getLayer(id)) map.moveLayer(id);
-  }
 }
 
 /** 重ねるのをやめた種別のレイヤーを空にする(レイヤー自体は残す。上記ensure参照) */
@@ -1158,9 +1050,7 @@ function ensureClusterLayers(
   map: maplibregl.Map,
   overlayKeysRef: OverlayKeysRef,
   /** 押されたピンのID(同じ地点に何件あるかは呼び出し側が解決する) */
-  onSelectSpot: (id: string) => void,
-  /** 押された探索の候補の通し番号(パネルの行を目立たせる) */
-  onSelectDiscovery: (no: number) => void
+  onSelectSpot: (id: string) => void
 ) {
   if (map.getSource(CLUSTER_SOURCE_ID)) return;
 
@@ -1183,24 +1073,6 @@ function ensureClusterLayers(
       "circle-stroke-color": "#2563eb",
       "circle-stroke-opacity": 0.9,
     },
-  });
-
-  // 周辺を探す範囲の薄い青円。**ピンより先に作る**ので下敷きになる
-  map.addSource(DISCOVERY_RANGE_SOURCE_ID, {
-    type: "geojson",
-    data: { type: "FeatureCollection", features: [] },
-  });
-  map.addLayer({
-    id: DISCOVERY_RANGE_FILL_LAYER_ID,
-    type: "fill",
-    source: DISCOVERY_RANGE_SOURCE_ID,
-    paint: { "fill-color": "#2563eb", "fill-opacity": 0.08 },
-  });
-  map.addLayer({
-    id: DISCOVERY_RANGE_LINE_LAYER_ID,
-    type: "line",
-    source: DISCOVERY_RANGE_SOURCE_ID,
-    paint: { "line-color": "#2563eb", "line-width": 1.5, "line-opacity": 0.5 },
   });
 
   map.addSource(CLUSTER_SOURCE_ID, {
@@ -1314,51 +1186,10 @@ function ensureClusterLayers(
     });
   }
 
-  // 周辺を探した候補の印。**DOMのマーカーではなく地図レイヤーで描く** ——
-  // 地図データ側は件数の上限を持たない(半径5kmで36,000件になりうる)ので、
-  // 1件1要素だと地図を動かすたびに全部を置き直すことになって固まる。
-  // ピンより後に足すので、常にその上に乗る
-  map.addSource(DISCOVERY_SOURCE_ID, {
-    type: "geojson",
-    data: { type: "FeatureCollection", features: [] },
-  });
-  map.addLayer({
-    id: DISCOVERY_CIRCLE_LAYER_ID,
-    type: "circle",
-    source: DISCOVERY_SOURCE_ID,
-    paint: {
-      "circle-radius": 12,
-      // 登録済みは灰色、選んでいるものは紫。押している行だけ青く縁取る
-      "circle-color": ["get", "color"],
-      "circle-opacity": ["get", "opacity"],
-      "circle-stroke-width": ["case", ["get", "focused"], 4, 2],
-      "circle-stroke-color": ["case", ["get", "focused"], "#2563eb", "#ffffff"],
-    },
-  });
-  map.addLayer({
-    id: DISCOVERY_LABEL_LAYER_ID,
-    type: "symbol",
-    source: DISCOVERY_SOURCE_ID,
-    layout: {
-      "text-field": ["get", "no"],
-      "text-size": 12,
-      "text-font": ["Noto Sans Regular"],
-      "text-allow-overlap": true,
-      "text-ignore-placement": true,
-    },
-    paint: { "text-color": "#ffffff", "text-opacity": ["get", "opacity"] },
-  });
-
-  map.on("click", DISCOVERY_CIRCLE_LAYER_ID, (e) => {
-    const no = Number(e.features?.[0]?.properties?.no);
-    if (Number.isInteger(no)) onSelectDiscovery(no);
-  });
-
   for (const layerId of [
     CLUSTER_LAYER_ID,
     UNCLUSTERED_LAYER_ID,
     PATH_PIN_LAYER_ID,
-    DISCOVERY_CIRCLE_LAYER_ID,
   ]) {
     map.on("mouseenter", layerId, () => {
       map.getCanvas().style.cursor = "pointer";
@@ -2513,99 +2344,6 @@ export default function MapView({
   const [addSpotAt, setAddSpotAt] = useState<{ lat: number; lng: number } | null>(
     null
   );
-  // 周辺のAI探索(spot_admin/admin専用)。使えるかはサーバーの設定(CHIEZO_BASE_URL)と
-  // 種別の設定(ai_discovery_enabled)で決まるので、ロールが分かってから問い合わせ、
-  // 使えないならメニューに出さない
-  const [discoveryEnabled, setDiscoveryEnabled] = useState(false);
-  // 検索モーダルを開いている中心座標(nullなら閉じている)
-  const [discoverySearchAt, setDiscoverySearchAt] = useState<{ lat: number; lng: number } | null>(
-    null
-  );
-  // 探索の結果。地図に番号つきの印で描き、右側のパネルで選ぶ。**保存しない**ので、
-  // 「終了」で消える。「もう一度探す」は同じ一覧に足す(1回の上限を超えて集めるため)
-  const [discoveryRows, setDiscoveryRows] = useState<DiscoveryRow[]>([]);
-  const [discoveryPanelOpen, setDiscoveryPanelOpen] = useState(false);
-  // 地図のクリックハンドラは1度しか束縛されないので、いまの状態はrefから読む
-  /**
-   * パネルが開いているか。**stateと同時に手で立てる** —— 反映を`useEffect`だけに任せると、
-   * 「結果を渡す → 自分を閉じる」を続けて呼ぶ探し方の画面から見たとき、まだ古い値のまま
-   * になる(コミット後にしか走らないため)。地図のクリックハンドラのように一度しか
-   * 束縛されない場所からも読む
-   */
-  const discoveryPanelOpenRef = useRef(false);
-  useEffect(() => {
-    discoveryPanelOpenRef.current = discoveryPanelOpen;
-  }, [discoveryPanelOpen]);
-  const [discoveryFocusedNo, setDiscoveryFocusedNo] = useState<number | null>(null);
-  const [discoveryStatus, setDiscoveryStatus] = useState<SpotStatus>("published");
-  /** 追加する全件に足すカテゴリ(空なら足さない) */
-  const [discoveryCategory, setDiscoveryCategory] = useState("");
-  /**
-   * パネルの実寸。**寄せ先を「パネルに隠れていない側の中心」にする**ために測る
-   * (`focusDiscoveryRow`)。パネルの置き方は画面幅で変わる(下の帯 / 右の帯)ので、
-   * こちら側で同じ条件を書き写すと片方を直したときにずれる
-   */
-  const discoveryPanelRef = useRef<HTMLDivElement | null>(null);
-  const [discoveryFallbackRegion, setDiscoveryFallbackRegion] = useState("");
-  const [discoveryAdding, setDiscoveryAdding] = useState(false);
-  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
-  // 「もう一度探す」の初期値(前回の検索語・半径・件数)
-  const [discoveryLastParams, setDiscoveryLastParams] = useState<{
-    query: string;
-    radius: number;
-    limit: number;
-    aiAssist?: boolean;
-  } | null>(null);
-  // 直近のAIとのやり取り(投げた本文と返ってきた本文)。画面から見られるようにする
-  const [discoveryExchange, setDiscoveryExchange] = useState<{
-    exchange: DiscoveryExchange;
-    backend: string | null;
-    model: string | null;
-  } | null>(null);
-  const [showDiscoveryExchange, setShowDiscoveryExchange] = useState(false);
-  // 「位置を直す」を押した行(押している間はボタンを止める)
-  const [discoveryRelocatingNo, setDiscoveryRelocatingNo] = useState<number | null>(null);
-  /**
-   * AIへの問い合わせが走っているか。**地図データの結果を出した後ろで動く**ので、
-   * パネルに出さないと「もう終わったのか、まだ来るのか」が分からない
-   */
-  const [discoveryAiPending, setDiscoveryAiPending] = useState(false);
-
-  /**
-   * 直近の探索の中心。「位置を直す」で距離を測り直すのに使う。
-   * **探し始めるときに覚える** —— 結果を受け取る側(`appendDiscoveryResult`)は
-   * 依存を持たないコールバックなので、そこで状態を読むと初回の値を掴む
-   */
-  const discoverySearchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
-  /**
-   * 探す範囲の円の半径を、探し方の画面(`AiSpotDiscoverySearchModal`)から受け取る。
-   *
-   * **同じ半径なら state をそのまま返し、関数の同一性も固定する。** 毎回新しい
-   * オブジェクトを作って渡すと、「円のstateが変わる → この画面が描き直される →
-   * 渡している関数の同一性が変わる → 向こうの`useEffect`(依存に関数が入っている)が
-   * また知らせてくる」が延々と回り、Reactが`Maximum update depth exceeded`で
-   * 描画を打ち切る。**打ち切られると円が出ないだけでなく、探した結果のパネルも
-   * 更新されないので「何も見つからなかった」ように見える**(実測でそうなった)。
-   */
-  const handleDiscoveryRadiusChange = useCallback((radius: number) => {
-    setDiscoveryRange((prev) => (prev && prev.radius !== radius ? { ...prev, radius } : prev));
-  }, []);
-
-  const openDiscoverySearch = useCallback((center: { lat: number; lng: number }) => {
-    discoverySearchCenterRef.current = center;
-    setDiscoverySearchAt(center);
-    // 円は探し方を決めている間から出す(半径は探索の画面が知らせてくる)
-    setDiscoveryRange((prev) => ({ ...center, radius: prev?.radius ?? DEFAULT_DISCOVERY_RADIUS }));
-  }, []);
-  /**
-   * 探す範囲の円(中心と半径)。**探し方を選んでいる間から結果を見終わるまで出す**。
-   * 半径は探索の画面から知らせてもらう(選び直すたびに円が変わる)
-   */
-  const [discoveryRange, setDiscoveryRange] = useState<{
-    lat: number;
-    lng: number;
-    radius: number;
-  } | null>(null);
   const [pendingSpots, setPendingSpots] = useState<
     { id: string; lat: number; lng: number; name: string; status: string }[]
   >([]);
@@ -2654,528 +2392,7 @@ export default function MapView({
     api.auth.me().then(({ data }) => setRole(data?.role ?? null));
   }, []);
 
-  useEffect(() => {
-    if (!role || !SPOT_ADMIN_ROLES.includes(role)) {
-      setDiscoveryEnabled(false);
-      return;
-    }
-    let cancelled = false;
-    api.spots.discoverOptions(spotTypeKey).then(({ data }) => {
-      if (!cancelled) setDiscoveryEnabled(!!data?.enabled);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [role, spotTypeKey]);
 
-  // 探索の結果を地図に描く(番号つきの紫の印。チェックを外したものは薄く、
-  // 登録済みは灰色)。押すとパネルの行が目立つ。パネルの行を押したときの
-  // 寄せは focusDiscoveryRow の側。
-  // **地図レイヤーへ流し込むだけ**にしてある —— 地図データ側は件数の上限が無く、
-  // 半径5kmだと36,000件になりうるので、1件1要素のDOMマーカーでは地図が固まる
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const source = map.getSource(DISCOVERY_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
-    if (!source) return;
-    source.setData({
-      type: "FeatureCollection",
-      features: discoveryPanelOpen
-        ? discoveryRows.map((row) => ({
-            type: "Feature" as const,
-            properties: {
-              no: String(row.no),
-              color: row.candidate.existing
-                ? DISCOVERY_EXISTING_COLOR
-                : row.source === "ai"
-                  ? DISCOVERY_AI_COLOR
-                  : row.source === "collect"
-                    ? DISCOVERY_COLLECT_COLOR
-                    : DISCOVERY_MAP_COLOR,
-              opacity: row.checked && !row.candidate.existing ? 1 : 0.45,
-              focused: row.no === discoveryFocusedNo,
-            },
-            geometry: {
-              type: "Point" as const,
-              coordinates: [row.candidate.lng, row.candidate.lat],
-            },
-          }))
-        : [],
-    });
-  }, [discoveryRows, discoveryPanelOpen, discoveryFocusedNo]);
-
-  // 探す範囲の薄い青円。**探し方を選んでいる間から出す**(半径を選び直すと即座に
-  // 変わるので、どこまで探すのかを決める手掛かりになる)。結果を見ている間も出したまま
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const source = map.getSource(DISCOVERY_RANGE_SOURCE_ID) as
-      | maplibregl.GeoJSONSource
-      | undefined;
-    if (!source) return;
-    source.setData({
-      type: "FeatureCollection",
-      features: discoveryRange
-        ? [circlePolygon({ lat: discoveryRange.lat, lng: discoveryRange.lng }, discoveryRange.radius)]
-        : [],
-    });
-  }, [discoveryRange]);
-
-  // 探索の結果を一覧に足す。同じ名前(正規化して比較)の候補は二度入れない
-  // (「もう一度探す」で同じ店が返ってくるため)
-  const appendDiscoveryResult = useCallback(
-    (
-      result: DiscoveryResult,
-      params: {
-        query: string;
-        radius: number;
-        limit: number;
-        source: DiscoverySource;
-        aiAssist?: boolean;
-      }
-    ) => {
-      setDiscoveryRows((prev) => {
-        const known = new Set(prev.map((r) => normalizeSpotName(r.candidate.name)));
-        // **通し番号は`prev`から決める(カウンタを持たない)。**
-        // かつては`useRef`を`++`していたが、**それは更新関数の中の副作用**で、
-        // StrictModeが更新関数を2回呼ぶ開発時には番号が2倍消費されていた ——
-        // 1回目で1〜Nを配って捨てられ、残る2回目がN+1から始まるので、
-        // **1件目の番号が件数ぶんずれる**(地図データが数千件返すようになって表面化した)。
-        // max+1なら何度呼ばれても同じ結果になる
-        const start = prev.reduce((max, r) => Math.max(max, r.no), 0) + 1;
-        const added: DiscoveryRow[] = [];
-        for (const c of result.candidates) {
-          const key = normalizeSpotName(c.name);
-          if (known.has(key)) continue;
-          known.add(key);
-          added.push({
-            no: start + added.length,
-            candidate: c,
-            // 地図データの候補は出どころが確かなので最初から選んでおく。
-            // **AIの候補は「地図データで実在を確かめられたもの」だけ**。
-            // かつては参照URLの有無で決めていたが、URLはAIが書いた文字列でしかなく
-            // 確かめる相手がいない。地図に在るかどうかのほうが強い根拠で、しかも
-            // `quick`のAIはURLをまず返さないので、判定として働いていなかった。
-            //
-            // **AIに精査させるときは、地図データを選んでおかない** ——
-            // 選ぶのはAIの仕事になる(`applyDiscoveryReviews`)。半径の中の全件を
-            // 選んだままにすると、精査した数件と精査していない千件が混ざったまま
-            // 「1,792件を追加」という選択になってしまう
-            checked:
-              !c.existing &&
-              (result.source === "map" ? !params.aiAssist : c.location_verified),
-            rank: c.rank ?? "",
-            searchedAt: result.searched_at,
-            source: result.source,
-            radius: params.radius,
-          });
-        }
-        return [...prev, ...added];
-      });
-      // 地図データで探したときはやり取りが無いので、前回のAIのぶんを消す
-      setDiscoveryExchange(
-        result.exchange
-          ? { exchange: result.exchange, backend: result.backend, model: result.model }
-          : null
-      );
-      setDiscoveryFallbackRegion((prev) => prev || result.center_region || "");
-      // **「もう一度探す」の初期値。** AIの後段からも呼ばれるが、そちらは
-      // `aiAssist`を持たない —— 上書きすると、次に開いたときチェックが外れている
-      setDiscoveryLastParams((prev) => ({
-        query: params.query,
-        radius: params.radius,
-        limit: params.limit,
-        aiAssist: params.aiAssist ?? prev?.aiAssist,
-      }));
-      setDiscoveryPanelOpen(true);
-      discoveryPanelOpenRef.current = true;
-      setDiscoverySearchAt(null);
-      setDiscoveryError(null);
-    },
-    []
-  );
-
-  /**
-   * AIの精査を一覧に当てる。**渡した候補ぶんの判定が揃って返る**ので、
-   * 選ばれなかった行はチェックを外す —— 地図データは「在るもの」を全部並べるだけで、
-   * 探しているものに合うかは見ていない。**行は消さない**(AIも見落とすので、
-   * 印を付けて薄く出すに留め、選び直せるようにする)。
-   *
-   * 突き合わせは**正規化した名前**で行う。渡したのは今回の地図データのぶんだけだが、
-   * 一覧には前回までの行も混ざっているため、番号では当てられない。
-   */
-  const applyDiscoveryReviews = useCallback((reviews: DiscoveryReview[]) => {
-    const byName = new Map(reviews.map((r) => [normalizeSpotName(r.name), r] as const));
-    setDiscoveryRows((prev) =>
-      prev.map((row) => {
-        if (row.source !== "map") return row;
-        const review = byName.get(normalizeSpotName(row.candidate.name));
-        if (!review) return row;
-        return {
-          ...row,
-          checked: review.picked && !row.candidate.existing,
-          reviewed: review.picked ? "picked" : "dropped",
-          // ランクは行ごとに直せるので、AIの値は初期値として入れるだけ
-          rank: review.rank ?? row.rank,
-          candidate: {
-            ...row.candidate,
-            // **AIの値で上書きするのは言葉だけ**(ジャンル・要約・ランク)。
-            // 名前と座標は辞典のほうが正確なので触らない
-            genre: review.genre ?? row.candidate.genre,
-            summary: review.summary ?? row.candidate.summary,
-            rank: review.rank ?? row.candidate.rank,
-            ai_reviewed: true,
-          },
-        };
-      })
-    );
-  }, []);
-
-  /**
-   * パネルの行を押したときに、その候補へ地図を寄せる(訪問予定リストの作成パネルと同じ流儀)。
-   *
-   * **寄せ先は地図の中心ではなく、パネルに隠れていない側の中心**。パネルは画面の下半分
-   * (狭い画面)か右側を覆っているので、素直に中心へ運ぶと**押した候補がパネルの下に入って
-   * 見えない**。`offset`(`visibleCenterOffset`)で見えている矩形の中心へ置く。
-   *
-   * **`flyTo`ではなく`easeTo`を使う** —— `flyTo`は「視差効果を減らす」設定の端末で
-   * `offset`を捨てる(`visibleCenterOffset`の注記)。
-   *
-   * **`padding`は使わない** —— あちらは地図の transform に残り続けるので、以後の
-   * `fitBounds`(訪問順の経路や現在地への移動)まで巻き込んでずれる。
-   */
-  const focusDiscoveryRow = useCallback(
-    (no: number) => {
-      setDiscoveryFocusedNo(no);
-      const map = mapRef.current;
-      const row = discoveryRows.find((r) => r.no === no);
-      if (!map || !row) return;
-      map.easeTo({
-        center: [row.candidate.lng, row.candidate.lat],
-        zoom: Math.max(map.getZoom(), 15),
-        offset: visibleCenterOffset(
-          containerRef.current?.getBoundingClientRect(),
-          discoveryPanelRef.current?.getBoundingClientRect()
-        ),
-        duration: 600,
-      });
-    },
-    [discoveryRows]
-  );
-
-  /**
-   * パネルが開いた(または探し直しで中心が変わった)ら、**探した中心を
-   * 「パネルに隠れていない側」へ寄せる**。
-   *
-   * 右クリックした点はそのとき地図の真ん中とは限らないうえ、パネルは画面の半分
-   * (狭い画面なら下半分)を覆う。**開いた直後は探した中心も候補の半分もパネルの下**
-   * という状態になっていた —— 行を押したときだけ直しても、最初に見る画面が合っていない。
-   * 寄せ方は`focusDiscoveryRow`と同じで、**縮尺は動かさない**(探した範囲の見え方を
-   * 勝手に変えない)。
-   */
-  useEffect(() => {
-    if (!discoveryPanelOpen) return;
-    const map = mapRef.current;
-    const center = discoverySearchCenterRef.current;
-    if (!map || !center) return;
-    map.easeTo({
-      center: [center.lng, center.lat],
-      offset: visibleCenterOffset(
-        containerRef.current?.getBoundingClientRect(),
-        discoveryPanelRef.current?.getBoundingClientRect()
-      ),
-      duration: 400,
-    });
-  }, [discoveryPanelOpen, discoveryRange?.lat, discoveryRange?.lng]);
-
-  /**
-   * その候補の位置を住所から引き直す。**押した1件だけ**を地名検索(Nominatim)に投げる
-   * —— 候補すべてに掛けると1件1秒の間隔制限がそのまま待ちになるが、気づいた行だけなら
-   * 1秒で済む。当たらなければ座標はそのままで、そう伝える
-   */
-  const relocateDiscoveryRow = useCallback(
-    async (no: number) => {
-      const row = discoveryRows.find((r) => r.no === no);
-      const address = row?.candidate.address;
-      if (!row || !address) return;
-      setDiscoveryRelocatingNo(no);
-      setDiscoveryError(null);
-      // 店名を添えると「その名前の別の場所」に当たることがあるので、住所だけで引く
-      const { data } = await api.geocode.search(address, regionScope ?? DEFAULT_REGION_SCOPE);
-      setDiscoveryRelocatingNo(null);
-      const hit = data?.[0];
-      if (!hit) {
-        setDiscoveryError(`「${row.candidate.name}」の住所から位置を取れませんでした。`);
-        return;
-      }
-      setDiscoveryRows((prev) =>
-        prev.map((r) =>
-          r.no === no
-            ? {
-                ...r,
-                relocated: true,
-                candidate: {
-                  ...r.candidate,
-                  lat: hit.lat,
-                  lng: hit.lng,
-                  location_verified: true,
-                  distance_m: Math.round(
-                    distanceMeters(
-                      { lat: hit.lat, lng: hit.lng },
-                      // 中心は探索時の座標。無ければ元の候補の位置から測り直さない
-                      discoverySearchCenterRef.current ?? { lat: hit.lat, lng: hit.lng }
-                    )
-                  ),
-                },
-              }
-            : r
-        )
-      );
-      // 直した位置がすぐ見えるように、その行へ寄せる
-      setDiscoveryFocusedNo(no);
-      // 直した先もパネルに隠れていない側へ寄せる(行を押したときと同じ扱い)
-      mapRef.current?.easeTo({
-        center: [hit.lng, hit.lat],
-        zoom: Math.max(mapRef.current.getZoom(), 16),
-        offset: visibleCenterOffset(
-          containerRef.current?.getBoundingClientRect(),
-          discoveryPanelRef.current?.getBoundingClientRect()
-        ),
-        duration: 600,
-      });
-    },
-    [discoveryRows, regionScope]
-  );
-
-  /**
-   * 地図データを出したあとで、AIにも聞いて同じ一覧に足す。
-   *
-   * **探索の画面ではなくここで走らせる。** あちらは結果を出した時点で閉じるので、
-   * 中で待つと結果を見られないまま数十秒止まる。こちらなら地図とパネルを見ながら待てる
-   */
-  const runAiFollowUp = useCallback(
-    async (req: {
-      query: string;
-      radius: number;
-      limit: number;
-      depth: DiscoveryDepth;
-      choice: DiscoveryChoice;
-      known: DiscoveryReviewTarget[];
-    }) => {
-      const center = discoverySearchCenterRef.current;
-      if (!center) return;
-      setDiscoveryAiPending(true);
-      setDiscoveryError(null);
-      const { data, error } = await api.spots.discover(spotTypeKey, {
-        lat: center.lat,
-        lng: center.lng,
-        radius: req.radius,
-        query: req.query,
-        limit: req.limit,
-        depth: req.depth,
-        known: req.known,
-        ...req.choice,
-      });
-      setDiscoveryAiPending(false);
-      if (error || !data) {
-        setDiscoveryError(error?.message ?? "AIへの問い合わせに失敗しました。");
-        return;
-      }
-      // **精査の結果は既にある行に当てる**(足したぶんより先に)。
-      // 足すぶんは同じ一覧に並ぶので、順序を逆にすると足した行まで
-      // 「AIが見なかった」ように見える
-      if (data.reviews) applyDiscoveryReviews(data.reviews);
-      appendDiscoveryResult(data, {
-        query: req.query,
-        radius: req.radius,
-        limit: req.limit,
-        source: "ai",
-      });
-    },
-    [appendDiscoveryResult, applyDiscoveryReviews, spotTypeKey]
-  );
-
-  /**
-   * 溜まった収集からスポットの候補を取り出し、探索のパネルに並べる。
-   *
-   * **周辺を探すと同じ器に載せる。** 出てくるのは同じ`DiscoveryResult`で、
-   * 地図の印・行ごとのシリーズ・登録済みの印・まとめて追加が全部そのまま使える ——
-   * 出どころが違うだけのものに、別の画面を作る理由が無い。
-   *
-   * **中心が無いので探す範囲の円は出さない**(集めたものは全国に散らばる)。
-   * 代わりに、取り出したあと候補全体が入るよう地図を寄せる。
-   */
-  const [collectFetching, setCollectFetching] = useState(false);
-  /** 円の中がどこまで収集済みか(取り出したときだけ入る) */
-  const [collectCoverage, setCollectCoverage] = useState<CollectCoverage | null>(null);
-  const [collectStarting, setCollectStarting] = useState(false);
-  const openCollected = useCallback(
-    async (center: { lat: number; lng: number }, radius: number) => {
-      setCollectFetching(true);
-      setCollectCoverage(null);
-      const { data, error } = await api.spotCollect.candidates(spotTypeKey, {
-        ...center,
-        radius,
-      });
-      setCollectFetching(false);
-      if (error || !data) {
-        setDiscoveryError(error?.message ?? "集めたものを取り出せませんでした。");
-        setDiscoveryPanelOpen(true);
-        discoveryPanelOpenRef.current = true;
-        return;
-      }
-      // **探した範囲の円はそのまま出す。** 「どこまで見ているか」がこの機能の要で、
-      // 収集済みかどうかもその円について答えている
-      discoverySearchCenterRef.current = center;
-      setDiscoveryRange({ ...center, radius });
-      setCollectCoverage(data.coverage);
-      setDiscoveryRows([]);
-      appendDiscoveryResult(data, {
-        query: "",
-        radius,
-        limit: 0,
-        source: "collect",
-      });
-      const points = data.candidates.filter((c) => c.location_verified);
-      if (points.length > 0) {
-        fitMapToSpots(points.map((c) => ({ lat: c.lat, lng: c.lng }) as Spot));
-      }
-    },
-    [appendDiscoveryResult, fitMapToSpots, spotTypeKey]
-  );
-
-  /**
-   * まだ見ていない区画を、予定を待たずに集めさせる。
-   *
-   * **1つずつしか頼めない**(知識サーバーは同時に1本しか走らせない)ので、
-   * 見ていない区画のうち先頭を渡す。残りは次の回か、もう一度押したときに進む。
-   *
-   * **割り込みで頼む**(`partition`)ので、定時の巡回の予定も区画の巡回記録も
-   * 動かない —— 地図で見ている範囲を先に見させるたびに一周が伸びたり、
-   * 見ていない区画に印が付いたりしない。
-   */
-  const startCollectingMissing = useCallback(async () => {
-    const partition = collectCoverage?.pending[0];
-    if (!partition) return;
-    setCollectStarting(true);
-    setDiscoveryError(null);
-    const { error } = await api.spotCollect.run(spotTypeKey, { partition });
-    setCollectStarting(false);
-    setDiscoveryError(
-      error
-        ? `集められませんでした: ${error.message}`
-        : "この範囲を集め始めました。集まるまで数分かかります。"
-    );
-  }, [collectCoverage, spotTypeKey]);
-
-  const closeDiscovery = useCallback(() => {
-    setDiscoveryPanelOpen(false);
-    discoveryPanelOpenRef.current = false;
-    setDiscoveryRows([]);
-    setDiscoveryCategory("");
-    setCollectCoverage(null);
-    setDiscoveryFocusedNo(null);
-    setDiscoveryError(null);
-    setDiscoveryExchange(null);
-    setShowDiscoveryExchange(false);
-    setDiscoveryRange(null);
-    setDiscoveryAiPending(false);
-  }, []);
-
-  // チェック済みの候補をまとめて登録する。登録できた行は一覧から外し、
-  // 残り(外したもの・登録済み)はそのまま残す
-  const addDiscoveryRows = useCallback(async () => {
-    const targets = discoveryRows.filter((r) => r.checked && !r.candidate.existing);
-    if (targets.length === 0) return;
-    // **座標の無い候補は入れない。** 集めたものは地図辞典で引き当てられないことがあり、
-    // そのまま入れると赤道上(0,0)にスポットが立つ。「位置を直す」で住所から引ける
-    if (targets.some((r) => r.candidate.lat === 0 && r.candidate.lng === 0)) {
-      setDiscoveryError(
-        "座標の無い候補が選ばれています。「位置を直す」で住所から取得するか、選択を外してください。"
-      );
-      return;
-    }
-    const regionOf = (row: DiscoveryRow) =>
-      row.candidate.region ?? discoveryFallbackRegion.trim();
-    if (targets.some((r) => !regionOf(r))) {
-      setDiscoveryError(
-        `${regionFieldLabel(regionScope ?? DEFAULT_REGION_SCOPE)}を選んでください。`
-      );
-      return;
-    }
-    setDiscoveryAdding(true);
-    setDiscoveryError(null);
-    // **候補のジャンルはシリーズに入れる**(ピンの中身と色を決める軸)。カテゴリは
-    // 一括の欄で付ける「まとめの札」だけで、候補ごとの分類はシリーズが受け持つ
-    const bulkCategory = discoveryCategory.trim();
-    const records = targets.map((row) => ({
-      name: row.candidate.name,
-      name_kana: row.candidate.name_kana,
-      lat: row.candidate.lat,
-      lng: row.candidate.lng,
-      region: regionOf(row),
-      rank: rankEnabled ? row.rank || null : null,
-      series: discoveryRowSeries(row).trim() || null,
-      categories: bulkCategory ? [bulkCategory] : [],
-      description: buildDiscoveredDescription(row.candidate, row.searchedAt, row.source),
-      status: discoveryStatus,
-    }));
-    // **使った値はその種別の一覧にも足す。** 地図データのジャンルがそのままシリーズに
-    // なるので、足しておかないと**ピンが全部同じ見た目になり、何を追加したのか地図から
-    // 読めない**(一覧に既定値を置いていないぶん、ここで育てる)
-    const { data, error } = await api.spots.createMany(records, spotTypeKey, {
-      registerSeries: true,
-      registerCategories: true,
-    });
-    setDiscoveryAdding(false);
-    if (error || !data) {
-      setDiscoveryError("追加に失敗しました: " + (error?.message ?? "unknown error"));
-      return;
-    }
-    for (const spot of data) {
-      if (spot.status === "published") {
-        // 公開で追加したものは、次の明示ダウンロードを待たずにキャッシュへ載せる
-        spotCache.applySpotChange(spot);
-      } else {
-        setPendingSpots((prev) => [
-          ...prev,
-          { id: spot.id, lat: spot.lat, lng: spot.lng, name: spot.name, status: spot.status },
-        ]);
-      }
-    }
-    const addedNos = new Set(targets.map((r) => r.no));
-    setDiscoveryRows((prev) => prev.filter((r) => !addedNos.has(r.no)));
-    setDiscoveryFocusedNo(null);
-  }, [
-    discoveryRows,
-    discoveryCategory,
-    discoveryFallbackRegion,
-    discoveryStatus,
-    seriesStyles,
-    rankEnabled,
-    regionScope,
-    spotTypeKey,
-    spotCache,
-  ]);
-
-  /** カテゴリ欄の候補。種別の設定を先に、既存スポットで使われている値を後ろに足す */
-  const discoveryCategoryOptions = useMemo(
-    () => distinctNonEmpty([...categories, ...spots.flatMap((s) => s.categories)]),
-    [categories, spots]
-  );
-
-  /**
-   * 行ごとのシリーズ欄の候補。**種別の設定を先に、いま並んでいる候補のジャンルを後ろに**
-   * 足す(設定に無いジャンルでもそのまま入力できるので、並べるだけ)
-   */
-  const discoverySeriesOptions = useMemo(
-    () =>
-      distinctNonEmpty([
-        ...seriesStyles.map((s) => s.series),
-        ...discoveryRows.map(discoveryRowSeries),
-      ]),
-    [seriesStyles, discoveryRows]
-  );
 
   // 地図の初期化
   useEffect(() => {
@@ -3411,25 +2628,6 @@ export default function MapView({
     };
     map.on("contextmenu", handleContextMenu);
 
-    // **周辺を探している間は左クリックでもメニューを出す。**
-    // 探した後に「やっぱり隣の区画も見たい」が続けて起きるので、そのたびに
-    // 右クリック(スマホなら長押し)を強いるのは重い。メニューの中身は
-    // 「もう一度探す」だけにする(下のJSX側で出し分ける)。
-    // **ピン・候補の印・線を押したときは出さない** —— そちらの操作が先
-    const handleDiscoveryClick = (e: maplibregl.MapMouseEvent) => {
-      if (!discoveryPanelOpenRef.current) return;
-      if (
-        hasFeatureAt(map, e.point, [
-          DISCOVERY_CIRCLE_LAYER_ID,
-          ...MAIN_PIN_LAYERS,
-          ...overlayPinLayerIds(overlayKeysRef.current),
-        ])
-      )
-        return;
-      setContextMenu({ x: e.point.x, y: e.point.y, lat: e.lngLat.lat, lng: e.lngLat.lng });
-    };
-    map.on("click", handleDiscoveryClick);
-
     // 長押し(モバイル)でも同じメニューを出す
     let longPressTimer: number | null = null;
     let touchStart: { x: number; y: number } | null = null;
@@ -3477,7 +2675,6 @@ export default function MapView({
       saveView();
       container.removeEventListener("wheel", handleWheel);
       map.off("contextmenu", handleContextMenu);
-      map.off("click", handleDiscoveryClick);
       map.off("moveend", saveView);
       geolocate.off("trackuserlocationstart", handleTrackingStart);
       geolocate.off("trackuserlocationend", handleTrackingEnd);
@@ -3814,9 +3011,7 @@ export default function MapView({
     );
 
     const renderSpots = async () => {
-      ensureClusterLayers(map, overlayKeysRef, handleMapSpotSelect, (no) =>
-        setDiscoveryFocusedNo(no)
-      );
+      ensureClusterLayers(map, overlayKeysRef, handleMapSpotSelect);
       showClusterLayers(map);
       // 使われるピン画像(シリーズ×訪問済み×非公開×形)を先に登録してからデータを流し込む
       // (ラベルが画像の場合は非同期で読み込むため、全件の登録完了を待つ)
@@ -5213,60 +4408,15 @@ export default function MapView({
             className="absolute z-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            {/* **探している間は「もう一度探す」だけにする。** 候補を見比べている
-                最中に押したいのはこれで、スポットの追加はパネルの「追加」で行う */}
-            {discoveryPanelOpen ? (
-              <button
-                onClick={() => {
-                  openDiscoverySearch({ lat: contextMenu.lat, lng: contextMenu.lng });
-                  setContextMenu(null);
-                }}
-                className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
-              >
-                ここでもう一度探す
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={() => {
-                    setAddSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
-                    setContextMenu(null);
-                  }}
-                  className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
-                >
-                  ここにスポットを追加
-                </button>
-                {/* 周辺のAI探索(管理者だけ。サーバーに接続先が設定されているときだけ出す) */}
-                {discoveryEnabled && (
-                  <button
-                    onClick={() => {
-                      openDiscoverySearch({ lat: contextMenu.lat, lng: contextMenu.lng });
-                      setContextMenu(null);
-                    }}
-                    className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
-                  >
-                    この周辺を探す
-                  </button>
-                )}
-                {/* **依頼して溜めておいたものを取り出す。** その場では探さないので
-                    「この周辺」ではない —— 集めたものは全国に散らばる */}
-                {discoveryEnabled && (
-                  <button
-                    onClick={() => {
-                      openCollected(
-                        { lat: contextMenu.lat, lng: contextMenu.lng },
-                        COLLECT_CIRCLE_RADIUS
-                      );
-                      setContextMenu(null);
-                    }}
-                    disabled={collectFetching}
-                    className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    {collectFetching ? "取り出し中…" : "この周辺の集めた情報"}
-                  </button>
-                )}
-              </>
-            )}
+            <button
+              onClick={() => {
+                setAddSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
+                setContextMenu(null);
+              }}
+              className="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-gray-50"
+            >
+              ここにスポットを追加
+            </button>
           </div>
         </>
       )}
@@ -5303,95 +4453,6 @@ export default function MapView({
         />
       )}
 
-      {/* 周辺のAI探索(右クリック/長押しメニューの「この周辺をAIで探す」)。
-          検索モーダルで条件を決め、結果は地図の印と右側のパネルで選ぶ */}
-      {discoverySearchAt && (
-        <AiSpotDiscoverySearchModal
-          lat={discoverySearchAt.lat}
-          lng={discoverySearchAt.lng}
-          spotTypeKey={spotTypeKey}
-          initial={discoveryLastParams ?? undefined}
-          onClose={() => {
-            setDiscoverySearchAt(null);
-            // 探さずに閉じたら円も消す(結果を見ている間は出したまま)。
-            // **stateではなくrefを見る** —— 探し方の画面は結果を渡してから自分を閉じるので、
-            // この関数が読む`discoveryPanelOpen`は「パネルを開く前」の値のまま。
-            // それで判定すると**探した直後に必ず円が消えていた**
-            if (!discoveryPanelOpenRef.current) setDiscoveryRange(null);
-          }}
-          onResult={appendDiscoveryResult}
-          onAiFollowUp={runAiFollowUp}
-          onRadiusChange={handleDiscoveryRadiusChange}
-        />
-      )}
-      {discoveryPanelOpen && (
-        <AiSpotDiscoveryPanel
-          ref={discoveryPanelRef}
-          rows={discoveryRows}
-          aiPending={discoveryAiPending}
-          role={role}
-          regionScope={regionScope ?? DEFAULT_REGION_SCOPE}
-          rankEnabled={rankEnabled}
-          seriesOptions={discoverySeriesOptions}
-          status={discoveryStatus}
-          category={discoveryCategory}
-          categoryOptions={discoveryCategoryOptions}
-          fallbackRegion={discoveryFallbackRegion}
-          focusedNo={discoveryFocusedNo}
-          adding={discoveryAdding}
-          error={discoveryError}
-          onStatusChange={setDiscoveryStatus}
-          onCategoryChange={setDiscoveryCategory}
-          onFallbackRegionChange={setDiscoveryFallbackRegion}
-          onToggle={(no) =>
-            setDiscoveryRows((prev) =>
-              prev.map((r) => (r.no === no ? { ...r, checked: !r.checked } : r))
-            )
-          }
-          onToggleAll={(checked) =>
-            setDiscoveryRows((prev) =>
-              // 登録済みの行は追加できないので、まとめて選んでも外したままにする
-              prev.map((r) => ({ ...r, checked: checked && !r.candidate.existing }))
-            )
-          }
-          onRankChange={(no, rank) =>
-            setDiscoveryRows((prev) => prev.map((r) => (r.no === no ? { ...r, rank } : r)))
-          }
-          onRowSeriesChange={(no, series) =>
-            setDiscoveryRows((prev) =>
-              prev.map((r) => (r.no === no ? { ...r, series } : r))
-            )
-          }
-          onRemove={(no) => {
-            setDiscoveryRows((prev) => prev.filter((r) => r.no !== no));
-            setDiscoveryFocusedNo((prev) => (prev === no ? null : prev));
-          }}
-          onFocus={focusDiscoveryRow}
-          onRelocate={relocateDiscoveryRow}
-          relocatingNo={discoveryRelocatingNo}
-          onShowExchange={
-            discoveryExchange ? () => setShowDiscoveryExchange(true) : undefined
-          }
-          coverage={collectCoverage}
-          onCollectMissing={startCollectingMissing}
-          collectStarting={collectStarting}
-          onSearchAgain={() => {
-            // 探し直しはいま見えている場所から(地図を動かして別の場所を探せる)
-            const center = mapRef.current?.getCenter();
-            if (center) openDiscoverySearch({ lat: center.lat, lng: center.lng });
-          }}
-          onAdd={addDiscoveryRows}
-          onClose={closeDiscovery}
-        />
-      )}
-      {showDiscoveryExchange && discoveryExchange && (
-        <AiExchangeDialog
-          exchange={discoveryExchange.exchange}
-          backend={discoveryExchange.backend}
-          model={discoveryExchange.model}
-          onClose={() => setShowDiscoveryExchange(false)}
-        />
-      )}
 
       {/* ルート・経路の詳細モーダル(ルート/訪問順の経路/訪問予定リストの経路の線・矢印の
           タップで開く。重ね表示のルートも共用) */}
