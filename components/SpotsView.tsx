@@ -37,6 +37,7 @@ import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getSeriesOrder } from "@/lib/seriesStyle";
 import { rankOrder } from "@/lib/rank";
 import SeriesFilter from "@/components/SeriesFilter";
+import TabBar from "@/components/TabBar";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useRankEnabled } from "@/lib/useRankEnabled";
 import { useCategories } from "@/lib/useCategories";
@@ -209,6 +210,11 @@ export default function SpotsView({
     [spotCache.publicSpots, privateSpots]
   );
   const [visits, setVisits] = useState<Visit[]>([]);
+  /**
+   * 狭い画面での柱の切り替え(広い画面では2カラムで両方出す)。既定は「自分の記録」
+   * —— 上から読む並びと同じにして、タブが無かったときと同じものが最初に出る
+   */
+  const [spotsTab, setSpotsTab] = useState<"mine" | "browse">("mine");
   const [visitPlans, setVisitPlans] = useState<VisitPlan[]>([]);
   const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
   // アーカイブした訪問予定リスト(新しくしまった順)。**件数を出すために常に読む**
@@ -541,12 +547,36 @@ export default function SpotsView({
     return (
       <>
       <main className="mx-auto max-w-4xl p-4">
+        <h1 className="mb-4 text-lg font-bold">スポット</h1>
+
+        {/* 狭い画面では2つの柱をタブで切り替える(管理画面と同じ考え方)。
+            縦に積むと、自分の記録を全部スクロールしないと「探す」に届かない。
+            「探す」は探し方ごとに分ける —— 右の柱の中にもう1段の切り替えを置くと、
+            タブで柱を選んでから同じ行の中でもう一度選ぶことになる */}
+        <TabBar
+          className="sm:hidden"
+          value={spotsTab === "mine" ? "mine" : browseMode}
+          onChange={(key) => {
+            if (key === "mine") {
+              setSpotsTab("mine");
+              return;
+            }
+            setSpotsTab("browse");
+            setBrowseMode(key);
+          }}
+          tabs={[
+            { key: "mine", label: "自分の記録" },
+            { key: "series", label: "探す: シリーズ" },
+            { key: "region", label: `探す: ${regionLabel}` },
+          ]}
+        />
+
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-          <section>
+          <section className={spotsTab === "mine" ? "" : "hidden sm:block"}>
             {/* 訪問予定(個別のブックマーク)。0件のときは出さない */}
             {plannedSpots.length > 0 && (
               <div className="mb-6">
-                <h1 className="mb-4 text-lg font-bold">訪問予定</h1>
+                <h2 className="mb-4 text-lg font-bold">訪問予定</h2>
                 <PagedListHeader
                   page={plannedPager.page}
                   totalPages={plannedPager.totalPages}
@@ -592,7 +622,7 @@ export default function SpotsView({
             {/* 訪問予定リスト(旅程)。見出し+追加ボタンは0件でも常に出す */}
             <div className="mb-6">
               <div className="mb-4 flex items-center justify-between gap-2">
-                <h1 className="text-lg font-bold">訪問予定リスト</h1>
+                <h2 className="text-lg font-bold">訪問予定リスト</h2>
                 <div className="flex shrink-0 items-center gap-2">
                   {/* アーカイブの入口。**1件もしまっていないうちは出さない** ——
                       押した先が空で終わるだけのボタンになるため(アーカイブ自体は
@@ -652,7 +682,7 @@ export default function SpotsView({
             </div>
             <div className="mb-6">
               <div className="mb-4 flex items-center justify-between gap-2">
-                <h1 className="text-lg font-bold">最近の訪問場所</h1>
+                <h2 className="text-lg font-bold">最近の訪問場所</h2>
               </div>
               {recentVisits.length === 0 ? (
                 <p className="text-sm text-gray-500">
@@ -715,7 +745,7 @@ export default function SpotsView({
             </div>
             {myReviews.length > 0 && (
               <div className="mb-6">
-                <h1 className="mb-4 text-lg font-bold">自分が書いた口コミ</h1>
+                <h2 className="mb-4 text-lg font-bold">自分が書いた口コミ</h2>
                 <PagedListHeader
                   page={myReviewsPager.page}
                   totalPages={myReviewsPager.totalPages}
@@ -768,7 +798,7 @@ export default function SpotsView({
             )}
             {myPrivateSpots.length > 0 && (
               <div className="mb-6">
-                <h1 className="mb-4 text-lg font-bold">自分の非公開スポット</h1>
+                <h2 className="mb-4 text-lg font-bold">自分の非公開スポット</h2>
                 <PagedListHeader
                   page={privateSpotsPager.page}
                   totalPages={privateSpotsPager.totalPages}
@@ -814,7 +844,7 @@ export default function SpotsView({
                 ここにだけ表示する。0件のときは出さない */}
             {hiddenSpots.length > 0 && (
               <div className="mb-6">
-                <h1 className="mb-1 text-lg font-bold">非表示にしたスポット</h1>
+                <h2 className="mb-1 text-lg font-bold">非表示にしたスポット</h2>
                 <p className="mb-4 text-xs text-gray-500">
                   地図・一覧に表示していないスポットです。タップして開き、「非表示を解除」で元に戻せます。
                 </p>
@@ -860,14 +890,15 @@ export default function SpotsView({
             )}
           </section>
 
-          <section>
+          <section className={spotsTab === "browse" ? "" : "hidden sm:block"}>
             <div className="mb-4 flex items-center justify-between">
-              <h1 className="text-lg font-bold">
+              <h2 className="text-lg font-bold">
                 {browseMode === "region"
                   ? `${regionLabel}から探す`
                   : "シリーズから探す"}
-              </h1>
-              <div className="flex overflow-hidden rounded-lg border border-gray-300 text-xs">
+              </h2>
+              {/* 探し方の切り替え。狭い画面ではタブが同じ役目を持つので出さない */}
+              <div className="hidden overflow-hidden rounded-lg border border-gray-300 text-xs sm:flex">
                 <button
                   type="button"
                   onClick={() => setBrowseMode("series")}
