@@ -4628,7 +4628,9 @@ export default function MapView({
             className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
           >
             <div className="flex items-center justify-between gap-2">
-              <h2 className="font-bold">絞り込み</h2>
+              {/* 節の見出しは全部同じ大きさにする —— 絞り込みは訪問日や表示に
+                  掛かっているわけではなく、並んだ節の1つでしかない */}
+              <h2 className="text-sm font-medium">絞り込み</h2>
               <div className="flex items-center gap-3">
                 {/* 見出しのリセットは絞り込み(シリーズ・カテゴリ・訪問状況)のみを
                     既定に戻す。訪問日・訪問予定リスト・重ね表示は各セクションの
@@ -4903,7 +4905,17 @@ export default function MapView({
 
             {/* 地図の見せ方の切り替え(絞り込みではない)。ダウンロードのすぐ上に置く */}
             <div className="border-t border-gray-100 pt-3">
-              <p className="mb-2 text-sm font-medium">表示</p>
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                表示
+                <HelpTip>
+                  {routes.length > 0 && "経路は巡った順の矢印です。"}
+                  クラスタ表示を無効にすると、近くのピンを「N件」の丸にまとめず1件ずつ
+                  出します(件数が多い種別では地図が重くなります)。
+                  「訪問済みも元のピンで表示」をオンにすると、訪問済みのスポットも緑+✓では
+                  なくランク・シリーズの見た目のまま表示します(重ねている種別のピンにも
+                  効きます)。
+                </HelpTip>
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {routes.length > 0 && (
                   <button
@@ -4956,14 +4968,6 @@ export default function MapView({
                   訪問済みも元のピンで表示
                 </button>
               </div>
-              <p className="mt-1 text-xs text-gray-500">
-                {routes.length > 0 && "経路は巡った順の矢印です。"}
-                クラスタ表示を無効にすると、近くのピンを「N件」の丸にまとめず1件ずつ出します
-                (件数が多い種別では地図が重くなります)。
-                「訪問済みも元のピンで表示」をオンにすると、訪問済みのスポットも緑+✓では
-                なくランク・シリーズの見た目のまま表示します(重ねている種別のピンにも
-                効きます)。
-              </p>
             </div>
 
             <div className="border-t border-gray-100 pt-3">

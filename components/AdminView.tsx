@@ -2891,7 +2891,7 @@ export default function AdminView({
                   className="ml-1 inline-block align-middle"
                   onClick={(e) => e.preventDefault()}
                 >
-                  <HelpTip anchored>
+                  <HelpTip>
                     知識サーバーに<b>依頼だけして離れ、集まった頃に取り出す</b>仕組み。
                     その場で待つ「周辺を探す」と違って時間を掛けられるぶん、
                     地図に載っていない新しい店なども拾える。
@@ -3007,7 +3007,7 @@ export default function AdminView({
                   <p className="mb-1 text-sm font-medium">
                     ① 名簿の抽出条件をAIに書かせる
                     <span className="ml-1 inline-block align-middle">
-                      <HelpTip anchored>
+                      <HelpTip>
                         最初の名簿は<b>AIではなく機械で埋める</b> ——
                         地図辞典(overture_japan・osm_japan)から名前と所在地を引くだけなので、
                         AIに書かせると存在しないものが混ざるうえ毎回違うものが返る。
@@ -3071,7 +3071,7 @@ export default function AdminView({
                   <p className="mb-1 text-sm font-medium">
                     ② 「{SWEEP_SCAN}」のプロンプトをAIに書かせる
                     <span className="ml-1 inline-block align-middle">
-                      <HelpTip anchored>
+                      <HelpTip>
                         全区画を<b>{SCAN_COVER_DAYS}日で一周</b>して、名簿に並んだものを
                         順に精査する回のプロンプト。
                         <b>{"{partition}"}</b>に今回見る範囲、<b>{"{current}"}</b>に
@@ -3136,7 +3136,7 @@ export default function AdminView({
                   <label className="mb-1 block text-sm font-medium">
                     集めさせる相手と深さ
                     <span className="ml-1 inline-block align-middle">
-                      <HelpTip anchored>
+                      <HelpTip>
                         <b>深さを上げないと浅く早く切り上げる</b> —— 指定なしの既定で
                         走らせたとき、1都道府県を3分・8件で終えた。
                         時間を掛けてよい収集なので、深いほうを選ぶ。
