@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import HelpTip from "@/components/HelpTip";
 import CopyTextButton from "@/components/CopyTextButton";
 import ExportJobsPanel from "@/components/ExportJobsPanel";
+import TabBar from "@/components/TabBar";
 import { api } from "@/lib/api-client";
 import { buildCsv, parseCsv } from "@/lib/csv";
 import { exportsEnabled } from "@/lib/features";
@@ -111,6 +112,11 @@ export default function AdminView({
   buildNumber?: string | null;
 }) {
   const router = useRouter();
+  /**
+   * 狭い画面での柱の切り替え(広い画面では使わない)。既定は「スポット」——
+   * 日常的に触るのはこちらで、ユーザー管理は用があるときだけ開く
+   */
+  const [adminTab, setAdminTab] = useState<"spots" | "users">("spots");
   const [checkingRole, setCheckingRole] = useState(true);
   const [hasPageAccess, setHasPageAccess] = useState(false);
   const [myRole, setMyRole] = useState<Role | null>(null);
@@ -1964,27 +1970,6 @@ export default function AdminView({
     loadRoutes();
   };
 
-  /**
-   * ユーザー管理の折り畳みを、**2カラム(PC)のときだけ最初から開いた状態にする**。
-   * 1カラム(スマホ)では畳んだまま —— 開いていると縦に長く居座って、
-   * 下にあるスポットの管理が遠くなるため。
-   *
-   * `open`はCSSで切り替えられないので、描画のあとにDOMへ直接立てる。
-   * **描画中に`window`を見て決めるとサーバーが返したHTMLと食い違う**
-   * (ハイドレーション不整合)ので、要素が付いたときに走るコールバックrefでやる。
-   * ここで`useEffect`にしないのは、この画面がロール判定の間`null`を返していて、
-   * マウント時点ではまだ要素が無いため。
-   *
-   * 幅はTailwindの`lg`(=1024px)と同じ値。**グリッドが2カラムに変わる境目**
-   * (`lg:grid-cols-[360px_1fr]`)なので、片方を変えるならもう片方も変えること。
-   * 開くのは要素が付いたときの1回だけで、あとから畳めばそのまま(幅の変化は追わない)。
-   */
-  const openWhenTwoColumns = useCallback((node: HTMLDetailsElement | null) => {
-    if (node && window.matchMedia("(min-width: 1024px)").matches) {
-      node.open = true;
-    }
-  }, []);
-
   if (checkingRole || !hasPageAccess) return null;
 
   return (
@@ -1997,189 +1982,26 @@ export default function AdminView({
         </span>
       </div>
 
+      {/* 狭い画面では2つの柱をタブで切り替える。**縦に積むと、上の柱を全部
+          スクロールしないと下の柱に届かない** —— ユーザー管理は縦に長く、
+          日常的に触るスポットの管理がその下に埋まっていた。
+          広い画面(lg以上)では従来どおり2カラムで両方出し、タブは出さない */}
+      {isAdmin && (
+        <TabBar
+          className="lg:hidden"
+          value={adminTab}
+          onChange={setAdminTab}
+          tabs={[
+            { key: "spots", label: "スポット" },
+            { key: "users", label: "ユーザー" },
+          ]}
+        />
+      )}
+
       {/* スポット種別(ログイン後の既定・種別マスタ) */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
-        {/* 左カラム: ユーザー管理と訪問記録のエクスポート(どちらもadmin専用) */}
-        {isAdmin && (
-          <div className="flex flex-col gap-6">
-          {/* 「スポットの管理」と同じdetails/summaryの体裁。
-              既定は畳んだ状態で、2カラム(PC)のときだけ開いて出す
-              (openWhenTwoColumns) */}
-          <details ref={openWhenTwoColumns}>
-            <summary className="cursor-pointer select-none text-base font-bold">
-              ユーザー管理
-            </summary>
-          <section className="mt-2">
-            {userMessage && (
-              <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                {userMessage}
-              </p>
-            )}
-            <ul className="mb-4 divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
-              {users.map((u) => {
-                const nicknameDraft = nicknameDrafts[u.id] ?? u.nickname ?? "";
-                const roleDraft = roleDrafts[u.id] ?? u.role;
-                return (
-                  <li key={u.id} className="flex flex-col gap-2 px-4 py-3">
-                    <div>
-                      <p className="truncate text-sm font-medium">
-                        {u.email}
-                        {u.id === myId && (
-                          <span className="ml-1 text-xs text-gray-400">(自分)</span>
-                        )}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {u.has_password && "パスワード"}
-                        {u.has_password && u.has_google && " / "}
-                        {u.has_google && "Google"}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        autoComplete="off"
-                        value={nicknameDraft}
-                        placeholder="ニックネーム未設定(口コミ等に表示)"
-                        onChange={(e) =>
-                          setNicknameDrafts((prev) => ({
-                            ...prev,
-                            [u.id]: e.target.value,
-                          }))
-                        }
-                        className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs"
-                      />
-                      <select
-                        value={roleDraft}
-                        disabled={u.id === myId}
-                        onChange={(e) =>
-                          setRoleDrafts((prev) => ({
-                            ...prev,
-                            [u.id]: e.target.value as Role,
-                          }))
-                        }
-                        title={u.id === myId ? "自分自身のロールは変更できません" : undefined}
-                        className="shrink-0 rounded-lg border border-gray-300 px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
-                      >
-                        {ROLES.map((r) => (
-                          <option key={r} value={r}>
-                            {ROLE_LABELS[r]}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={
-                          nicknameDraft.trim() === (u.nickname ?? "") &&
-                          roleDraft === u.role
-                        }
-                        onClick={() =>
-                          handleChangeUser(u, {
-                            nickname: nicknameDraft.trim(),
-                            role: roleDraft,
-                          })
-                        }
-                        className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        変更
-                      </button>
-                      {u.id !== myId && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteUser(u)}
-                          className="shrink-0 rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-600"
-                        >
-                          削除
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-
-            <form
-              onSubmit={handleCreateUser}
-              className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3"
-            >
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  メールアドレス
-                </label>
-                <input
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)}
-                  placeholder="user@example.com"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  初期パスワード
-                </label>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={newUserPassword}
-                  onChange={(e) => setNewUserPassword(e.target.value)}
-                  placeholder="8文字以上"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  ニックネーム(任意)
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  value={newUserNickname}
-                  onChange={(e) => setNewUserNickname(e.target.value)}
-                  placeholder="口コミ等に表示する名前(未設定なら「匿名」)"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">ロール</label>
-                <select
-                  value={newUserRole}
-                  onChange={(e) => setNewUserRole(e.target.value as Role)}
-                  className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
-                >
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {ROLE_LABELS[r]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="submit"
-                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
-              >
-                + ユーザー追加
-              </button>
-              <p className="text-xs text-gray-400">
-                Googleログインだけで使わせたい場合も、初期パスワードは必須です
-                (あとから本人が同じメールアドレスでGoogleログインすると自動的に
-                連携されます)。
-              </p>
-            </form>
-          </section>
-          </details>
-          {/* 永続ディスクと常駐プロセスが要る機能なので、サーバーレスに載せた
-              ときは節ごと出さない(lib/features.ts) */}
-          {exportsEnabled && <ExportJobsPanel />}
-          </div>
-        )}
-
-        {/* 右カラム(またはadminでない場合は唯一のカラム): スポットの管理 */}
-        <div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+        {/* 左カラム: スポットの管理(日常的に触るほう。狭い画面ではタブ「スポット」) */}
+        <div className={adminTab === "spots" ? "" : "hidden lg:block"}>
           <div className="flex flex-col gap-6">
             {isAdmin && currentType && (
               <details>
@@ -3435,6 +3257,190 @@ export default function AdminView({
           )}
           </div>
         </div>
+        {/* 右カラム: ユーザー管理と訪問記録のエクスポート(どちらもadmin専用。
+            狭い画面ではタブ「ユーザー」) */}
+        {isAdmin && (
+          <div
+            className={`flex-col gap-6 ${
+              adminTab === "users" ? "flex" : "hidden lg:flex"
+            }`}
+          >
+          {/* 「スポットの管理」と同じdetails/summaryの体裁。
+              既定は畳んだ状態で、2カラム(PC)のときだけ開いて出す
+              (openWhenTwoColumns) */}
+          <details open>
+            <summary className="cursor-pointer select-none text-base font-bold">
+              ユーザー管理
+            </summary>
+          <section className="mt-2">
+            {userMessage && (
+              <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                {userMessage}
+              </p>
+            )}
+            <ul className="mb-4 divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+              {users.map((u) => {
+                const nicknameDraft = nicknameDrafts[u.id] ?? u.nickname ?? "";
+                const roleDraft = roleDrafts[u.id] ?? u.role;
+                return (
+                  <li key={u.id} className="flex flex-col gap-2 px-4 py-3">
+                    <div>
+                      <p className="truncate text-sm font-medium">
+                        {u.email}
+                        {u.id === myId && (
+                          <span className="ml-1 text-xs text-gray-400">(自分)</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {u.has_password && "パスワード"}
+                        {u.has_password && u.has_google && " / "}
+                        {u.has_google && "Google"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        autoComplete="off"
+                        value={nicknameDraft}
+                        placeholder="ニックネーム未設定(口コミ等に表示)"
+                        onChange={(e) =>
+                          setNicknameDrafts((prev) => ({
+                            ...prev,
+                            [u.id]: e.target.value,
+                          }))
+                        }
+                        className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs"
+                      />
+                      <select
+                        value={roleDraft}
+                        disabled={u.id === myId}
+                        onChange={(e) =>
+                          setRoleDrafts((prev) => ({
+                            ...prev,
+                            [u.id]: e.target.value as Role,
+                          }))
+                        }
+                        title={u.id === myId ? "自分自身のロールは変更できません" : undefined}
+                        className="shrink-0 rounded-lg border border-gray-300 px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        {ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABELS[r]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          nicknameDraft.trim() === (u.nickname ?? "") &&
+                          roleDraft === u.role
+                        }
+                        onClick={() =>
+                          handleChangeUser(u, {
+                            nickname: nicknameDraft.trim(),
+                            role: roleDraft,
+                          })
+                        }
+                        className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        変更
+                      </button>
+                      {u.id !== myId && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteUser(u)}
+                          className="shrink-0 rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-600"
+                        >
+                          削除
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <form
+              onSubmit={handleCreateUser}
+              className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3"
+            >
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  メールアドレス
+                </label>
+                <input
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  初期パスワード
+                </label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  placeholder="8文字以上"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  ニックネーム(任意)
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={newUserNickname}
+                  onChange={(e) => setNewUserNickname(e.target.value)}
+                  placeholder="口コミ等に表示する名前(未設定なら「匿名」)"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">ロール</label>
+                <select
+                  value={newUserRole}
+                  onChange={(e) => setNewUserRole(e.target.value as Role)}
+                  className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
+                >
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABELS[r]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
+              >
+                + ユーザー追加
+              </button>
+              <p className="text-xs text-gray-400">
+                Googleログインだけで使わせたい場合も、初期パスワードは必須です
+                (あとから本人が同じメールアドレスでGoogleログインすると自動的に
+                連携されます)。
+              </p>
+            </form>
+          </section>
+          </details>
+          {/* 永続ディスクと常駐プロセスが要る機能なので、サーバーレスに載せた
+              ときは節ごと出さない(lib/features.ts) */}
+          {exportsEnabled && <ExportJobsPanel />}
+          </div>
+        )}
+
       </div>
     </main>
   );
