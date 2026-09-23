@@ -7,6 +7,13 @@ import HelpTip from "@/components/HelpTip";
 import CopyTextButton from "@/components/CopyTextButton";
 import ExportJobsPanel from "@/components/ExportJobsPanel";
 import TabBar from "@/components/TabBar";
+import {
+  findTypeFolders,
+  readZip,
+  zipText,
+  type ZipEntries,
+  type ZipTypeFolder,
+} from "@/lib/zipReader";
 import { api } from "@/lib/api-client";
 import { buildCsv, parseCsv } from "@/lib/csv";
 import { exportsEnabled } from "@/lib/features";
@@ -194,6 +201,14 @@ export default function AdminView({
   const [githubImporting, setGithubImporting] = useState(false);
   const [githubProgress, setGithubProgress] = useState<string | null>(null);
   const [githubMessage, setGithubMessage] = useState<string | null>(null);
+
+  // ZIPファイルからの取り込み(admin専用)。中身はtravel-log-dataと同じ形で、
+  // GitHubから取るか手元のファイルから読むかの違いしかない
+  const [zipEntries, setZipEntries] = useState<ZipEntries | null>(null);
+  const [zipFolders, setZipFolders] = useState<ZipTypeFolder[] | null>(null);
+  const [zipImporting, setZipImporting] = useState(false);
+  const [zipProgress, setZipProgress] = useState<string | null>(null);
+  const [zipMessage, setZipMessage] = useState<string | null>(null);
   const [defaultTypeMessage, setDefaultTypeMessage] = useState<string | null>(
     null
   );
@@ -1808,6 +1823,109 @@ export default function AdminView({
   };
 
   /**
+   * travel-log-data形式の4ファイルを、この順で1つのスポット種別へ適用する
+   * (settings.json → spots.csv → exclude.txt → routes.csv)。
+   *
+   * **取り込み経路で分けない。** GitHubリポジトリからの取り込みとZIPからの取り込みが
+   * 同じものを使う —— 経路ごとに書くと片方だけ古くなり、settings.jsonの新しい項目を
+   * 取り出し忘れる類の漏れは**成功したように見えて黙って落ちる**(かつて
+   * category_stylesを足したときに実際に踏んだ)。
+   *
+   * 進んだところは`onProgress`で伝え、やったことは行の配列で返す(呼ぶ側が
+   * 見出しを付けて出す)。**無いファイルは飛ばす**(`missingNote`はその断りの言い回し)。
+   */
+  const applySpotTypeFiles = async (
+    key: string,
+    files: {
+      settings: string | null;
+      spots: string | null;
+      exclude: string | null;
+      routes: string | null;
+    },
+    onProgress: (message: string) => void,
+    missingNote: string
+  ): Promise<string[]> => {
+    const lines: string[] = [];
+    if (!files.settings) {
+      throw new Error(`${key}/settings.json が見つかりません。`);
+    }
+      // 1. settings.json → 種別の作成または設定の上書き
+      onProgress("スポット種別の設定を適用中…");
+      let settingsJson: unknown;
+      try {
+        settingsJson = JSON.parse(files.settings);
+      } catch {
+        throw new Error("settings.json の読み込みに失敗しました(構文エラー)。");
+      }
+      const { label, created } = await applyTypeDefinition(settingsJson, key);
+      lines.push(
+        created
+          ? `settings.json: 種別「${label}」を作成しました。`
+          : `settings.json: 種別「${label}」の設定を上書きしました。`
+      );
+
+      // 2. spots.csv → 差分インポート(対象種別の既存全件と突き合わせる)
+      if (files.spots) {
+        onProgress("spots.csv を適用中…");
+        const { data: existing, error: listError } = await withRetry(() =>
+          api.spots.list(undefined, { type: key })
+        );
+        if (listError) {
+          throw new Error(
+            "既存スポットの取得に失敗しました: " + listError.message
+          );
+        }
+        lines.push(
+          "spots.csv: " +
+            (await runSpotsCsvImport(files.spots, key, existing ?? [], (done, total) =>
+              onProgress(`spots.csv を適用中… ${done}/${total}件`)
+            ))
+        );
+      } else {
+        lines.push(`spots.csv: ${missingNote}スキップ。`);
+      }
+
+      // 3. exclude.txt → CSVから外したスポットの削除(件数確認あり)
+      if (files.exclude) {
+        onProgress("exclude.txt を適用中…");
+        lines.push(
+          "exclude.txt: " + (await applyExcludeKeys(files.exclude, key, label))
+        );
+      } else {
+        lines.push(`exclude.txt: ${missingNote}スキップ。`);
+      }
+
+      // 4. routes.csv → スポット取り込み後の最新のkeyで検証してから適用
+      if (files.routes) {
+        onProgress("routes.csv を適用中…");
+        const [{ data: freshSpots, error: spotsError }, { data: existingRoutes, error: routesError }] =
+          await Promise.all([
+            withRetry(() => api.spots.list(undefined, { type: key })),
+            withRetry(() => api.routes.list(key)),
+          ]);
+        if (spotsError || routesError) {
+          throw new Error(
+            "経路の検証用のデータ取得に失敗しました: " +
+              (spotsError?.message ?? routesError?.message ?? "")
+          );
+        }
+        lines.push(
+          "routes.csv: " +
+            (await runRouteCsvImport(
+              files.routes,
+              key,
+              freshSpots ?? [],
+              existingRoutes ?? []
+            ))
+        );
+      } else {
+        lines.push(`routes.csv: ${missingNote}スキップ。`);
+      }
+
+    return lines;
+  };
+
+  /**
    * カタログで選んだスポット種別のフォルダから settings.json・spots.csv・
    * exclude.txt・routes.csv を取得して順に適用する。種別が無ければ作成、あれば上書き。
    * 途中で失敗してもそこまでの結果を表示する
@@ -1842,78 +1960,19 @@ export default function AdminView({
         );
       }
 
-      // 1. settings.json → 種別の作成または設定の上書き
-      setGithubProgress("スポット種別の設定を適用中…");
-      let settingsJson: unknown;
-      try {
-        settingsJson = JSON.parse(settingsText);
-      } catch {
-        throw new Error("settings.json の読み込みに失敗しました(構文エラー)。");
-      }
-      const { label, created } = await applyTypeDefinition(settingsJson, key);
       lines.push(
-        created
-          ? `settings.json: 種別「${label}」を作成しました。`
-          : `settings.json: 種別「${label}」の設定を上書きしました。`
+        ...(await applySpotTypeFiles(
+          key,
+          {
+            settings: settingsText,
+            spots: spotsText,
+            exclude: excludeText,
+            routes: routesText,
+          },
+          setGithubProgress,
+          "リポジトリに無いため"
+        ))
       );
-
-      // 2. spots.csv → 差分インポート(対象種別の既存全件と突き合わせる)
-      if (spotsText) {
-        setGithubProgress("spots.csv を適用中…");
-        const { data: existing, error: listError } = await withRetry(() =>
-          api.spots.list(undefined, { type: key })
-        );
-        if (listError) {
-          throw new Error(
-            "既存スポットの取得に失敗しました: " + listError.message
-          );
-        }
-        lines.push(
-          "spots.csv: " +
-            (await runSpotsCsvImport(spotsText, key, existing ?? [], (done, total) =>
-              setGithubProgress(`spots.csv を適用中… ${done}/${total}件`)
-            ))
-        );
-      } else {
-        lines.push("spots.csv: リポジトリに無いためスキップ。");
-      }
-
-      // 3. exclude.txt → CSVから外したスポットの削除(件数確認あり)
-      if (excludeText) {
-        setGithubProgress("exclude.txt を適用中…");
-        lines.push(
-          "exclude.txt: " + (await applyExcludeKeys(excludeText, key, label))
-        );
-      } else {
-        lines.push("exclude.txt: リポジトリに無いためスキップ。");
-      }
-
-      // 4. routes.csv → スポット取り込み後の最新のkeyで検証してから適用
-      if (routesText) {
-        setGithubProgress("routes.csv を適用中…");
-        const [{ data: freshSpots, error: spotsError }, { data: existingRoutes, error: routesError }] =
-          await Promise.all([
-            withRetry(() => api.spots.list(undefined, { type: key })),
-            withRetry(() => api.routes.list(key)),
-          ]);
-        if (spotsError || routesError) {
-          throw new Error(
-            "経路の検証用のデータ取得に失敗しました: " +
-              (spotsError?.message ?? routesError?.message ?? "")
-          );
-        }
-        lines.push(
-          "routes.csv: " +
-            (await runRouteCsvImport(
-              routesText,
-              key,
-              freshSpots ?? [],
-              existingRoutes ?? []
-            ))
-        );
-      } else {
-        lines.push("routes.csv: リポジトリに無いためスキップ。");
-      }
 
       setGithubMessage("取り込みが完了しました。\n" + lines.join("\n"));
     } catch (err) {
@@ -1923,6 +1982,75 @@ export default function AdminView({
       setGithubImporting(false);
       setGithubProgress(null);
       // 現在表示中の種別へ取り込んだ場合はこの画面の一覧にも反映する
+      loadSpotTypes();
+      if (key === typeKey) {
+        load();
+        loadRoutes();
+      }
+    }
+  };
+
+  /** ZIPを開いて、入っているスポット種別を一覧にする(まだ適用しない) */
+  const handleZipOpen = async (file: File) => {
+    setZipImporting(true);
+    setZipMessage(null);
+    setZipEntries(null);
+    setZipFolders(null);
+    try {
+      const entries = await readZip(file);
+      const folders = findTypeFolders(entries);
+      if (folders.length === 0) {
+        throw new Error(
+          "ZIPの中にスポット種別が見つかりません" +
+            "(<キー>/settings.json のある形で書き出してください)。"
+        );
+      }
+      setZipEntries(entries);
+      setZipFolders(folders);
+    } catch (err) {
+      setZipMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setZipImporting(false);
+    }
+  };
+
+  /** ZIPの中の1種別を適用する。**適用処理はGitHub取り込みと共用**(`applySpotTypeFiles`) */
+  const handleZipApply = async (folder: ZipTypeFolder) => {
+    if (!zipEntries) return;
+    const { prefix, key, label } = folder;
+    if (
+      !confirm(
+        `ZIPから「${label}」(${key})を適用します。` +
+          `スポット種別が無ければ作成し、あれば設定・スポット・経路を上書きします。` +
+          `よろしいですか?`
+      )
+    )
+      return;
+    setZipImporting(true);
+    setZipMessage(null);
+    const lines: string[] = [];
+    try {
+      lines.push(
+        ...(await applySpotTypeFiles(
+          key,
+          {
+            settings: zipText(zipEntries, `${prefix}settings.json`),
+            spots: zipText(zipEntries, `${prefix}spots.csv`),
+            // exclude.txt の置き場所は travel-log-data の規則(excluded_candidates/)
+            exclude: zipText(zipEntries, `${prefix}excluded_candidates/exclude.txt`),
+            routes: zipText(zipEntries, `${prefix}routes.csv`),
+          },
+          setZipProgress,
+          "ZIPに無いため"
+        ))
+      );
+      setZipMessage("取り込みが完了しました。\n" + lines.join("\n"));
+    } catch (err) {
+      lines.push(err instanceof Error ? err.message : String(err));
+      setZipMessage("取り込みを中断しました:\n" + lines.join("\n"));
+    } finally {
+      setZipImporting(false);
+      setZipProgress(null);
       loadSpotTypes();
       if (key === typeKey) {
         load();
@@ -1981,6 +2109,82 @@ export default function AdminView({
         {/* 左カラム: スポットの管理(日常的に触るほう。狭い画面ではタブ「スポット」) */}
         <div className={adminTab === "spots" ? "" : "hidden lg:block"}>
           <div className="flex flex-col gap-6">
+          {/* ZIPファイルからの取り込み。中身はGitHub取り込みと同じ形なので、
+              適用処理(applySpotTypeFiles)は共用する */}
+          {isAdmin && (
+            <div>
+              <h2 className="mb-2 flex items-center gap-1.5 text-base font-bold">
+                ZIPファイルからスポット種別取り込み
+                <HelpTip>
+                  travel-log-dataと同じ形(&lt;キー&gt;/settings.json・spots.csv・
+                  excluded_candidates/exclude.txt・routes.csv)で固めたZIPを読み込む。
+                  GitHubからの取り込みと同じものを、手元のファイルから入れる道で、
+                  リポジトリに置いていないデータ(tazunaが書き出した収集など)を
+                  取り込むのに使う。ZIPに入っている種別を一覧にし、選んだものだけ適用する。
+                  種別が無ければ作成し、あれば設定・スポット・経路を上書きする
+                  (それぞれ個別インポートと同じ差分更新)。
+                </HelpTip>
+              </h2>
+              <section className="rounded-xl border border-gray-200 bg-white p-3">
+                <label className="inline-block cursor-pointer rounded-lg border border-blue-600 bg-white px-3 py-1.5 text-sm font-medium text-blue-600">
+                  ZIPファイルを選ぶ
+                  <input
+                    type="file"
+                    accept=".zip,application/zip"
+                    className="hidden"
+                    disabled={zipImporting}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleZipOpen(file);
+                      // 同じファイルを選び直せるようにする
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {zipFolders && (
+                  <ul className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                    {zipFolders.map((folder) => (
+                      <li
+                        key={folder.key}
+                        className="flex items-center gap-3 px-3 py-2"
+                      >
+                        <span className="min-w-0 flex-1 text-sm">
+                          {folder.label}{" "}
+                          <span className="text-gray-400">({folder.key})</span>
+                          {spotTypes.some((t) => t.key === folder.key) ? (
+                            <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
+                              上書き
+                            </span>
+                          ) : (
+                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
+                              新規作成
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={zipImporting}
+                          onClick={() => handleZipApply(folder)}
+                          className="shrink-0 rounded-lg border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 disabled:opacity-50"
+                        >
+                          適用
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {zipProgress && (
+                  <p className="mt-2 text-sm text-gray-500">{zipProgress}</p>
+                )}
+                {zipMessage && (
+                  <p className="mt-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {zipMessage}
+                  </p>
+                )}
+              </section>
+            </div>
+          )}
+
           {/* データリポジトリからの取り込み。ここが日々の入口なので一番上に置く */}
           {isAdmin && (
             <div>
