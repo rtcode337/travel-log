@@ -86,26 +86,37 @@ export interface SpotDeletion {
 }
 
 /**
- * 公開スポットへの「間違い報告」。管理者(spot_admin/admin)がスポット詳細から
- * 報告する。reasonは空でもよい —— 気づいた時点で印だけ付けられるようにするため
- * (理由は後から管理画面の一覧でまとめてAIに投げる)
+ * 修正・追加の依頼(spot_flags)。管理者(spot_admin/admin)が残す。
+ * - 修正の依頼: スポット詳細から、既にある公開スポットに付ける(spot_idを持つ)
+ * - 追加の依頼: 地図の右クリックから、スポットの無い場所に付ける(spot_idはnullで、
+ *   座標と種別を持つ)
+ *
+ * reasonは空でもよい —— 気づいた時点で印だけ付けられるようにするため
+ * (理由は後から管理画面の一覧でまとめて渡す)
  */
 export interface SpotFlag {
   id: string;
-  spot_id: string;
+  spot_id: string | null;
   reason: string;
   flagged_by: string | null;
   created_at: string;
 }
 
-/** 管理画面の間違い報告の一覧の1行(spot_flagsにスポットの表示用の項目をJOINしたもの) */
+/** 依頼の種類。spot_idを持つかどうかで決まる(表には持たない) */
+export type SpotFlagKind = "fix" | "add";
+
+/**
+ * 管理画面の修正・追加の依頼の一覧の1行(spot_flagsにスポットの表示用の項目を
+ * JOINしたもの)。追加の依頼はスポットが無いので、nameは空・座標は依頼そのもののもの
+ */
 export interface FlaggedSpot extends SpotFlag {
+  kind: SpotFlagKind;
   name: string;
   key: string | null;
   region: string;
   lat: number;
   lng: number;
-  /** 報告した人のニックネーム(未設定ならメールアドレス。消えたユーザーはnull) */
+  /** 依頼した人のニックネーム(未設定ならメールアドレス。消えたユーザーはnull) */
   flagged_by_name: string | null;
 }
 

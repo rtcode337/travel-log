@@ -209,21 +209,28 @@ export const api = {
       request<SpotDeletion[]>(`/api/spot-deletions?type=${encodeURIComponent(type)}`),
   },
   spotFlags: {
-    // 公開スポットへの間違い報告(spot_admin/admin専用)。
-    // 一覧は管理画面、報告と取り消しはスポット詳細から呼ぶ
+    // 修正・追加の依頼(spot_admin/admin専用)。一覧は管理画面、
+    // 修正の依頼はスポット詳細、追加の依頼は地図の右クリックから呼ぶ
     list: (type: string) =>
       request<FlaggedSpot[]>(`/api/spot-flags?type=${encodeURIComponent(type)}`),
-    // 1スポットぶん(スポット詳細が報告の有無を見る)。無ければ空配列
+    // 1スポットぶん(スポット詳細が依頼の有無を見る)。無ければ空配列
     forSpot: (spotId: string) =>
       request<FlaggedSpot[]>(`/api/spot-flags?spot_id=${encodeURIComponent(spotId)}`),
-    // 同じスポットに2度報告しても1件のまま(理由は上書き)
+    // 修正の依頼。同じスポットに2度依頼しても1件のまま(理由は上書き)
     create: (spotId: string, reason: string) =>
       request<SpotFlag>("/api/spot-flags", {
         method: "POST",
         body: JSON.stringify({ spot_id: spotId, reason }),
       }),
-    delete: (spotId: string) =>
-      request<{ ok: true }>(`/api/spot-flags/${spotId}`, { method: "DELETE" }),
+    // 追加の依頼(スポットの無い場所に、種別と座標で付ける)
+    requestAdd: (type: string, lat: number, lng: number, reason: string) =>
+      request<SpotFlag>("/api/spot-flags", {
+        method: "POST",
+        body: JSON.stringify({ type, lat, lng, reason }),
+      }),
+    // 1件取り消す。修正の依頼はスポットのid、追加の依頼は依頼そのもののidで指す
+    delete: (id: string) =>
+      request<{ ok: true }>(`/api/spot-flags/${id}`, { method: "DELETE" }),
     // 種別ぶんをまとめて取り消す(管理画面の一括取り消し)
     clear: (type: string) =>
       request<{ deleted: number }>(

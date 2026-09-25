@@ -24,6 +24,7 @@ erDiagram
     spot_types ||--o{ spot_routes : ""
     spot_types ||--o{ visit_plan_lists : ""
     app_settings }o--|| spot_types : "active_spot_type_id"
+    spot_types |o--o{ spot_flags : "追加の依頼"
 
     users |o--o{ spots : "created_by"
     users |o--o{ spot_routes : "created_by"
@@ -39,7 +40,7 @@ erDiagram
     spots ||--o{ spot_route_points : ""
     spots ||--o{ visits : ""
     spots ||--o{ spot_hides : ""
-    spots ||--o{ spot_flags : "1件まで"
+    spots |o--o{ spot_flags : "修正の依頼は1件まで"
     spots ||--o{ visit_plans : ""
     spots ||--o{ visit_plan_list_items : ""
     spots ||--o{ reviews : ""
@@ -171,9 +172,12 @@ erDiagram
     }
     spot_flags {
         uuid id PK
-        uuid spot_id FK "スポットでユニーク(1件まで)"
-        text reason "どこが間違っているか(空でもよい)"
-        uuid flagged_by FK "報告した管理者"
+        uuid spot_id FK "修正の依頼。スポットでユニーク(1件まで)"
+        text reason "どこを直す・何が足りないか(空でもよい)"
+        uuid flagged_by FK "依頼した管理者"
+        double lat "追加の依頼の場所"
+        double lng
+        uuid spot_type_id FK "追加の依頼の種別"
     }
     spot_routes {
         uuid id PK
@@ -207,11 +211,12 @@ erDiagram
 - **`spot_deletions` は削除の墓標**。CSV 由来の公開スポットを画面から個別削除した
   ときだけ記録し、travel-log-data 側の `exclude.txt` へ追記する候補として
   還元用エクスポートに出す(行が消えるので値をコピーして残す)
-- **`spot_flags` は公開スポットへの「間違い報告」**(画面の表示名)。管理者
-  (spot_admin/admin)がスポット詳細から報告し、理由を添えられる(空でもよい)。
-  **1スポットに1つ**(`spot_id` がユニーク)で、スポット自体には何の影響も無い ——
-  管理画面の一覧に出て、まとめて AI へ渡すテキストにするか、まとめて取り消すかの
-  どちらかで片付ける
+- **`spot_flags` は「修正・追加の依頼」**(画面の表示名)。管理者(spot_admin/admin)が
+  理由を添えて残す(空でもよい)。**2 種類ある**: 公開スポットに付ける修正の依頼
+  (スポット詳細から。`spot_id` を持ち、**1スポットに1つ**)と、スポットの無い場所に
+  付ける追加の依頼(地図の右クリックから。`spot_id` は空で、`lat`/`lng`/`spot_type_id`
+  を持つ)。どちらか一方は必ず持つ(check 制約)。スポット自体には何の影響も無い ——
+  管理画面の一覧に出て、まとめて渡すテキストにするか、取り消すかで片付ける
 
 ### ユーザーごとの記録
 
@@ -318,7 +323,8 @@ erDiagram
 | spots | `(spot_type_id, key)` ユニーク(key が null 以外) | CSV・ルートからの参照キー |
 | spots | `(spot_type_id, region, name, id)` | 公開スポットのダウンロード(`limit`/`offset` の分割取得)の並び |
 | spot_deletions | `spot_type_id` | 還元用エクスポートの抽出 |
-| spot_flags | `spot_id` | スポット詳細からの報告の有無の確認 |
+| spot_flags | `spot_id` | スポット詳細からの修正の依頼の有無の確認 |
+| spot_flags | `spot_type_id` | 追加の依頼の種別ごとの一覧 |
 | spot_routes | `series` | シリーズ絞り込みとの連動 |
 | spot_route_points | `spot_id` | スポットからの逆引き |
 | visits / spot_hides / visit_plans | `user_id` / `spot_id` | ユーザーの記録の取得と逆引き |

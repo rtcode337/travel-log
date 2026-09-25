@@ -281,24 +281,34 @@ create table visit_notes (
 create index visit_notes_visit_id_idx on visit_notes (visit_id);
 
 -- =============================================================
--- spot_flags: 公開スポットへの「間違い報告」(画面の表示名。中身がおかしいと
--- 気づいた管理者(spot_admin/admin)が地図の詳細から報告し、理由を添えられる
--- =空でもよい)。管理画面に一覧で出し、スポット名と理由をまとめてAIへ渡す・
--- まとめて取り消す、の2つの操作で片付ける。報告は1スポットに1つ
--- (誰が報告したかは flagged_by、報告日時は created_at)。
--- スポット自体には触らないので、報告が付いていても地図の見え方は変わらない
+-- spot_flags: 修正・追加の依頼(画面の表示名)。管理者(spot_admin/admin)が
+-- 「このスポットはおかしい」(修正の依頼。スポット詳細から)と「ここにスポットが
+-- 足りない」(追加の依頼。地図の右クリックから)を理由を添えて残す(理由は空でもよい)。
+-- 修正の依頼は spot_id を、追加の依頼は座標と種別を持つ(どちらか一方は必須)。
+-- 管理画面に一覧で出し、名前・座標・理由をまとめて渡す・まとめて取り消す、の
+-- 2つの操作で片付ける。修正の依頼は1スポットに1つ
+-- (誰が依頼したかは flagged_by、依頼日時は created_at)。
+-- スポット自体には触らないので、依頼が付いていても地図の見え方は変わらない
 -- =============================================================
 create table spot_flags (
-  id         uuid primary key default gen_random_uuid(),
-  spot_id    uuid not null references spots (id) on delete cascade,
-  reason     text not null default '',
-  flagged_by uuid references users (id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (spot_id)
+  id           uuid primary key default gen_random_uuid(),
+  spot_id      uuid references spots (id) on delete cascade,
+  reason       text not null default '',
+  flagged_by   uuid references users (id) on delete set null,
+  lat          double precision,
+  lng          double precision,
+  spot_type_id uuid references spot_types (id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  unique (spot_id),
+  constraint spot_flags_target_ck check (
+    spot_id is not null
+    or (lat is not null and lng is not null and spot_type_id is not null)
+  )
 );
 
 create index spot_flags_spot_id_idx on spot_flags (spot_id);
+create index spot_flags_spot_type_id_idx on spot_flags (spot_type_id);
 
 -- =============================================================
 -- spot_hides: 非表示スポット。公開スポットのうち「自分は興味がない」ものを
