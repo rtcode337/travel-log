@@ -141,8 +141,8 @@ export default function SpotDetailModal({
   const [showForm, setShowForm] = useState(false);
   // 非公開スポットの位置修正(ドラッグ)モーダルの表示
   const [showReposition, setShowReposition] = useState(false);
-  // 中身がおかしいと気づいたときに付ける「間違い報告」の印(spot_admin/adminのみ)。
-  // nullなら未報告。理由の入力欄はボタンを押したときだけ開く
+  // 中身がおかしいと気づいたときに付ける「修正の依頼」の印(spot_admin/adminのみ)。
+  // nullなら未依頼。理由の入力欄はボタンを押したときだけ開く
   const [flag, setFlag] = useState<SpotFlag | null>(null);
   const [flagFormOpen, setFlagFormOpen] = useState(false);
   const [flagReason, setFlagReason] = useState("");
@@ -281,12 +281,12 @@ export default function SpotDetailModal({
 
   const isSpotAdmin = !!myRole && SPOT_ADMIN_ROLES.includes(myRole);
 
-  // 間違い報告は公開スポットにだけ付く(承認待ち・却下・非公開は承認/却下の
+  // 修正の依頼は公開スポットにだけ付く(承認待ち・却下・非公開は承認/却下の
   // 流れで扱うため)。読み取り専用(重ね表示)では出さない
   const canFlag =
     !readOnly && !!spot && spot.status === "published" && isSpotAdmin;
 
-  // 報告の有無を読む。付ける権限が無い人には問い合わせない(403になるだけのため)
+  // 依頼の有無を読む。付ける権限が無い人には問い合わせない(403になるだけのため)
   useEffect(() => {
     if (!canFlag) {
       setFlag(null);
@@ -306,7 +306,7 @@ export default function SpotDetailModal({
     const { data, error } = await api.spotFlags.create(spotId, flagReason);
     setFlagSaving(false);
     if (error) {
-      setActionError("間違い報告を送れませんでした: " + error.message);
+      setActionError("修正の依頼を送れませんでした: " + error.message);
       return;
     }
     setFlag(data ?? null);
@@ -318,7 +318,7 @@ export default function SpotDetailModal({
     const { error } = await api.spotFlags.delete(spotId);
     setFlagSaving(false);
     if (error) {
-      setActionError("間違い報告を取り消せませんでした: " + error.message);
+      setActionError("修正の依頼を取り消せませんでした: " + error.message);
       return;
     }
     setFlag(null);
@@ -604,8 +604,8 @@ export default function SpotDetailModal({
                       位置を修正
                     </button>
                   )}
-                  {/* 間違い報告。理由は空でもよいので、押した時点で入力欄を開き、
-                      空のまま「報告する」を押せるようにしてある */}
+                  {/* 修正の依頼。理由は空でもよいので、押した時点で入力欄を開き、
+                      空のまま「依頼する」を押せるようにしてある */}
                   {canFlag && (
                     <button
                       type="button"
@@ -622,7 +622,7 @@ export default function SpotDetailModal({
                         flag ? "text-amber-700" : "text-gray-600"
                       }`}
                     >
-                      {flag ? "⚠ 報告を取り消す" : "⚠ 間違い報告"}
+                      {flag ? "⚠ 依頼を取り消す" : "⚠ 修正を依頼"}
                     </button>
                   )}
                   {canManage && (
@@ -641,7 +641,7 @@ export default function SpotDetailModal({
             {canFlag && flagFormOpen && !flag && (
               <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
                 <label className="mb-1 block text-xs font-bold text-amber-800">
-                  どこが間違っているか(空でもよい)
+                  どこを直してほしいか(空でもよい)
                 </label>
                 <textarea
                   value={flagReason}
@@ -657,7 +657,7 @@ export default function SpotDetailModal({
                     disabled={flagSaving}
                     className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-bold text-white disabled:opacity-50"
                   >
-                    {flagSaving ? "報告しています…" : "報告する"}
+                    {flagSaving ? "依頼しています…" : "依頼する"}
                   </button>
                   <button
                     type="button"
@@ -672,7 +672,7 @@ export default function SpotDetailModal({
 
             {canFlag && flag && (
               <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
-                ⚠ 間違いとして報告済み{flag.reason ? `: ${flag.reason}` : ""}
+                ⚠ 修正を依頼済み{flag.reason ? `: ${flag.reason}` : ""}
               </p>
             )}
 

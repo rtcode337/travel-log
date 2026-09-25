@@ -128,14 +128,12 @@ export default function AdminView({
   const [exportingManual, setExportingManual] = useState(false);
   const [manualExportMessage, setManualExportMessage] = useState<string | null>(null);
 
-  // 間違い報告(spot_flags)。報告するのは地図のスポット詳細で、
-  // ここは一覧・AIへ渡すテキスト・一括取り消しの3つだけを持つ
+  // 修正・追加の依頼(spot_flags)。依頼するのは地図(修正はスポット詳細、
+  // 追加は右クリック)で、ここは一覧・渡すテキスト・取り消しだけを持つ
   const [flaggedSpots, setFlaggedSpots] = useState<FlaggedSpot[]>([]);
   const [flagTextOpen, setFlagTextOpen] = useState(false);
   const [flagClearing, setFlagClearing] = useState(false);
   const [flagMessage, setFlagMessage] = useState<string | null>(null);
-  /** 収集へ割り込ませている最中のスポット(一括のときは`"all"`) */
-  const [flagFocusing, setFlagFocusing] = useState<string | null>(null);
 
   // ルート(スポットを巡った順に矢印で繋ぐ)の一覧とCSVインポート用
   const [routes, setRoutes] = useState<SpotRoute[]>([]);
@@ -1089,45 +1087,36 @@ export default function AdminView({
   };
 
   /**
-   * 間違い報告のあったスポットを、AIへ渡すための1つのテキストにまとめる。
-   * **スポット名と理由だけ**を並べる —— 渡す先で必要なのは「どれが」「なぜ」で、
-   * 座標やキーは判断の材料にならないため(必要なら一覧の行から辿れる)。
-   * **理由が無い行は名前だけ**にする(「(理由なし)」と書くと、AIがその文字列を
-   * 理由として読んでしまう)。理由の無い報告も落とさない —— 印だけ付けて
+   * 修正・追加の依頼を、そのまま渡せる1つのテキストにまとめる
+   * (AIに相談する・tazunaの「travel-logからの依頼」に貼って収集を回す)。
+   * 1行は `- [修正] 名前 (緯度,経度): 理由` / `- [追加] (緯度,経度): 理由`。
+   * **座標を入れる** —— 追加の依頼は名前を持たないので、場所は座標でしか言えない。
+   * 受け取る側はそこから「どの区画の話か」を引く(名前だけだと同名の店を取り違える)。
+   * **理由が無い行は理由を書かない**(「(理由なし)」と書くと、AIがその文字列を
+   * 理由として読んでしまう)。理由の無い依頼も落とさない —— 印だけ付けて
    * 理由を書かない使い方を許しているため。
    */
   const flaggedSpotsText = useMemo(
     () =>
       [
-        `# 間違い報告のあったスポット(${currentTypeLabel}) ${flaggedSpots.length}件`,
+        `# 修正・追加の依頼(${currentTypeLabel}) ${flaggedSpots.length}件`,
         ``,
-        ...flaggedSpots.map((f) => (f.reason ? `- ${f.name}: ${f.reason}` : `- ${f.name}`)),
+        ...flaggedSpots.map((f) => {
+          const where = `(${f.lat.toFixed(5)},${f.lng.toFixed(5)})`;
+          const head = f.kind === "add" ? `- [追加] ${where}` : `- [修正] ${f.name} ${where}`;
+          return f.reason ? `${head}: ${f.reason}` : head;
+        }),
         ``,
       ].join("\n"),
     [flaggedSpots, currentTypeLabel]
   );
 
-  /**
-   * 報告された内容を、そのまま収集への割り込みの依頼文にする。
-   * **テキストで表示と同じ形**(`- 名前: 理由`)—— 渡す先で必要なのは
-   * 「どれが」「なぜ」で、座標やキーは判断の材料にならない。
-   */
-  const flagFocusNote = useCallback(
-    (items: FlaggedSpot[]) =>
-      [
-        `「${currentTypeLabel}」に間違いの報告がありました。` +
-          "実在するか・所在地は合っているか・二重に入っていないかを確かめて直してください。",
-        ...items.map((f) => (f.reason ? `- ${f.name}: ${f.reason}` : `- ${f.name}`)),
-      ].join("\n"),
-    [currentTypeLabel]
-  );
-
-  /** 報告を種別ぶんまとめて取り消す(片付けたあとに押す) */
+  /** 依頼を種別ぶんまとめて取り消す(片付けたあとに押す) */
   const handleClearFlags = async () => {
     if (flaggedSpots.length === 0) return;
     if (
       !confirm(
-        `間違い報告${flaggedSpots.length}件をまとめて取り消しますか?(スポット自体は消えません)`
+        `修正・追加の依頼${flaggedSpots.length}件をまとめて取り消しますか?(スポット自体は消えません)`
       )
     ) {
       return;
@@ -1137,11 +1126,25 @@ export default function AdminView({
     const { data, error } = await api.spotFlags.clear(typeKey);
     setFlagClearing(false);
     if (error) {
-      setFlagMessage("報告を取り消せませんでした: " + error.message);
+      setFlagMessage("依頼を取り消せませんでした: " + error.message);
       return;
     }
     setFlagTextOpen(false);
-    setFlagMessage(`間違い報告を${data?.deleted ?? 0}件取り消しました。`);
+    setFlagMessage(`修正・追加の依頼を${data?.deleted ?? 0}件取り消しました。`);
+    loadFlags();
+  };
+
+  /**
+   * 依頼を1件取り消す。**追加の依頼を取り消せるのはここだけ** —— 指す先の
+   * スポットが無いので、修正の依頼のようにスポット詳細から取り消す道が無い
+   */
+  const handleRemoveFlag = async (f: FlaggedSpot) => {
+    setFlagMessage(null);
+    const { error } = await api.spotFlags.delete(f.id);
+    if (error) {
+      setFlagMessage("依頼を取り消せませんでした: " + error.message);
+      return;
+    }
     loadFlags();
   };
 
@@ -2252,15 +2255,15 @@ export default function AdminView({
 
               <div className="mt-3 border-t border-gray-100 pt-3">
               <h3 className="mb-2 flex items-center gap-1.5 text-base font-bold">
-                ⚠ 間違い報告のあったスポット
+                ⚠ 修正・追加の依頼
                 <HelpTip>
-                  地図のスポット詳細で「⚠ 間違い報告」を押して報告された
-                  スポットの一覧(公開スポットのみ・spot_admin/adminだけが報告できる)。
-                  中身がおかしいと気づいた場所に理由を添えて報告しておき、
-                  ここでまとめて片付ける。「テキストで表示」はスポット名と理由だけを
-                  並べたもので、そのままAIに渡してデータの直し方を相談するための形
-                  (理由の無いものは名前だけが並ぶ)。片付いたら
-                  「報告を一括で取り消す」で消す(スポット自体は消えない)。
+                  spot_admin/adminが地図から出した依頼の一覧。スポット詳細の
+                  「⚠ 修正を依頼」で出したもの(公開スポットのみ)が[修正]、地図の
+                  右クリック(長押し)の「ここにスポット追加を依頼」で出したものが[追加]。
+                  「テキストで表示」は名前・座標・理由を1行ずつ並べたもので、そのまま
+                  AIに渡して直し方を相談したり、tazunaの「travel-logからの依頼」に
+                  貼って情報収集を回したりするための形(理由の無いものは理由を書かない)。
+                  片付いたら「依頼を一括で取り消す」で消す(スポット自体は消えない)。
                 </HelpTip>
               </h3>
 
@@ -2272,7 +2275,7 @@ export default function AdminView({
 
               {flaggedSpots.length === 0 ? (
                 <p className="text-sm text-gray-500">
-                  間違い報告はありません。
+                  修正・追加の依頼はありません。
                 </p>
               ) : (
                 <>
@@ -2280,12 +2283,33 @@ export default function AdminView({
                     {flaggedSpots.map((f) => (
                       <li key={f.id} className="px-3 py-2 text-sm">
                         <div className="flex items-baseline gap-2">
-                          <Link
-                            href={`/${typeKey}/map?spot=${f.spot_id}`}
-                            className="font-medium text-blue-600 underline"
+                          <span
+                            className={`shrink-0 rounded px-1.5 text-xs font-bold ${
+                              f.kind === "add"
+                                ? "bg-green-50 text-green-700"
+                                : "bg-amber-50 text-amber-700"
+                            }`}
                           >
-                            {f.name}
-                          </Link>
+                            {f.kind === "add" ? "追加" : "修正"}
+                          </span>
+                          {/* 追加の依頼は指す先のスポットが無いので、座標を地図で開く */}
+                          {f.kind === "add" ? (
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${f.lat},${f.lng}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-blue-600 underline"
+                            >
+                              {f.lat.toFixed(5)}, {f.lng.toFixed(5)}
+                            </a>
+                          ) : (
+                            <Link
+                              href={`/${typeKey}/map?spot=${f.spot_id}`}
+                              className="font-medium text-blue-600 underline"
+                            >
+                              {f.name}
+                            </Link>
+                          )}
                           <span className="text-xs text-gray-400">
                             {f.region}
                           </span>
@@ -2302,6 +2326,13 @@ export default function AdminView({
                             {f.flagged_by_name ?? "不明"} /{" "}
                             {new Date(f.created_at).toLocaleString("ja-JP")}
                           </p>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFlag(f)}
+                            className="ml-auto text-xs text-gray-500 underline"
+                          >
+                            取り消す
+                          </button>
                         </div>
                       </li>
                     ))}
@@ -2323,17 +2354,17 @@ export default function AdminView({
                     >
                       {flagClearing
                         ? "取り消しています…"
-                        : `報告を一括で取り消す(${flaggedSpots.length}件)`}
+                        : `依頼を一括で取り消す(${flaggedSpots.length}件)`}
                     </button>
                   </div>
 
                   {flagTextOpen && (
                     <div className="mt-2">
                       <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-500">
-                        AIに渡すテキスト(スポット名と理由)
+                        渡すテキスト(名前・座標・理由)
                         <CopyTextButton
                           text={flaggedSpotsText}
-                          label="間違い報告のあったスポットの一覧をコピー"
+                          label="修正・追加の依頼の一覧をコピー"
                         />
                       </div>
                       {/* 読み取り専用。コピーはボタンからだが、長いときに
