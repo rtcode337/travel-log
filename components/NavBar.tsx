@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { SPOT_ADMIN_ROLES } from "@/lib/types";
+import { useStickToVisibleBottom } from "@/lib/useStickToVisibleBottom";
 
 const items = [
   { path: "map", label: "地図", icon: "🗺️" },
@@ -19,6 +20,10 @@ export default function NavBar() {
   const router = useRouter();
   const typeKey = useCurrentSpotTypeKey();
   const [isAdmin, setIsAdmin] = useState(false);
+  // キーボードを閉じたあとに帯が画面の途中へ浮くのを防ぐ(iPhoneのホーム画面から開いたとき)
+  const navRef = useRef<HTMLElement>(null);
+  const shown = !pathname.startsWith("/login") && !!typeKey;
+  useStickToVisibleBottom(navRef, shown);
 
   useEffect(() => {
     if (pathname.startsWith("/login")) return;
@@ -41,7 +46,10 @@ export default function NavBar() {
   if (!typeKey) return null;
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white">
+    <nav
+      ref={navRef}
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white"
+    >
       <div className="mx-auto flex max-w-lg items-stretch">
         {items.map((item) => {
           if (item.adminOnly && !isAdmin) return null;
