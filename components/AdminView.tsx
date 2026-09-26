@@ -134,6 +134,7 @@ export default function AdminView({
   const [flagTextOpen, setFlagTextOpen] = useState(false);
   const [flagClearing, setFlagClearing] = useState(false);
   const [flagMessage, setFlagMessage] = useState<string | null>(null);
+  const [flagForwarding, setFlagForwarding] = useState(false);
 
   // ルート(スポットを巡った順に矢印で繋ぐ)の一覧とCSVインポート用
   const [routes, setRoutes] = useState<SpotRoute[]>([]);
@@ -1087,7 +1088,16 @@ export default function AdminView({
   };
 
   /**
-   * 修正・追加の依頼を、そのまま渡せる1つのテキストにまとめる
+   * まだ渡していない依頼。「テキストで表示」はこれだけを並べる —— 対応中の
+   * ものまで混ぜると、同じ依頼を二重に渡してしまう
+   */
+  const unforwardedFlags = useMemo(
+    () => flaggedSpots.filter((f) => !f.forwarded_at),
+    [flaggedSpots]
+  );
+
+  /**
+   * 未依頼の修正・追加の依頼を、そのまま渡せる1つのテキストにまとめる
    * (AIに相談する・tazunaの「travel-logからの依頼」に貼って収集を回す)。
    * 1行は `- [修正] 名前 (緯度,経度): 理由` / `- [追加] (緯度,経度): 理由`。
    * **座標を入れる** —— 追加の依頼は名前を持たないので、場所は座標でしか言えない。
@@ -1099,17 +1109,35 @@ export default function AdminView({
   const flaggedSpotsText = useMemo(
     () =>
       [
-        `# 修正・追加の依頼(${currentTypeLabel}) ${flaggedSpots.length}件`,
+        `# 修正・追加の依頼(${currentTypeLabel}) ${unforwardedFlags.length}件`,
         ``,
-        ...flaggedSpots.map((f) => {
+        ...unforwardedFlags.map((f) => {
           const where = `(${f.lat.toFixed(5)},${f.lng.toFixed(5)})`;
           const head = f.kind === "add" ? `- [追加] ${where}` : `- [修正] ${f.name} ${where}`;
           return f.reason ? `${head}: ${f.reason}` : head;
         }),
         ``,
       ].join("\n"),
-    [flaggedSpots, currentTypeLabel]
+    [unforwardedFlags, currentTypeLabel]
   );
+
+  /**
+   * 依頼を「対応中(渡した)」にする・「未依頼」に戻す。テキストの一括は
+   * **テキストに並べたidで指す** —— 表示してから押すまでに増えた依頼まで
+   * 渡したことにしないため
+   */
+  const handleForwardFlags = async (ids: string[], forwarded: boolean) => {
+    if (ids.length === 0) return;
+    setFlagForwarding(true);
+    setFlagMessage(null);
+    const { error } = await api.spotFlags.setForwarded(ids, forwarded);
+    setFlagForwarding(false);
+    if (error) {
+      setFlagMessage("依頼の状態を変えられませんでした: " + error.message);
+      return;
+    }
+    loadFlags();
+  };
 
   /** 依頼を種別ぶんまとめて取り消す(片付けたあとに押す) */
   const handleClearFlags = async () => {
@@ -2260,9 +2288,11 @@ export default function AdminView({
                   spot_admin/adminが地図から出した依頼の一覧。スポット詳細の
                   「⚠ 修正を依頼」で出したもの(公開スポットのみ)が[修正]、地図の
                   右クリック(長押し)の「ここにスポット追加を依頼」で出したものが[追加]。
-                  「テキストで表示」は名前・座標・理由を1行ずつ並べたもので、そのまま
-                  AIに渡して直し方を相談したり、tazunaの「travel-logからの依頼」に
+                  「テキストで表示」は未依頼のものの名前・座標・理由を1行ずつ並べたもので、
+                  そのままAIに渡して直し方を相談したり、tazunaの「travel-logからの依頼」に
                   貼って情報収集を回したりするための形(理由の無いものは理由を書かない)。
+                  渡したら「対応中にする」で印を付けると、まだ渡していないものと
+                  見分けられる(対応中のものはテキストに入らない)。
                   片付いたら「依頼を一括で取り消す」で消す(スポット自体は消えない)。
                 </HelpTip>
               </h3>
@@ -2279,6 +2309,10 @@ export default function AdminView({
                 </p>
               ) : (
                 <>
+                  <p className="mb-2 text-xs text-gray-500">
+                    未依頼 {unforwardedFlags.length}件 / 対応中{" "}
+                    {flaggedSpots.length - unforwardedFlags.length}件
+                  </p>
                   <ul className="mb-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
                     {flaggedSpots.map((f) => (
                       <li key={f.id} className="px-3 py-2 text-sm">
@@ -2292,6 +2326,11 @@ export default function AdminView({
                           >
                             {f.kind === "add" ? "追加" : "修正"}
                           </span>
+                          {f.forwarded_at && (
+                            <span className="shrink-0 rounded bg-blue-50 px-1.5 text-xs font-bold text-blue-700">
+                              対応中
+                            </span>
+                          )}
                           {/* 追加の依頼は指す先のスポットが無いので、座標を地図で開く */}
                           {f.kind === "add" ? (
                             <a
@@ -2328,8 +2367,16 @@ export default function AdminView({
                           </p>
                           <button
                             type="button"
+                            onClick={() => handleForwardFlags([f.id], !f.forwarded_at)}
+                            disabled={flagForwarding}
+                            className="ml-auto text-xs text-blue-600 underline disabled:opacity-50"
+                          >
+                            {f.forwarded_at ? "未依頼に戻す" : "対応中にする"}
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleRemoveFlag(f)}
-                            className="ml-auto text-xs text-gray-500 underline"
+                            className="text-xs text-gray-500 underline"
                           >
                             取り消す
                           </button>
@@ -2358,21 +2405,41 @@ export default function AdminView({
                     </button>
                   </div>
 
-                  {flagTextOpen && (
+                  {flagTextOpen && unforwardedFlags.length === 0 && (
+                    <p className="mt-2 text-sm text-gray-500">
+                      未依頼のものはありません(どれも対応中です)。
+                    </p>
+                  )}
+                  {flagTextOpen && unforwardedFlags.length > 0 && (
                     <div className="mt-2">
-                      <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-500">
-                        渡すテキスト(名前・座標・理由)
+                      <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+                        渡すテキスト(未依頼のものの名前・座標・理由)
                         <CopyTextButton
                           text={flaggedSpotsText}
                           label="修正・追加の依頼の一覧をコピー"
                         />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleForwardFlags(
+                              unforwardedFlags.map((f) => f.id),
+                              true
+                            )
+                          }
+                          disabled={flagForwarding}
+                          className="ml-auto rounded-lg border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-700 disabled:opacity-50"
+                        >
+                          {flagForwarding
+                            ? "更新しています…"
+                            : `渡したので対応中にする(${unforwardedFlags.length}件)`}
+                        </button>
                       </div>
                       {/* 読み取り専用。コピーはボタンからだが、長いときに
                           一部だけ選んで持っていけるよう選択はできるままにする */}
                       <textarea
                         readOnly
                         value={flaggedSpotsText}
-                        rows={Math.min(14, flaggedSpots.length + 3)}
+                        rows={Math.min(14, unforwardedFlags.length + 3)}
                         className="w-full rounded-lg border border-gray-300 bg-gray-50 p-2 font-mono text-xs"
                       />
                     </div>

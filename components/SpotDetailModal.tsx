@@ -75,6 +75,7 @@ export default function SpotDetailModal({
   onPlanListChange,
   onReviewChange,
   onHideChange,
+  onFlagChange,
   onOpenSpot,
 }: {
   spotId: string;
@@ -119,6 +120,8 @@ export default function SpotDetailModal({
   onReviewChange?: () => void;
   /** このスポットの非表示/解除を切り替えたときに呼ばれる(呼び出し元の地図・一覧への反映用) */
   onHideChange?: () => void;
+  /** 修正の依頼を出した/取り消したときに呼ばれる(呼び出し元の地図の印への反映用) */
+  onFlagChange?: () => void;
   /** 「訪問予定」セクションのリスト詳細から別のスポットが選ばれたときに呼ばれる
    * (呼び出し元が表示対象のスポットIDを差し替える。省略時はリスト詳細を閉じるだけ) */
   onOpenSpot?: (spotId: string) => void;
@@ -311,6 +314,7 @@ export default function SpotDetailModal({
     }
     setFlag(data ?? null);
     setFlagFormOpen(false);
+    onFlagChange?.();
   };
 
   const removeFlag = async () => {
@@ -323,6 +327,7 @@ export default function SpotDetailModal({
     }
     setFlag(null);
     setFlagFormOpen(false);
+    onFlagChange?.();
   };
 
   // 編集・削除できるのは、公開スポットはspot_admin/admin、それ以外(非公開・承認待ち・
@@ -672,7 +677,8 @@ export default function SpotDetailModal({
 
             {canFlag && flag && (
               <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
-                ⚠ 修正を依頼済み{flag.reason ? `: ${flag.reason}` : ""}
+                ⚠ 修正を依頼済み{flag.forwarded_at ? "(対応中)" : ""}
+                {flag.reason ? `: ${flag.reason}` : ""}
               </p>
             )}
 

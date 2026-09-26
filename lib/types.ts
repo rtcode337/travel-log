@@ -99,6 +99,11 @@ export interface SpotFlag {
   spot_id: string | null;
   reason: string;
   flagged_by: string | null;
+  /**
+   * 受け取る側(収集を回す側)へ渡した日時。nullなら未依頼、入っていれば対応中。
+   * 管理画面で渡したときに付け、修正の依頼を出し直すと(理由が変わるので)空に戻る
+   */
+  forwarded_at: string | null;
   created_at: string;
 }
 
