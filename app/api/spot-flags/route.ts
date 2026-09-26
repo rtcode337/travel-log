@@ -19,7 +19,7 @@ import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
  * 一覧の1行を組むSELECT。**追加の依頼は指す先のスポットが無い**ので、
  * スポットは left join で引き、座標は依頼そのもののものに落とす
  */
-const FLAG_SELECT = `select f.id, f.spot_id, f.reason, f.flagged_by, f.created_at,
+const FLAG_SELECT = `select f.id, f.spot_id, f.reason, f.flagged_by, f.forwarded_at, f.created_at,
        case when f.spot_id is null then 'add' else 'fix' end as kind,
        coalesce(s.name, '') as name, s.key, coalesce(s.region, '') as region,
        coalesce(s.lat, f.lat) as lat, coalesce(s.lng, f.lng) as lng,
@@ -36,7 +36,11 @@ async function findSpotType(typeKey: string): Promise<SpotType | null> {
   return rows[0] ?? null;
 }
 
-/** 種別の依頼の一覧(管理画面の「修正・追加の依頼」)。依頼された順に並べる */
+/**
+ * 種別の依頼の一覧(管理画面の「修正・追加の依頼」)。未依頼を先に、それぞれ
+ * 依頼された順に並べる(まだ渡していないものが上に固まるほうが、渡す作業がしやすい)。
+ * `mine=1` を付けると自分が出した依頼(修正・追加の両方)だけを返す(地図に印を出すため)
+ */
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
@@ -65,13 +69,60 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
 
+  if (searchParams.get("mine") === "1") {
+    const { rows } = await query<FlaggedSpot>(
+      `${FLAG_SELECT}
+        where coalesce(s.spot_type_id, f.spot_type_id) = $1 and f.flagged_by = $2
+        order by f.created_at`,
+      [spotType.id, user.id]
+    );
+    return NextResponse.json({ data: rows });
+  }
+
   const { rows } = await query<FlaggedSpot>(
     `${FLAG_SELECT}
       where coalesce(s.spot_type_id, f.spot_type_id) = $1
-      order by f.created_at`,
+      order by f.forwarded_at is not null, f.created_at`,
     [spotType.id]
   );
   return NextResponse.json({ data: rows });
+}
+
+/**
+ * 依頼を「渡した(対応中)」にする・「未依頼」に戻す。
+ * `{ ids: string[], forwarded: boolean }` を受け取る。**idで指す** —— 一覧を
+ * テキストにしてから印を付けるまでの間に増えた依頼まで、渡したことにしないため。
+ * 既に渡した日時が入っているものは上書きしない(最初に渡した日時を残す)。
+ * 更新した件数を返す
+ */
+export async function PATCH(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (!SPOT_ADMIN_ROLES.includes(user.role)) {
+    return NextResponse.json({ error: "権限がありません。" }, { status: 403 });
+  }
+
+  const body = await request.json().catch(() => null);
+  const ids = body?.ids;
+  const forwarded = body?.forwarded;
+  if (
+    !Array.isArray(ids) ||
+    ids.length === 0 ||
+    !ids.every((id) => typeof id === "string") ||
+    typeof forwarded !== "boolean"
+  ) {
+    return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  }
+
+  const { rowCount } = await query(
+    forwarded
+      ? "update spot_flags set forwarded_at = now() where id = any($1::uuid[]) and forwarded_at is null"
+      : "update spot_flags set forwarded_at = null where id = any($1::uuid[])",
+    [ids]
+  );
+  return NextResponse.json({ data: { updated: rowCount ?? 0 } });
 }
 
 /**
@@ -79,6 +130,7 @@ export async function GET(request: Request) {
  *
  * 修正の依頼は同じスポットに2度出しても1件のままで、理由だけが上書きされる
  * (トグルUIの二重送信に強くする。spot_hidesのPOSTと同じ考え方)。
+ * 出し直すと未依頼に戻す —— 理由が変わったなら、渡した中身とはもう別の依頼なので。
  * **公開スポットだけが対象** —— 承認待ち・却下・非公開は承認/却下の流れで扱うため。
  * 追加の依頼は場所ごとに別の依頼として増える(同じ場所に2つ足りないこともある)。
  */
@@ -121,8 +173,9 @@ export async function POST(request: Request) {
     `insert into spot_flags (spot_id, reason, flagged_by)
      values ($1, $2, $3)
      on conflict (spot_id)
-       do update set reason = excluded.reason, flagged_by = excluded.flagged_by
-     returning id, spot_id, reason, flagged_by, created_at`,
+       do update set reason = excluded.reason, flagged_by = excluded.flagged_by,
+                     forwarded_at = null
+     returning id, spot_id, reason, flagged_by, forwarded_at, created_at`,
     [spotId, reason, user.id]
   );
   return NextResponse.json({ data: rows[0] });
@@ -156,7 +209,7 @@ async function requestAdd(
   const { rows } = await query<SpotFlag>(
     `insert into spot_flags (spot_type_id, lat, lng, reason, flagged_by)
      values ($1, $2, $3, $4, $5)
-     returning id, spot_id, reason, flagged_by, created_at`,
+     returning id, spot_id, reason, flagged_by, forwarded_at, created_at`,
     [spotType.id, lat, lng, reason, userId]
   );
   return NextResponse.json({ data: rows[0] });

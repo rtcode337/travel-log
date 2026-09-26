@@ -33,6 +33,7 @@ import {
 } from "@/lib/region";
 import { countedVisits, getSpotTypeSetting, SPOT_ADMIN_ROLES } from "@/lib/types";
 import type {
+  FlaggedSpot,
   Role,
   Spot,
   SpotRoute,
@@ -2353,6 +2354,11 @@ export default function MapView({
   const [addRequestSaving, setAddRequestSaving] = useState(false);
   const [addRequestError, setAddRequestError] = useState<string | null>(null);
   const [addRequestNotice, setAddRequestNotice] = useState<string | null>(null);
+  // 自分が出した修正・追加の依頼。片付くまで地図に印を出す —— 追加の依頼は
+  // スポットが無い場所なので地図に何も残らず、修正の依頼もピンの見た目は変わらない
+  // ので、どこに頼んだか・もう頼んだかが地図から分からなくなる
+  const [myRequests, setMyRequests] = useState<FlaggedSpot[]>([]);
+  const requestMarkersRef = useRef<maplibregl.Marker[]>([]);
   const [pendingSpots, setPendingSpots] = useState<
     { id: string; lat: number; lng: number; name: string; status: string }[]
   >([]);
@@ -2400,6 +2406,20 @@ export default function MapView({
   useEffect(() => {
     api.auth.me().then(({ data }) => setRole(data?.role ?? null));
   }, []);
+
+  const loadMyRequests = useCallback(async () => {
+    const { data } = await api.spotFlags.mine(spotTypeKey);
+    setMyRequests(data ?? []);
+  }, [spotTypeKey]);
+
+  // 依頼を出せるのはspot_admin/adminだけなので、それ以外は問い合わせない
+  useEffect(() => {
+    if (!role || !SPOT_ADMIN_ROLES.includes(role)) {
+      setMyRequests([]);
+      return;
+    }
+    loadMyRequests();
+  }, [role, loadMyRequests]);
 
 
 
@@ -3344,6 +3364,64 @@ export default function MapView({
       pendingMarkersRef.current.push(marker);
     }
   }, [pendingSpots]);
+
+  // 自分の依頼の印。未依頼は破線、対応中(渡した)は実線。
+  // - 修正の依頼: スポットの座標(ピンの先端)を囲む黄色の輪。**タップは素通し**
+  //   にしてピンをそのまま押せるようにする(理由はスポット詳細に出る)。ピンの
+  //   大きさはランクで変わるので、頭に札を載せるより先端を囲むほうがずれない
+  // - 追加の依頼: 緑の「+」。タップで理由と状態を出す。取り消しは管理画面の一覧から
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    requestMarkersRef.current.forEach((m) => m.remove());
+    requestMarkersRef.current = [];
+
+    for (const f of myRequests) {
+      const state = f.forwarded_at ? "対応中" : "未依頼";
+      const border = f.forwarded_at ? "solid" : "dashed";
+      if (f.kind === "fix") {
+        const ring = document.createElement("div");
+        ring.style.cssText = `
+          width: 30px; height: 30px; border-radius: 50%; pointer-events: none;
+          background: #fde68a66; border: 3px ${border} #d97706;
+          box-shadow: 0 0 0 2px #ffffffcc;
+        `;
+        const marker = new maplibregl.Marker({ element: ring })
+          .setLngLat([f.lng, f.lat])
+          .addTo(map);
+        requestMarkersRef.current.push(marker);
+        continue;
+      }
+      const el = document.createElement("div");
+      el.title = `スポット追加を依頼中(${state})`;
+      el.textContent = "+";
+      el.style.cssText = `
+        width: 20px; height: 20px; border-radius: 50%; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        font: bold 14px/1 sans-serif; color: #15803d;
+        background: #dcfce7cc;
+        border: 2px ${border} #16a34a;
+      `;
+      // 理由は利用者の入力なので、HTMLとしてではなくテキストとして入れる
+      const body = document.createElement("div");
+      body.style.cssText = "font-size: 12px; max-width: 220px; white-space: pre-wrap;";
+      const head = document.createElement("div");
+      head.style.fontWeight = "bold";
+      head.textContent = `スポット追加を依頼中(${state})`;
+      body.appendChild(head);
+      if (f.reason) {
+        const reason = document.createElement("div");
+        reason.textContent = f.reason;
+        body.appendChild(reason);
+      }
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([f.lng, f.lat])
+        .setPopup(new maplibregl.Popup({ offset: 14 }).setDOMContent(body))
+        .addTo(map);
+      requestMarkersRef.current.push(marker);
+    }
+  }, [myRequests]);
 
   // タップされたルート(絞り込み等でルート一覧が入れ替わって見つからなければ閉じる扱い)。
   // 本体・重ね表示のどちらのルートも同じ詳細モーダルで表示する(モーダル内に更新系は無い)
@@ -4498,6 +4576,7 @@ export default function MapView({
                     return;
                   }
                   setAddRequestAt(null);
+                  loadMyRequests();
                   setAddRequestNotice("スポット追加を依頼しました");
                   window.setTimeout(() => setAddRequestNotice(null), 3000);
                 }}
@@ -4888,13 +4967,18 @@ export default function MapView({
           onPlanListChange={loadPlanLists}
           // 非表示にする/解除をピンの表示へ即反映する
           onHideChange={loadHides}
+          // 修正の依頼の輪を即反映する
+          onFlagChange={loadMyRequests}
+          // 位置を直した・消したスポットに修正の依頼があれば、輪も動かす・消す
           onSpotChange={(spot) => {
             spotCache.applySpotChange(spot);
             loadPrivateSpots();
+            loadMyRequests();
           }}
           onSpotDeleted={(id) => {
             spotCache.applySpotDelete(id);
             loadPrivateSpots();
+            loadMyRequests();
           }}
           onOpenSpot={setDetailSpotId}
         />

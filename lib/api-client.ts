@@ -213,6 +213,9 @@ export const api = {
     // 修正の依頼はスポット詳細、追加の依頼は地図の右クリックから呼ぶ
     list: (type: string) =>
       request<FlaggedSpot[]>(`/api/spot-flags?type=${encodeURIComponent(type)}`),
+    // 自分が出した依頼(修正・追加の両方。地図に印を出す)
+    mine: (type: string) =>
+      request<FlaggedSpot[]>(`/api/spot-flags?type=${encodeURIComponent(type)}&mine=1`),
     // 1スポットぶん(スポット詳細が依頼の有無を見る)。無ければ空配列
     forSpot: (spotId: string) =>
       request<FlaggedSpot[]>(`/api/spot-flags?spot_id=${encodeURIComponent(spotId)}`),
@@ -227,6 +230,12 @@ export const api = {
       request<SpotFlag>("/api/spot-flags", {
         method: "POST",
         body: JSON.stringify({ type, lat, lng, reason }),
+      }),
+    // 渡した(対応中)にする・未依頼に戻す。依頼のidで指す
+    setForwarded: (ids: string[], forwarded: boolean) =>
+      request<{ updated: number }>("/api/spot-flags", {
+        method: "PATCH",
+        body: JSON.stringify({ ids, forwarded }),
       }),
     // 1件取り消す。修正の依頼はスポットのid、追加の依頼は依頼そのもののidで指す
     delete: (id: string) =>

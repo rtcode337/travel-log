@@ -288,6 +288,7 @@ create index visit_notes_visit_id_idx on visit_notes (visit_id);
 -- 管理画面に一覧で出し、名前・座標・理由をまとめて渡す・まとめて取り消す、の
 -- 2つの操作で片付ける。修正の依頼は1スポットに1つ
 -- (誰が依頼したかは flagged_by、依頼日時は created_at)。
+-- 受け取る側へ渡したら forwarded_at に日時を入れる(空=未依頼、入っていれば対応中)。
 -- スポット自体には触らないので、依頼が付いていても地図の見え方は変わらない
 -- =============================================================
 create table spot_flags (
@@ -298,6 +299,7 @@ create table spot_flags (
   lat          double precision,
   lng          double precision,
   spot_type_id uuid references spot_types (id) on delete cascade,
+  forwarded_at timestamptz,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   unique (spot_id),
