@@ -237,7 +237,7 @@ export default function SpotsView({
   // アーカイブの一覧(訪問予定リストの「アーカイブ」から開く)
   const [showArchive, setShowArchive] = useState(false);
 
-  const [browseMode, setBrowseMode] = useState<BrowseMode>("series");
+  const [browseMode, setBrowseMode] = useState<BrowseMode>("region");
   const [managementItems, setManagementItems] = useState<Spot[]>([]);
   const [managementTotal, setManagementTotal] = useState(0);
   const [managementAvailableSeries, setManagementAvailableSeries] = useState<Series[]>([]);
@@ -566,8 +566,8 @@ export default function SpotsView({
           }}
           tabs={[
             { key: "mine", label: "自分の記録" },
-            { key: "series", label: "探す: シリーズ" },
             { key: "region", label: `探す: ${regionLabel}` },
+            { key: "series", label: "探す: シリーズ" },
           ]}
         />
 
@@ -901,17 +901,6 @@ export default function SpotsView({
               <div className="hidden overflow-hidden rounded-lg border border-gray-300 text-xs sm:flex">
                 <button
                   type="button"
-                  onClick={() => setBrowseMode("series")}
-                  className={`px-2.5 py-1 font-medium ${
-                    browseMode === "series"
-                      ? "bg-blue-600 text-white"
-                      : "bg-white text-gray-500"
-                  }`}
-                >
-                  シリーズ
-                </button>
-                <button
-                  type="button"
                   onClick={() => setBrowseMode("region")}
                   className={`px-2.5 py-1 font-medium ${
                     browseMode === "region"
@@ -920,6 +909,17 @@ export default function SpotsView({
                   }`}
                 >
                   {regionLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBrowseMode("series")}
+                  className={`px-2.5 py-1 font-medium ${
+                    browseMode === "series"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-500"
+                  }`}
+                >
+                  シリーズ
                 </button>
               </div>
             </div>
