@@ -237,14 +237,14 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ ids, forwarded }),
       }),
-    // 1件取り消す。修正の依頼はスポットのid、追加の依頼は依頼そのもののidで指す
+    // 1件削除する。修正の依頼はスポットのid、追加の依頼は依頼そのもののidで指す
     delete: (id: string) =>
       request<{ ok: true }>(`/api/spot-flags/${id}`, { method: "DELETE" }),
-    // 種別ぶんをまとめて取り消す(管理画面の一括取り消し)
-    clear: (type: string) =>
+    // まとめて削除する(管理画面の一括削除)。依頼のidで指し、種別に属するものだけを消す
+    deleteMany: (type: string, ids: string[]) =>
       request<{ deleted: number }>(
         `/api/spot-flags?type=${encodeURIComponent(type)}`,
-        { method: "DELETE" }
+        { method: "DELETE", body: JSON.stringify({ ids }) }
       ),
   },
   routes: {

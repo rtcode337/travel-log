@@ -215,7 +215,12 @@ async function requestAdd(
   return NextResponse.json({ data: rows[0] });
 }
 
-/** 種別ぶんの依頼をまとめて取り消す(管理画面の一括取り消し)。消した件数を返す */
+/**
+ * 依頼をまとめて削除する(管理画面の「未依頼を一括で削除」「対応中を一括で削除」)。
+ * `{ ids: string[] }` で指し、種別に属するものだけを消す。消した件数を返す。
+ * **idで指す** —— 状態で消すと、一覧を表示してから押すまでに増えた依頼まで、
+ * 見ないまま消してしまう
+ */
 export async function DELETE(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
@@ -234,12 +239,23 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "存在しない種別です。" }, { status: 404 });
   }
 
+  const body = await request.json().catch(() => null);
+  const ids = body?.ids;
+  if (
+    !Array.isArray(ids) ||
+    ids.length === 0 ||
+    !ids.every((id) => typeof id === "string")
+  ) {
+    return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  }
+
   // 修正の依頼はスポットの種別で、追加の依頼は依頼そのものの種別で数える
   const { rowCount } = await query(
     `delete from spot_flags f
-      where f.spot_type_id = $1
-         or f.spot_id in (select id from spots where spot_type_id = $1)`,
-    [spotType.id]
+      where f.id = any($2::uuid[])
+        and (f.spot_type_id = $1
+             or f.spot_id in (select id from spots where spot_type_id = $1))`,
+    [spotType.id, ids]
   );
   return NextResponse.json({ data: { deleted: rowCount ?? 0 } });
 }
