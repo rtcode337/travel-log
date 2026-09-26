@@ -131,7 +131,6 @@ export default function AdminView({
   // 修正・追加の依頼(spot_flags)。依頼するのは地図(修正はスポット詳細、
   // 追加は右クリック)で、ここは一覧・渡すテキスト・取り消しだけを持つ
   const [flaggedSpots, setFlaggedSpots] = useState<FlaggedSpot[]>([]);
-  const [flagTextOpen, setFlagTextOpen] = useState(false);
   const [flagClearing, setFlagClearing] = useState(false);
   const [flagMessage, setFlagMessage] = useState<string | null>(null);
   const [flagForwarding, setFlagForwarding] = useState(false);
@@ -1088,7 +1087,7 @@ export default function AdminView({
   };
 
   /**
-   * まだ渡していない依頼。「テキストで表示」はこれだけを並べる —— 対応中の
+   * まだ渡していない依頼。渡すテキストはこれだけを並べる —— 対応中の
    * ものまで混ぜると、同じ依頼を二重に渡してしまう
    */
   const unforwardedFlags = useMemo(
@@ -1139,38 +1138,43 @@ export default function AdminView({
     loadFlags();
   };
 
-  /** 依頼を種別ぶんまとめて取り消す(片付けたあとに押す) */
-  const handleClearFlags = async () => {
-    if (flaggedSpots.length === 0) return;
+  /**
+   * 未依頼/対応中の依頼をまとめて削除する。**いま一覧に出ているidで指す** ——
+   * 表示してから押すまでに増えた依頼まで、見ないまま消さないため
+   */
+  const handleDeleteFlags = async (targets: FlaggedSpot[], stateLabel: string) => {
+    if (targets.length === 0) return;
     if (
       !confirm(
-        `修正・追加の依頼${flaggedSpots.length}件をまとめて取り消しますか?(スポット自体は消えません)`
+        `${stateLabel}の依頼${targets.length}件をまとめて削除しますか?(スポット自体は消えません)`
       )
     ) {
       return;
     }
     setFlagClearing(true);
     setFlagMessage(null);
-    const { data, error } = await api.spotFlags.clear(typeKey);
+    const { data, error } = await api.spotFlags.deleteMany(
+      typeKey,
+      targets.map((f) => f.id)
+    );
     setFlagClearing(false);
     if (error) {
-      setFlagMessage("依頼を取り消せませんでした: " + error.message);
+      setFlagMessage("依頼を削除できませんでした: " + error.message);
       return;
     }
-    setFlagTextOpen(false);
-    setFlagMessage(`修正・追加の依頼を${data?.deleted ?? 0}件取り消しました。`);
+    setFlagMessage(`${stateLabel}の依頼を${data?.deleted ?? 0}件削除しました。`);
     loadFlags();
   };
 
   /**
-   * 依頼を1件取り消す。**追加の依頼を取り消せるのはここだけ** —— 指す先の
+   * 依頼を1件削除する。**追加の依頼を削除できるのはここだけ** —— 指す先の
    * スポットが無いので、修正の依頼のようにスポット詳細から取り消す道が無い
    */
   const handleRemoveFlag = async (f: FlaggedSpot) => {
     setFlagMessage(null);
     const { error } = await api.spotFlags.delete(f.id);
     if (error) {
-      setFlagMessage("依頼を取り消せませんでした: " + error.message);
+      setFlagMessage("依頼を削除できませんでした: " + error.message);
       return;
     }
     loadFlags();
@@ -2288,12 +2292,13 @@ export default function AdminView({
                   spot_admin/adminが地図から出した依頼の一覧。スポット詳細の
                   「⚠ 修正を依頼」で出したもの(公開スポットのみ)が[修正]、地図の
                   右クリック(長押し)の「ここにスポット追加を依頼」で出したものが[追加]。
-                  「テキストで表示」は未依頼のものの名前・座標・理由を1行ずつ並べたもので、
+                  下の「渡すテキスト」は未依頼のものの名前・座標・理由を1行ずつ並べたもので、
                   そのままAIに渡して直し方を相談したり、tazunaの「travel-logからの依頼」に
                   貼って情報収集を回したりするための形(理由の無いものは理由を書かない)。
                   渡したら「対応中にする」で印を付けると、まだ渡していないものと
                   見分けられる(対応中のものはテキストに入らない)。
-                  片付いたら「依頼を一括で取り消す」で消す(スポット自体は消えない)。
+                  片付いたら「対応中を一括で削除」で消す(スポット自体は消えない)。
+                  要らなくなった未依頼のものは「未依頼を一括で削除」で消せる。
                 </HelpTip>
               </h3>
 
@@ -2378,39 +2383,49 @@ export default function AdminView({
                             onClick={() => handleRemoveFlag(f)}
                             className="text-xs text-gray-500 underline"
                           >
-                            取り消す
+                            削除
                           </button>
                         </div>
                       </li>
                     ))}
                   </ul>
 
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setFlagTextOpen((v) => !v)}
-                      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                      onClick={() => handleDeleteFlags(unforwardedFlags, "未依頼")}
+                      disabled={flagClearing || unforwardedFlags.length === 0}
+                      className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-50"
                     >
-                      {flagTextOpen ? "テキストを閉じる" : "テキストで表示"}
+                      未依頼を一括で削除({unforwardedFlags.length}件)
                     </button>
                     <button
                       type="button"
-                      onClick={handleClearFlags}
-                      disabled={flagClearing}
+                      onClick={() =>
+                        handleDeleteFlags(
+                          flaggedSpots.filter((f) => f.forwarded_at),
+                          "対応中"
+                        )
+                      }
+                      disabled={
+                        flagClearing ||
+                        flaggedSpots.length === unforwardedFlags.length
+                      }
                       className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-50"
                     >
-                      {flagClearing
-                        ? "取り消しています…"
-                        : `依頼を一括で取り消す(${flaggedSpots.length}件)`}
+                      対応中を一括で削除(
+                      {flaggedSpots.length - unforwardedFlags.length}件)
                     </button>
                   </div>
 
-                  {flagTextOpen && unforwardedFlags.length === 0 && (
+                  {/* 渡すテキストは開閉させずに常に出す(この節ごと折り畳みの中にあるので、
+                      ここでさらに畳むと、渡すまでに開く操作が2段になる) */}
+                  {unforwardedFlags.length === 0 && (
                     <p className="mt-2 text-sm text-gray-500">
                       未依頼のものはありません(どれも対応中です)。
                     </p>
                   )}
-                  {flagTextOpen && unforwardedFlags.length > 0 && (
+                  {unforwardedFlags.length > 0 && (
                     <div className="mt-2">
                       <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
                         渡すテキスト(未依頼のものの名前・座標・理由)

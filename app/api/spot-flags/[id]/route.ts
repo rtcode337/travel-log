@@ -4,11 +4,11 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { SPOT_ADMIN_ROLES } from "@/lib/types";
 
 /**
- * 依頼を1つ取り消す。**指し方は2通り** —— 修正の依頼はスポットのid
+ * 依頼を1つ削除する。**指し方は2通り** —— 修正の依頼はスポットのid
  * (スポット詳細の「依頼を取り消す」。依頼のidを知らない)、追加の依頼は
  * 依頼そのもののid(管理画面の一覧。指す先のスポットが無い)。
  * どちらもuuidなので取り違えは起きない。
- * 一覧からまとめて取り消すのは DELETE /api/spot-flags?type= の方。
+ * 一覧からまとめて削除するのは DELETE /api/spot-flags?type= の方(idの配列で指す)。
  */
 export async function DELETE(
   _request: Request,
