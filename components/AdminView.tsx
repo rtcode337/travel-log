@@ -2035,149 +2035,6 @@ export default function AdminView({
             </div>
           )}
 
-            {isAdmin && currentType && (
-              <details>
-                <summary className="cursor-pointer select-none text-base font-bold">
-                  このスポット種別の管理({currentTypeLabel})
-                </summary>
-                <section className="mt-2 rounded-xl border border-gray-200 bg-white p-3">
-                <h3 className="mb-2 text-base font-bold">スポット種別の設定</h3>
-                {typeSettingsMessage && (
-                  <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
-                    {typeSettingsMessage}
-                  </p>
-                )}
-                <div className="flex flex-col gap-2">
-                  {SPOT_TYPE_SETTING_KEYS.map((key) => (
-                    <label key={key} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={getSpotTypeSetting(currentType, key)}
-                        onChange={() => handleToggleSetting(currentType, key)}
-                      />
-                      この種別で{SPOT_TYPE_SETTING_LABELS[key]}を有効にする
-                    </label>
-                  ))}
-                </div>
-
-                <form
-                  onSubmit={handleSaveRegionSettings}
-                  className="mt-3 border-t border-gray-100 pt-3"
-                >
-                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                    対象地域
-                    <HelpTip>
-                      地図の地名検索の対象国と、スポットの「地域」欄の扱い
-                      (日本=都道府県、国を指定=その国の州・県、世界=国ごと)を決める。
-                    </HelpTip>
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      value={regionScopeKind}
-                      onChange={(e) =>
-                        setRegionScopeKind(
-                          e.target.value as "jp" | "country" | "world"
-                        )
-                      }
-                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                    >
-                      <option value="jp">日本(既定)</option>
-                      <option value="country">国を指定</option>
-                      <option value="world">世界(国ごと)</option>
-                    </select>
-                    {regionScopeKind === "country" && (
-                      <>
-                        <input
-                          value={regionCountryCode}
-                          onChange={(e) => setRegionCountryCode(e.target.value)}
-                          placeholder="国コード(例: fr)"
-                          maxLength={2}
-                          autoComplete="off"
-                          className="w-36 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                        />
-                        {/^[a-zA-Z]{2}$/.test(regionCountryCode.trim()) && (
-                          <span className="text-xs text-gray-500">
-                            = {countryDisplayName(regionCountryCode.trim())}
-                          </span>
-                        )}
-                      </>
-                    )}
-                    <button
-                      type="submit"
-                      disabled={savingRegionSettings}
-                      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-                    >
-                      {savingRegionSettings ? "保存中…" : "保存"}
-                    </button>
-                  </div>
-                </form>
-
-                <form
-                  onSubmit={handleSaveCategories}
-                  className="mt-3 border-t border-gray-100 pt-3"
-                >
-                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                    カテゴリ
-                    <HelpTip>
-                      この種別で使うカテゴリの一覧(カンマまたは読点区切り。並び順が
-                      そのまま絞り込みチップ・スポット追加時のサジェストの並びになる)。
-                      空で保存するとカテゴリ未定義になり、既存スポットに入っている値
-                      だけが絞り込み・サジェストに出る。未保存の種別は観光地の
-                      カテゴリが既定。カテゴリ自体は自由入力のため、一覧に無い値の
-                      スポットもそのまま動く(並びは一覧の後ろになる)。
-                    </HelpTip>
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      value={categoriesDraft}
-                      onChange={(e) => setCategoriesDraft(e.target.value)}
-                      placeholder="神社仏閣、自然、城、…"
-                      autoComplete="off"
-                      className="min-w-60 flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                    />
-                    <button
-                      type="submit"
-                      disabled={savingCategories}
-                      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-                    >
-                      {savingCategories ? "保存中…" : "保存"}
-                    </button>
-                  </div>
-                </form>
-
-                <div className="mt-3 border-t border-gray-100 pt-3">
-                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                    JSONファイルから設定を反映
-                    <HelpTip>
-                      種別追加時と同じ形式(
-                      <code>{"{ key, label, settings?, series?, categories? }"}</code>
-                      )のJSONファイルをアップロードすると、label・settings・series・
-                      categoriesをまとめてこの種別に反映できる(JSON側で省略した
-                      JSONキーの内容は変更しない)。ただしkeyの変更は影響が大きいため、
-                      JSONのkeyが現在のkey(
-                      <span className="font-mono">{typeKey}</span>
-                      )と一致しない場合はエラーにして何も反映しない。
-                    </HelpTip>
-                  </p>
-                  <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
-                    {applyingTypeJson ? "反映中…" : "JSONファイルから反映"}
-                    <input
-                      type="file"
-                      accept=".json,application/json"
-                      className="hidden"
-                      disabled={applyingTypeJson}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleApplyTypeFromJson(file);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                </div>
-                </section>
-              </details>
-            )}
-
             <details>
               <summary className="cursor-pointer select-none text-base font-bold">
                 スポットの管理
@@ -2673,6 +2530,149 @@ export default function AdminView({
               </section>
             </details>
 
+            {isAdmin && currentType && (
+              <details>
+                <summary className="cursor-pointer select-none text-base font-bold">
+                  このスポット種別の管理({currentTypeLabel})
+                </summary>
+                <section className="mt-2 rounded-xl border border-gray-200 bg-white p-3">
+                <h3 className="mb-2 text-base font-bold">スポット種別の設定</h3>
+                {typeSettingsMessage && (
+                  <p className="mb-3 whitespace-pre-wrap rounded-lg bg-blue-50 p-2 text-sm text-blue-800">
+                    {typeSettingsMessage}
+                  </p>
+                )}
+                <div className="flex flex-col gap-2">
+                  {SPOT_TYPE_SETTING_KEYS.map((key) => (
+                    <label key={key} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={getSpotTypeSetting(currentType, key)}
+                        onChange={() => handleToggleSetting(currentType, key)}
+                      />
+                      この種別で{SPOT_TYPE_SETTING_LABELS[key]}を有効にする
+                    </label>
+                  ))}
+                </div>
+
+                <form
+                  onSubmit={handleSaveRegionSettings}
+                  className="mt-3 border-t border-gray-100 pt-3"
+                >
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                    対象地域
+                    <HelpTip>
+                      地図の地名検索の対象国と、スポットの「地域」欄の扱い
+                      (日本=都道府県、国を指定=その国の州・県、世界=国ごと)を決める。
+                    </HelpTip>
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={regionScopeKind}
+                      onChange={(e) =>
+                        setRegionScopeKind(
+                          e.target.value as "jp" | "country" | "world"
+                        )
+                      }
+                      className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    >
+                      <option value="jp">日本(既定)</option>
+                      <option value="country">国を指定</option>
+                      <option value="world">世界(国ごと)</option>
+                    </select>
+                    {regionScopeKind === "country" && (
+                      <>
+                        <input
+                          value={regionCountryCode}
+                          onChange={(e) => setRegionCountryCode(e.target.value)}
+                          placeholder="国コード(例: fr)"
+                          maxLength={2}
+                          autoComplete="off"
+                          className="w-36 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                        />
+                        {/^[a-zA-Z]{2}$/.test(regionCountryCode.trim()) && (
+                          <span className="text-xs text-gray-500">
+                            = {countryDisplayName(regionCountryCode.trim())}
+                          </span>
+                        )}
+                      </>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={savingRegionSettings}
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                    >
+                      {savingRegionSettings ? "保存中…" : "保存"}
+                    </button>
+                  </div>
+                </form>
+
+                <form
+                  onSubmit={handleSaveCategories}
+                  className="mt-3 border-t border-gray-100 pt-3"
+                >
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                    カテゴリ
+                    <HelpTip>
+                      この種別で使うカテゴリの一覧(カンマまたは読点区切り。並び順が
+                      そのまま絞り込みチップ・スポット追加時のサジェストの並びになる)。
+                      空で保存するとカテゴリ未定義になり、既存スポットに入っている値
+                      だけが絞り込み・サジェストに出る。未保存の種別は観光地の
+                      カテゴリが既定。カテゴリ自体は自由入力のため、一覧に無い値の
+                      スポットもそのまま動く(並びは一覧の後ろになる)。
+                    </HelpTip>
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={categoriesDraft}
+                      onChange={(e) => setCategoriesDraft(e.target.value)}
+                      placeholder="神社仏閣、自然、城、…"
+                      autoComplete="off"
+                      className="min-w-60 flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingCategories}
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                    >
+                      {savingCategories ? "保存中…" : "保存"}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="mt-3 border-t border-gray-100 pt-3">
+                  <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                    JSONファイルから設定を反映
+                    <HelpTip>
+                      種別追加時と同じ形式(
+                      <code>{"{ key, label, settings?, series?, categories? }"}</code>
+                      )のJSONファイルをアップロードすると、label・settings・series・
+                      categoriesをまとめてこの種別に反映できる(JSON側で省略した
+                      JSONキーの内容は変更しない)。ただしkeyの変更は影響が大きいため、
+                      JSONのkeyが現在のkey(
+                      <span className="font-mono">{typeKey}</span>
+                      )と一致しない場合はエラーにして何も反映しない。
+                    </HelpTip>
+                  </p>
+                  <label className="inline-block cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                    {applyingTypeJson ? "反映中…" : "JSONファイルから反映"}
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      disabled={applyingTypeJson}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleApplyTypeFromJson(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                </section>
+              </details>
+            )}
+
 
           {isAdmin && (
             <details>
@@ -2956,10 +2956,10 @@ export default function AdminView({
               adminTab === "users" ? "flex" : "hidden lg:flex"
             }`}
           >
-          {/* 「スポットの管理」と同じdetails/summaryの体裁。
-              既定は畳んだ状態で、2カラム(PC)のときだけ開いて出す
-              (openWhenTwoColumns) */}
-          <details open>
+          {/* 「スポットの管理」と同じdetails/summaryの体裁。既定は畳む ——
+              ユーザーを足す・変えるのはたまにで、開いたままだと縦に長い一覧が
+              右の柱を占める */}
+          <details>
             <summary className="cursor-pointer select-none text-base font-bold">
               ユーザー管理
             </summary>
