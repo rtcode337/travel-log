@@ -1167,8 +1167,8 @@ export default function AdminView({
   };
 
   /**
-   * 依頼を1件削除する。**追加の依頼を削除できるのはここだけ** —— 指す先の
-   * スポットが無いので、修正の依頼のようにスポット詳細から取り消す道が無い
+   * 依頼を1件削除する。追加の依頼は指す先のスポットが無いので、修正の依頼のように
+   * スポット詳細から取り消す道が無い —— ここと、地図の「+」の吹き出しから取り消す
    */
   const handleRemoveFlag = async (f: FlaggedSpot) => {
     setFlagMessage(null);

@@ -3369,7 +3369,9 @@ export default function MapView({
   // - 修正の依頼: スポットの座標(ピンの先端)を囲む黄色の輪。**タップは素通し**
   //   にしてピンをそのまま押せるようにする(理由はスポット詳細に出る)。ピンの
   //   大きさはランクで変わるので、頭に札を載せるより先端を囲むほうがずれない
-  // - 追加の依頼: 緑の「+」。タップで理由と状態を出す。取り消しは管理画面の一覧から
+  // - 追加の依頼: 緑の「+」。タップで理由と状態を出し、その場で取り消せる。
+  //   指す先のスポットが無いので、ここで取り消せないと管理画面の一覧まで
+  //   探しに行くことになる(地図で「これは要らなかった」と気づくのはこの場面)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -3415,13 +3417,38 @@ export default function MapView({
         reason.textContent = f.reason;
         body.appendChild(reason);
       }
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "依頼を取り消す";
+      cancel.style.cssText = `
+        margin-top: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer;
+        color: #b91c1c; background: #fff; border: 1px solid #fca5a5; border-radius: 4px;
+      `;
+      const failure = document.createElement("div");
+      failure.style.cssText = "margin-top: 4px; color: #b91c1c;";
+      cancel.addEventListener("click", async () => {
+        cancel.disabled = true;
+        cancel.textContent = "取り消しています…";
+        failure.textContent = "";
+        const { error } = await api.spotFlags.delete(f.id);
+        if (error) {
+          cancel.disabled = false;
+          cancel.textContent = "依頼を取り消す";
+          failure.textContent = "取り消せませんでした: " + error.message;
+          return;
+        }
+        // 読み直すと印ごと描き直され、ポップアップも一緒に消える
+        loadMyRequests();
+      });
+      body.appendChild(cancel);
+      body.appendChild(failure);
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([f.lng, f.lat])
         .setPopup(new maplibregl.Popup({ offset: 14 }).setDOMContent(body))
         .addTo(map);
       requestMarkersRef.current.push(marker);
     }
-  }, [myRequests]);
+  }, [myRequests, loadMyRequests]);
 
   // タップされたルート(絞り込み等でルート一覧が入れ替わって見つからなければ閉じる扱い)。
   // 本体・重ね表示のどちらのルートも同じ詳細モーダルで表示する(モーダル内に更新系は無い)
