@@ -130,6 +130,7 @@ export default function PlanBuildPanel({
                       スポット名の幅を食うため出さない) */}
                   <span
                     className="h-3.5 w-3.5 shrink-0 rounded-full"
+                    role="img"
                     aria-label={seriesName}
                     style={{
                       backgroundColor: face.color,

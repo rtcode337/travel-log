@@ -65,7 +65,7 @@ Googleログインの設定は [docs/operations.md](docs/operations.md)、
 docker compose -f docker-compose.dev.yml up --build   # http://localhost:7040
 ```
 
-Node や Postgres をローカルに入れる必要はない。スマホの実機で開くときは、`.env`に
+Node や Postgres をローカルに入れる必要はない。テストは`npm test`、lintは`npm run lint`。スマホの実機で開くときは、`.env`に
 `ALLOWED_DEV_ORIGINS=localhost,127.0.0.1,<ホスト名かIP>`を設定してから起動する
 (未設定のまま`localhost`以外で開くと画面が真っ白になる)。
 

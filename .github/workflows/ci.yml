@@ -2,7 +2,8 @@
 # docker-publish はイメージを作るだけで、失敗しても PR の側には出ないため、
 # 依存更新(Dependabot)や手直しの PR はここが通ってからマージする。
 #
-# 通すのは next build(型エラーと依存の不整合はここで落ちる)と、スキーマの適用の検査。
+# 通すのは lint・lib の単体テスト・next build(型エラーと依存の不整合はここで落ちる)と、
+# スキーマの適用の検査。
 # 公開リポジトリなので標準ランナーの実行時間は無料枠の外。
 name: ci
 
@@ -33,6 +34,9 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - run: npm run lint
+      - run: npm test
 
       # DB もクラウドの鍵も要らない(next build は静的解析とバンドルまで)
       - run: npm run build

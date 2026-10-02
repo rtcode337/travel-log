@@ -26,7 +26,7 @@ LAN内の別端末から開発サーバを開くときは`ALLOWED_DEV_ORIGINS`(`
 
 **リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
 
-このプロジェクトにアプリコードのテストスイート/テストコマンドは存在しない(唯一のテストは`scripts/bootstrap-sql_test.sh`で、Supabase向けの一括SQLがアプリの起動時の適用と同じスキーマを作るかを突き合わせるもの。`db/migrations/README.md`参照)。リンターも未導入(Next.js 16で`next lint`が廃止された際、代替のESLint導入は見送った — eslint-config-nextの依存チェーンに未修正のbrace-expansion脆弱性(GHSA-mh99-v99m-4gvg)が含まれ、導入するとDependabotの高深刻度アラートが解消不能な形で付くため。エコシステム側の修正後に導入を検討する)。型チェックは`next build`が行う。
+テストは`npm test`(`lib/**/*.test.ts`を`node:test`+`tsx`で流す。`@/`の別名もそのまま解決される)。**対象は`lib/`の純粋な関数**(日時の書式・CSV・ZIPの書き出しと読み戻し・セッション・レート制限・入力の検査など)で、画面とAPIは含まない。DBに触る検査は`scripts/bootstrap-sql_test.sh`(スキーマ本体+マイグレーションを2回当てて冪等であること、Supabase向けの一括SQLと同じ状態になることを確かめる。`db/migrations/README.md`参照)。リンターは`npm run lint`(Biome。**lintだけで整形はしない**)。ESLintは`eslint-config-next`の依存チェーンに未修正の脆弱性(GHSA-mh99-v99m-4gvg)があり見送った。`biome.json`は推奨ルールのうち、**いまのコードで通るものだけを有効にしてある** —— a11y(ボタンの`type`・クリックできる要素の役割など)とフックの依存配列は直す量が多く、まとめて直すまで切ってある。型チェックは`next build`が行う。CIはこの3つと`next build`を回す(`.github/workflows/ci.yml`)。
 
 ### スキーマ変更のルール
 
