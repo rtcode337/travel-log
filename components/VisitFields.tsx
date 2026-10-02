@@ -87,6 +87,19 @@ export default function VisitFields({
             onChange={(e) => onVisitedOnChange(e.target.value)}
             className="w-full min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
+          {/* 手元の写真から日時だけ読む。保存済みの写真にはExifが残っていないので、
+              あとから日時を直すときはこちらから元ファイルを選ぶ。
+              日時欄の行に置くのは、写真欄の近くにあると「写真を追加する」ボタンに見えるため */}
+          <label className="flex shrink-0 cursor-pointer items-center rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600">
+            写真から読む
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleReadTakenAt}
+              className="hidden"
+            />
+          </label>
           {/* 「時期不明」「下調べ」用に空欄へ戻すボタン(ブラウザによっては
               datetime-local入力のクリア手段が無いため) */}
           {visitedOn && (
@@ -99,21 +112,9 @@ export default function VisitFields({
             </button>
           )}
         </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {/* 手元の写真から日時だけ読む。保存済みの写真にはExifが残っていないので、
-              あとから日時を直すときはこちらから元ファイルを選ぶ */}
-          <label className="cursor-pointer rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-600">
-            写真から読む
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleReadTakenAt}
-              className="hidden"
-            />
-          </label>
-          {readNote && <span className="text-xs text-gray-500">{readNote}</span>}
-        </div>
+        {readNote && (
+          <p className="mt-1.5 text-xs text-gray-500">{readNote}</p>
+        )}
         {earliestTakenAt && takenAtValue && takenAtValue !== visitedOn && (
           <button
             type="button"
