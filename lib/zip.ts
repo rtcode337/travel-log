@@ -1,7 +1,7 @@
 /**
  * 依存パッケージなしの最小ZIP生成(サーバー専用モジュール)。
  *
- * 訪問記録エクスポート(app/api/visits/export/route.ts)のためのもので、
+ * 訪問記録エクスポート(lib/visitExport.ts。POST /api/exportsのバックグラウンド生成)のためのもので、
  * 圧縮はしない(STORE方式)。同梱するのは圧縮済み画像(jpg/png/webp)と
  * 小さなCSVだけなので、deflateしてもサイズはほぼ変わらない。
  * ZIP64には対応しない(4GB超・65,535エントリ超は生成時にエラーにする)。
@@ -39,11 +39,11 @@ function dosDateTime(d: Date): { time: number; date: number } {
   };
 }
 
-export function buildZip(entries: ZipEntry[], mtime = new Date()): Buffer {
+export function buildZip(entries: ZipEntry[]): Buffer {
   if (entries.length > 0xffff) {
     throw new Error("ZIPに格納できるファイル数の上限を超えました");
   }
-  const { time, date } = dosDateTime(mtime);
+  const { time, date } = dosDateTime(new Date());
 
   const localParts: Buffer[] = [];
   const centralParts: Buffer[] = [];

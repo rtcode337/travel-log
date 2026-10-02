@@ -51,13 +51,6 @@ export function countryDisplayName(code: string): string {
   return code.toUpperCase();
 }
 
-/** スコープ自体の表示名(管理画面用)。'jp'→日本、'world'→世界、国コード→国名 */
-export function regionScopeDisplayName(scope: string): string {
-  if (scope === "jp") return "日本";
-  if (scope === "world") return "世界";
-  return countryDisplayName(scope);
-}
-
 const prefectureOrder = new Map(PREFECTURES.map((p, i) => [p as string, i]));
 
 /**

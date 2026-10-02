@@ -44,29 +44,6 @@ export function resolveCategories(
   return parseCategories(raw) ?? [];
 }
 
-/**
- * 実際に使われたカテゴリのうち、一覧にまだ無いものを**末尾に足した**新しい一覧を返す。
- * 足すものが無ければnull(呼び出し側が「保存しない」を判断できるように)。
- *
- * 一覧の既定値を廃したぶん、**使った値がそのまま一覧になっていく形**にするためのもの。
- * 並びは「もとの一覧 → 新しく出てきた順」で、既にある値の位置は動かさない
- * (絞り込みチップの並びが、追加のたびに入れ替わらないようにするため)。
- */
-export function mergeCategories(
-  defined: Category[],
-  used: Category[]
-): Category[] | null {
-  const seen = new Set(defined);
-  const added: Category[] = [];
-  for (const value of used) {
-    const v = value.trim();
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    added.push(v);
-  }
-  return added.length > 0 ? [...defined, ...added] : null;
-}
-
 /** カテゴリの並び順(categories配列の順→未知の値→null の順)。Array.sort用 */
 export function getCategoryOrder(
   category: Category | null,

@@ -27,17 +27,13 @@ import {
   CURRENT_LOCATION_ZOOM,
 } from "@/lib/mapStyle";
 import { useRegionScope } from "@/lib/useRegionScope";
-import {
-  DEFAULT_REGION_SCOPE,
-  regionFieldLabel,
-} from "@/lib/region";
+import { DEFAULT_REGION_SCOPE } from "@/lib/region";
 import { countedVisits, getSpotTypeSetting, SPOT_ADMIN_ROLES } from "@/lib/types";
 import type {
   FlaggedSpot,
   Role,
   Spot,
   SpotRoute,
-  SpotStatus,
   SpotType,
   Visit,
   VisitPlanList,
@@ -101,22 +97,6 @@ const STACK_BADGE_LAYER_ID = "spots-stack-badge";
 const FOCUS_SOURCE_ID = "spot-focus";
 const FOCUS_LAYER_ID = "spot-focus-halo";
 
-
-/**
- * 空を除いた重複なしの一覧を**出てきた順のまま**返す。`distinctValues`(lib/types.ts)は
- * 並べ替えてしまうので、「種別の設定を先に、実データを後ろに」の並びを保てない
- */
-function distinctNonEmpty(values: (string | null | undefined)[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const v = value?.trim();
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    out.push(v);
-  }
-  return out;
-}
 
 const PATH_PIN_SOURCE_ID = "spots-path";
 const PATH_PIN_LAYER_ID = "spots-path-point";
@@ -711,7 +691,7 @@ function isInVisitedRange(visitedOn: string | null, filters: SpotFilters): boole
 
 /**
  * 選んだ日(期間)に訪問したスポットのID。
- * 経路(buildVisitPath)と違い**スポットの解決が要らない**ので、まだ読み込んで
+ * 経路(buildVisitPathsByDay)と違い**スポットの解決が要らない**ので、まだ読み込んで
  * いないスポットや別のスポット種別のスポットも含めて「その期間に訪問したか」だけを
  * 判定できる。ピンを絞り込みから免除するかの判定はこちらを使う
  * (重ね表示側はスポットの実体を自前で持っているため、IDが分かれば足りる)。
@@ -1523,7 +1503,7 @@ export default function MapView({
     [spotCache.publicSpots, privateSpots]
   );
   // 自分の訪問記録(全種別分)。ピンの訪問済み表示のほか、訪問日での絞り込みと
-  // 訪問順の矢印(buildVisitPath)に訪問日時が要るため、IDの集合ではなく全件を持つ
+  // 訪問順の矢印(buildVisitPathsByDay)に訪問日時が要るため、IDの集合ではなく全件を持つ
   const [visits, setVisits] = useState<Visit[]>([]);
   // 訪問予定リスト(絞り込みモーダルの「訪問予定リスト」セレクトで経路表示に使う)
   const [planLists, setPlanLists] = useState<VisitPlanList[]>([]);
@@ -1544,7 +1524,7 @@ export default function MapView({
   );
   const pathResolvedRef = useRef<Set<string>>(new Set());
   // 訪問済み(ピンの緑色・訪問状況の絞り込み)には未訪問記録(unvisited)を数えない。
-  // 訪問順の経路(buildVisitPath)・訪問日の選択肢は日時ありの未訪問記録も含むため、
+  // 訪問順の経路(buildVisitPathsByDay)・訪問日の選択肢は日時ありの未訪問記録も含むため、
   // そちらはvisitsをそのまま使う
   const visitedIds = useMemo(
     () => new Set(countedVisits(visits).map((v) => v.spot_id)),
@@ -4848,8 +4828,6 @@ export default function MapView({
         <SpotDetailModal
           spotId={overlayDetailSpotId}
           readOnly
-          allowVisitRecording
-          allowPlanList
           onClose={() => {
             setOverlayDetailSpotId(null);
             // 一覧から開いていたら戻す

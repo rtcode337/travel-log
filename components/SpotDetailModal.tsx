@@ -65,8 +65,6 @@ export default function SpotDetailModal({
   spotId,
   spots,
   readOnly = false,
-  allowVisitRecording = false,
-  allowPlanList = false,
   onClose,
   onVisitChange,
   onSpotChange,
@@ -83,23 +81,12 @@ export default function SpotDetailModal({
   spots?: Spot[];
   /**
    * 読み取り専用表示(地図の「別の種別を重ねて表示」から開いた場合)。
-   * 更新系(編集・削除・承認/却下・訪問記録・訪問予定・訪問記録の削除)を
-   * すべて出さず、「地図で開く」の代わりに元のスポット種別の地図へのリンクを出す
-   * (このスポットは表示中の種別の地図では表示できないため)
+   * スポット自体の更新系(編集・削除・承認/却下・非表示の切り替え・修正の依頼)を出さない。
+   * **訪問記録と訪問予定リストへの追加は出す** —— 対象は常に今開いている地図の種別
+   * (URLの`[type]`)のリストで、リストの経由スポットは種別非依存のため、
+   * 別種別のスポットも現在の種別の旅程に混ぜて入れられる
    */
   readOnly?: boolean;
-  /** readOnly(重ね表示)でも「訪問を記録」だけは許可する。地図で経路表示中に、
-   *  重ね表示した別種別スポットへ種別を切り替えずに訪問記録し、リストから外すために使う。
-   *  スポットの編集・削除や訪問予定/予定リスト追加は readOnly のまま隠す */
-  allowVisitRecording?: boolean;
-  /**
-   * readOnly(重ね表示)でも「訪問予定」セクション(訪問予定リストへの追加と、
-   * このスポットを含むリストの一覧)を出す。対象は常に**今開いている地図の種別**
-   * (URLの`[type]`)のリストで、重ねられた側の種別のリストは扱わない
-   * ——リストの経由スポットは種別非依存のため、別種別のスポットも現在の種別の
-   * 旅程に混ぜて入れられる
-   */
-  allowPlanList?: boolean;
   onClose: () => void;
   /** 訪問記録の追加・削除があったときに呼ばれる(呼び出し元の一覧・バッジ更新用) */
   onVisitChange?: () => void;
@@ -235,16 +222,12 @@ export default function SpotDetailModal({
     setReviewsPage(1);
   }, [load]);
 
-  // 訪問予定セクション(リストへの追加・所属リストの一覧)を出すか。
-  // readOnly(重ね表示)では既定で出さないが、allowPlanListが立っていれば出す
-  const planListEnabled = !readOnly || allowPlanList;
-
-  // 訪問予定リストの読み込み(セクションを出さないときは読まない)
+  // 訪問予定リストの読み込み
   const loadPlanLists = useCallback(async () => {
-    if (!typeKey || !planListEnabled) return;
+    if (!typeKey) return;
     const { data } = await api.visitPlanLists.list(typeKey);
     setPlanLists(data ?? []);
-  }, [typeKey, planListEnabled]);
+  }, [typeKey]);
 
   useEffect(() => {
     loadPlanLists();
@@ -702,18 +685,16 @@ export default function SpotDetailModal({
                     </p>
                   )}
                 </div>
-                {(!readOnly || allowVisitRecording) && (
-                  <div className="flex flex-wrap justify-end gap-2">
-                    {/* 未訪問記録(訪問済みにしない記録)も同じフォームから記録する
-                        (フォーム内のチェックボックスで切り替え) */}
-                    <button
-                      onClick={() => setShowForm(true)}
-                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
-                    >
-                      + 訪問を記録
-                    </button>
-                  </div>
-                )}
+                <div className="flex flex-wrap justify-end gap-2">
+                  {/* 未訪問記録(訪問済みにしない記録)も同じフォームから記録する
+                      (フォーム内のチェックボックスで切り替え) */}
+                  <button
+                    onClick={() => setShowForm(true)}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
+                  >
+                    + 訪問を記録
+                  </button>
+                </div>
               </div>
               {visits.length === 0 ? (
                 <p className="text-sm text-gray-500">
@@ -873,49 +854,47 @@ export default function SpotDetailModal({
 
             {/* 訪問予定(訪問予定リスト)。リストへの追加と、このスポットを含む
                 リストの表示。★(訪問予定の単独ブックマーク)はヘッダー右上 */}
-            {planListEnabled && (
-              <div className="mt-4 border-t border-gray-100 pt-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="font-bold">訪問予定</h3>
-                  <button
-                    onClick={() => setShowAddToList(true)}
-                    className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
-                  >
-                    リストに追加
-                  </button>
-                </div>
-                {/* 重ね表示から開いた別種別のスポットでも、対象は今開いている地図の
-                    種別のリスト(リストの経由スポットは種別非依存のため混ぜられる) */}
-                {readOnly && viewingSpotType && (
-                  <p className="mb-2 text-xs text-gray-400">
-                    今開いている「{viewingSpotType.label}」の地図の訪問予定リストが対象です。
-                  </p>
-                )}
-                {containingPlanLists.length === 0 ? (
-                  <p className="text-sm text-gray-500">
-                    このスポットを含む訪問予定リストはありません。
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-gray-100">
-                    {containingPlanLists.map((list) => (
-                      <li key={list.id} className="py-2">
-                        <button
-                          type="button"
-                          onClick={() => setDetailListId(list.id)}
-                          className="text-sm font-medium text-blue-600 underline"
-                        >
-                          {list.title}
-                        </button>
-                        <p className="text-xs text-gray-500">
-                          {formatPlanDateRange(list.start_date, list.end_date)}・
-                          {list.spot_ids.length}件
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="font-bold">訪問予定</h3>
+                <button
+                  onClick={() => setShowAddToList(true)}
+                  className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
+                >
+                  リストに追加
+                </button>
               </div>
-            )}
+              {/* 重ね表示から開いた別種別のスポットでも、対象は今開いている地図の
+                  種別のリスト(リストの経由スポットは種別非依存のため混ぜられる) */}
+              {readOnly && viewingSpotType && (
+                <p className="mb-2 text-xs text-gray-400">
+                  今開いている「{viewingSpotType.label}」の地図の訪問予定リストが対象です。
+                </p>
+              )}
+              {containingPlanLists.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  このスポットを含む訪問予定リストはありません。
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {containingPlanLists.map((list) => (
+                    <li key={list.id} className="py-2">
+                      <button
+                        type="button"
+                        onClick={() => setDetailListId(list.id)}
+                        className="text-sm font-medium text-blue-600 underline"
+                      >
+                        {list.title}
+                      </button>
+                      <p className="text-xs text-gray-500">
+                        {formatPlanDateRange(list.start_date, list.end_date)}・
+                        {list.spot_ids.length}件
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
             {/* 口コミ(公開・掲示板形式) */}
             {reviewsEnabled && (
