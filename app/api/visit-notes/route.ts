@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isTooLong, parseJsonBody, PHOTO_BODY_MAX_BYTES } from "@/lib/requestBody";
 import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import { deleteVisitPhotos, saveVisitPhoto } from "@/lib/photos";
@@ -52,7 +53,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json();
+  const parsed = await parseJsonBody(request, PHOTO_BODY_MAX_BYTES);
+  if (parsed.response) return parsed.response;
+  const body = parsed.body;
+  if (isTooLong(body?.body)) {
+    return NextResponse.json(
+      { error: "本文が長すぎます(10,000文字まで)。" },
+      { status: 400 }
+    );
+  }
   const visitId = typeof body?.visit_id === "string" ? body.visit_id : null;
   if (!visitId) {
     return NextResponse.json({ error: "visit_id は必須です。" }, { status: 400 });

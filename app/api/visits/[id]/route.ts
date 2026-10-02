@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isTooLong, parseJsonBody, PHOTO_BODY_MAX_BYTES } from "@/lib/requestBody";
 import { pool, query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import { deleteVisitPhotos, saveVisitPhoto } from "@/lib/photos";
@@ -31,7 +32,15 @@ export async function PATCH(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const body = await request.json();
+  const parsed = await parseJsonBody(request, PHOTO_BODY_MAX_BYTES);
+  if (parsed.response) return parsed.response;
+  const body = parsed.body;
+  if (isTooLong(body?.memo)) {
+    return NextResponse.json(
+      { error: "本文が長すぎます(10,000文字まで)。" },
+      { status: 400 }
+    );
+  }
 
   // 写真は「既存の相対パス(残す写真)」と「data URL(追加する写真)」の混在で届く。
   // 相対パスはこの訪問記録が現在持っているものに限定する(他人の写真パスや

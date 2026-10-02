@@ -30,7 +30,7 @@ const CONTENT_TYPE_BY_EXT: Record<string, string> = {
 // クライアント側(VisitFormModal)は1280px程度に縮小してから送るが、それを信頼せず
 // サーバー側でも上限を設ける(ブラウザを経由しない直接APIコールでの
 // ディスク圧迫・DoSを防ぐため)。1visitあたりの枚数上限は app/api/visits/route.ts 側
-const MAX_PHOTO_BASE64_LENGTH = 8_000_000; // base64で約8MB(デコード後 約6MB)
+export const MAX_PHOTO_BASE64_LENGTH = 8_000_000; // base64で約8MB(デコード後 約6MB)
 
 // saveVisitPhotoが生成する相対パスにのみ一致する。DB由来の値であっても
 // 保存先に触る前に必ずこれで検証する(パストラバーサル対策)

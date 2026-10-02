@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isTooLong } from "@/lib/requestBody";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { MODERATION_ROLES, SPOT_ADMIN_ROLES, type Role } from "@/lib/types";
@@ -115,6 +116,12 @@ export async function POST(request: Request) {
   const { spot_id, body } = await request.json();
   if (typeof spot_id !== "string" || typeof body !== "string" || !body.trim()) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  }
+  if (isTooLong(body)) {
+    return NextResponse.json(
+      { error: "本文が長すぎます(10,000文字まで)。" },
+      { status: 400 }
+    );
   }
 
   const { rows: spotRows } = await query<{
