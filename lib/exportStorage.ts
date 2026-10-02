@@ -1,5 +1,7 @@
-import { promises as fs } from "fs";
+import { createReadStream, promises as fs } from "fs";
 import path from "path";
+import { Readable } from "stream";
+import { ZipWriter } from "@/lib/zip";
 
 /**
  * 訪問記録エクスポートのZIPの置き場(サーバー専用モジュール)。
@@ -29,23 +31,51 @@ function resolveExportPath(relPath: string): string | null {
   return absPath;
 }
 
-/** ZIPを保存する(既存があれば上書き) */
-export async function saveExportZip(
+/**
+ * ZIPを書き出す(既存があれば上書き)。`build`がエントリを1件ずつ足し、そのたびに
+ * ファイルへ書く —— 全体をメモリに組まない(写真の多いユーザーでは数百MBになる)。
+ *
+ * **書き終わるまでは`.part`に書き、最後に名前を変える。** 途中で落ちたときに、
+ * 壊れたZIPが完成品の名前で残らないようにするため。返すのはZIPのバイト数。
+ */
+export async function writeExportZip(
   relPath: string,
-  data: Uint8Array
-): Promise<void> {
+  build: (zip: ZipWriter) => Promise<void>
+): Promise<number> {
   const absPath = resolveExportPath(relPath);
   if (!absPath) throw new Error("invalid export path");
   await fs.mkdir(path.dirname(absPath), { recursive: true });
-  await fs.writeFile(absPath, data);
+  const partPath = `${absPath}.part`;
+  const handle = await fs.open(partPath, "w");
+  try {
+    const zip = new ZipWriter(async (chunk) => {
+      await handle.write(chunk);
+    });
+    await build(zip);
+    const size = await zip.finish();
+    await handle.close();
+    await fs.rename(partPath, absPath);
+    return size;
+  } catch (e) {
+    await handle.close().catch(() => {});
+    await fs.unlink(partPath).catch(() => {});
+    throw e;
+  }
 }
 
-/** ZIPを読む。存在しない・読めない場合はnull(ファイルだけ消えていても画面は壊さない) */
-export async function readExportZip(relPath: string): Promise<Buffer | null> {
+/**
+ * ZIPを読み出すストリームとバイト数。存在しない・読めない場合はnull
+ * (ファイルだけ消えていても画面は壊さない)。中身はメモリに載せずに流す
+ */
+export async function openExportZip(
+  relPath: string
+): Promise<{ stream: ReadableStream<Uint8Array>; size: number } | null> {
   const absPath = resolveExportPath(relPath);
   if (!absPath) return null;
   try {
-    return await fs.readFile(absPath);
+    const { size } = await fs.stat(absPath);
+    const stream = Readable.toWeb(createReadStream(absPath)) as ReadableStream<Uint8Array>;
+    return { stream, size };
   } catch {
     return null;
   }

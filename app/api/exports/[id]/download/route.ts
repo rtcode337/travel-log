@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { readExportZip } from "@/lib/exportStorage";
+import { openExportZip } from "@/lib/exportStorage";
 
 /**
  * 出来上がったエクスポートZIPをダウンロードする。
@@ -40,8 +40,8 @@ export async function GET(
     return NextResponse.json({ error: "not ready" }, { status: 409 });
   }
 
-  const data = await readExportZip(job.file_path);
-  if (!data) {
+  const zip = await openExportZip(job.file_path);
+  if (!zip) {
     return NextResponse.json({ error: "file not found" }, { status: 410 });
   }
 
@@ -54,9 +54,11 @@ export async function GET(
     .replace(/-/g, "");
   const filename = `travel-log-visits-${localPart || "user"}-${jstDate}.zip`;
 
-  return new NextResponse(new Uint8Array(data), {
+  // ZIPは数百MBになりうるので、メモリに読み込まずにそのまま流す
+  return new NextResponse(zip.stream, {
     headers: {
       "Content-Type": "application/zip",
+      "Content-Length": String(zip.size),
       "Content-Disposition": `attachment; filename="${filename}"`,
       "Cache-Control": "no-store",
     },

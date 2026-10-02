@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { buildVisitExportZip } from "@/lib/visitExport";
-import { deleteExportZip, saveExportZip } from "@/lib/exportStorage";
+import { writeVisitExport } from "@/lib/visitExport";
+import { deleteExportZip, writeExportZip } from "@/lib/exportStorage";
 import {
   EXPORTS_DISABLED_MESSAGE,
   exportsEnabled,
@@ -133,11 +133,13 @@ export async function POST(request: Request) {
  */
 async function runExportJob(jobId: string, targetUserId: string) {
   try {
-    const { zip, visitCount, photoCount } =
-      await buildVisitExportZip(targetUserId);
     // 写真と同じく<ユーザーID>/配下に置く(人ごとにまとめて消せる)
     const relPath = `${targetUserId}/${jobId}.zip`;
-    await saveExportZip(relPath, zip);
+    let counts = { visitCount: 0, photoCount: 0 };
+    const zipSize = await writeExportZip(relPath, async (zip) => {
+      counts = await writeVisitExport(targetUserId, zip);
+    });
+    const { visitCount, photoCount } = counts;
 
     const { rows: old } = await query<{ id: string; file_path: string | null }>(
       "select id, file_path from export_jobs where user_id = $1 and id <> $2",
@@ -150,7 +152,7 @@ async function runExportJob(jobId: string, targetUserId: string) {
               visit_count = $4, photo_count = $5, error = null,
               finished_at = now()
         where id = $1`,
-      [jobId, relPath, zip.length, visitCount, photoCount]
+      [jobId, relPath, zipSize, visitCount, photoCount]
     );
 
     for (const row of old) {

@@ -3,7 +3,7 @@ import { query } from "@/lib/db";
 import { parseVisitPhotoPath, readVisitPhoto } from "@/lib/photos";
 import { buildCsv } from "@/lib/csv";
 import { formatCategoryList } from "@/lib/category";
-import { buildZip, type ZipEntry } from "@/lib/zip";
+import type { ZipWriter } from "@/lib/zip";
 
 /**
  * 1ユーザーの訪問記録+写真をZIPにまとめる(サーバー専用モジュール)。
@@ -62,13 +62,17 @@ const CSV_HEADER = [
 ];
 
 export interface VisitExportResult {
-  zip: Buffer;
   visitCount: number;
   photoCount: number;
 }
 
-export async function buildVisitExportZip(
-  userId: string
+/**
+ * `zip`へ1件ずつ書き足す。**写真は1枚読んではすぐ書く**(全部をメモリに溜めない)。
+ * CSVは写真の欠損を反映してから組むので、ZIPの最後に入れる
+ */
+export async function writeVisitExport(
+  userId: string,
+  zip: ZipWriter
 ): Promise<VisitExportResult> {
   const { rows } = await query<ExportRow>(
     `select v.id,
@@ -105,7 +109,7 @@ export async function buildVisitExportZip(
     else notesByVisit.set(note.visit_id, [note]);
   }
 
-  const photoEntries: ZipEntry[] = [];
+  let photoCount = 0;
   // 種別キー → その種別のCSV行(先頭は見出し)
   const csvByType = new Map<string, (string | number | null)[][]>();
 
@@ -122,7 +126,8 @@ export async function buildVisitExportZip(
       const data = await readVisitPhoto(parsed.relPath);
       if (!data) continue; // 欠損はスキップ
       const zipPath = `photos/${path.posix.basename(relPath)}`;
-      photoEntries.push({ name: zipPath, data: Buffer.from(data) });
+      await zip.add(zipPath, Buffer.from(data));
+      photoCount++;
       zipPaths.push(zipPath);
     }
 
@@ -150,25 +155,17 @@ export async function buildVisitExportZip(
     csvByType.set(row.type_key, csvRows);
   }
 
-  const csvEntries: ZipEntry[] = [...csvByType.entries()].map(
-    ([typeKey, csvRows]) => ({
-      name: `visits-${typeKey}.csv`,
-      // BOM付きUTF-8(ExcelでのUTF-8自動判別のため)
-      data: Buffer.from("\ufeff" + buildCsv(csvRows), "utf8"),
-    })
-  );
+  // BOM付きUTF-8(ExcelでのUTF-8自動判別のため)
+  const csvData = (csvRows: (string | number | null)[][]) =>
+    Buffer.from("\ufeff" + buildCsv(csvRows), "utf8");
+  for (const [typeKey, csvRows] of csvByType) {
+    await zip.add(`visits-${typeKey}.csv`, csvData(csvRows));
+  }
   // 訪問記録が1件も無くても空のZIPを返さず、見出しだけのCSVを1枚入れる
   // (「取り込みに失敗した」のか「記録が無い」のかを開いた人が見分けられるように)
-  if (csvEntries.length === 0) {
-    csvEntries.push({
-      name: "visits.csv",
-      data: Buffer.from("\ufeff" + buildCsv([CSV_HEADER]), "utf8"),
-    });
+  if (csvByType.size === 0) {
+    await zip.add("visits.csv", csvData([CSV_HEADER]));
   }
 
-  return {
-    zip: buildZip([...csvEntries, ...photoEntries]),
-    visitCount: rows.length,
-    photoCount: photoEntries.length,
-  };
+  return { visitCount: rows.length, photoCount };
 }

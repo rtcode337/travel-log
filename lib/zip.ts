@@ -2,16 +2,11 @@
  * 依存パッケージなしの最小ZIP生成(サーバー専用モジュール)。
  *
  * 訪問記録エクスポート(lib/visitExport.ts。POST /api/exportsのバックグラウンド生成)のためのもので、
- * 圧縮はしない(STORE方式)。同梱するのは圧縮済み画像(jpg/png/webp)と
+ * **1件ずつ書き出す**(全体をメモリに組まない)。写真の多いユーザーでは ZIP が数百MBになり、
+ * まとめて組むとプロセスごと落ちうるため。圧縮はしない(STORE方式)。同梱するのは圧縮済み画像(jpg/png/webp)と
  * 小さなCSVだけなので、deflateしてもサイズはほぼ変わらない。
  * ZIP64には対応しない(4GB超・65,535エントリ超は生成時にエラーにする)。
  */
-
-export interface ZipEntry {
-  /** ZIP内の相対パス(スラッシュ区切り) */
-  name: string;
-  data: Buffer;
-}
 
 // CRC-32(ZIP標準の多項式0xEDB88320)のルックアップテーブル
 const CRC_TABLE = new Uint32Array(256).map((_, n) => {
@@ -20,7 +15,7 @@ const CRC_TABLE = new Uint32Array(256).map((_, n) => {
   return c;
 });
 
-function crc32(data: Buffer): number {
+function crc32(data: Uint8Array): number {
   let c = 0xffffffff;
   for (let i = 0; i < data.length; i++) {
     c = CRC_TABLE[(c ^ data[i]) & 0xff] ^ (c >>> 8);
@@ -39,19 +34,36 @@ function dosDateTime(d: Date): { time: number; date: number } {
   };
 }
 
-export function buildZip(entries: ZipEntry[]): Buffer {
-  if (entries.length > 0xffff) {
-    throw new Error("ZIPに格納できるファイル数の上限を超えました");
+/**
+ * ZIPを先頭から順に書き出す。`add`のたびにローカルヘッダーと中身を`write`へ渡し、
+ * セントラルディレクトリ(各エントリの位置の一覧)だけを手元に持って`finish`で書く。
+ * 持つのはエントリ1件につき数十バイトなので、写真が何千枚あっても軽い。
+ */
+export class ZipWriter {
+  private readonly central: Buffer[] = [];
+  private offset = 0;
+  private count = 0;
+  private readonly time: number;
+  private readonly date: number;
+
+  constructor(private readonly write: (chunk: Buffer) => Promise<void>) {
+    ({ time: this.time, date: this.date } = dosDateTime(new Date()));
   }
-  const { time, date } = dosDateTime(new Date());
 
-  const localParts: Buffer[] = [];
-  const centralParts: Buffer[] = [];
-  let offset = 0;
+  /** エントリ数 */
+  get size(): number {
+    return this.count;
+  }
 
-  for (const entry of entries) {
-    const nameBytes = Buffer.from(entry.name, "utf8");
-    const crc = crc32(entry.data);
+  async add(name: string, data: Buffer): Promise<void> {
+    if (this.count >= 0xffff) {
+      throw new Error("ZIPに格納できるファイル数の上限を超えました");
+    }
+    const nameBytes = Buffer.from(name, "utf8");
+    const crc = crc32(data);
+    if (this.offset + 30 + nameBytes.length + data.length > 0xffffffff) {
+      throw new Error("ZIPのサイズ上限(4GB)を超えました");
+    }
 
     // ローカルファイルヘッダー + ファイル名 + データ本体
     const local = Buffer.alloc(30);
@@ -59,14 +71,15 @@ export function buildZip(entries: ZipEntry[]): Buffer {
     local.writeUInt16LE(20, 4); // 展開に必要なバージョン(2.0)
     local.writeUInt16LE(0x0800, 6); // フラグ: ファイル名はUTF-8
     local.writeUInt16LE(0, 8); // 圧縮方式: STORE(無圧縮)
-    local.writeUInt16LE(time, 10);
-    local.writeUInt16LE(date, 12);
+    local.writeUInt16LE(this.time, 10);
+    local.writeUInt16LE(this.date, 12);
     local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(entry.data.length, 18); // 圧縮後サイズ(=無圧縮なので同じ)
-    local.writeUInt32LE(entry.data.length, 22); // 元サイズ
+    local.writeUInt32LE(data.length, 18); // 圧縮後サイズ(=無圧縮なので同じ)
+    local.writeUInt32LE(data.length, 22); // 元サイズ
     local.writeUInt16LE(nameBytes.length, 26);
     local.writeUInt16LE(0, 28); // 拡張フィールド長
-    localParts.push(local, nameBytes, entry.data);
+    await this.write(Buffer.concat([local, nameBytes]));
+    await this.write(data);
 
     // セントラルディレクトリエントリ(未指定オフセットはalloc時の0のまま)
     const central = Buffer.alloc(46);
@@ -75,29 +88,30 @@ export function buildZip(entries: ZipEntry[]): Buffer {
     central.writeUInt16LE(20, 6); // 展開に必要なバージョン
     central.writeUInt16LE(0x0800, 8); // フラグ: ファイル名はUTF-8
     central.writeUInt16LE(0, 10); // 圧縮方式: STORE
-    central.writeUInt16LE(time, 12);
-    central.writeUInt16LE(date, 14);
+    central.writeUInt16LE(this.time, 12);
+    central.writeUInt16LE(this.date, 14);
     central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(entry.data.length, 20);
-    central.writeUInt32LE(entry.data.length, 24);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
     central.writeUInt16LE(nameBytes.length, 28);
-    central.writeUInt32LE(offset, 42); // 対応するローカルヘッダーの位置
-    centralParts.push(central, nameBytes);
+    central.writeUInt32LE(this.offset, 42); // 対応するローカルヘッダーの位置
+    this.central.push(central, nameBytes);
 
-    offset += 30 + nameBytes.length + entry.data.length;
-    if (offset > 0xffffffff) {
-      throw new Error("ZIPのサイズ上限(4GB)を超えました");
-    }
+    this.offset += 30 + nameBytes.length + data.length;
+    this.count++;
   }
 
-  const centralSize = centralParts.reduce((n, b) => n + b.length, 0);
-
-  // セントラルディレクトリ終端レコード
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0); // シグネチャ
-  eocd.writeUInt16LE(entries.length, 8); // このディスク上のエントリ数
-  eocd.writeUInt16LE(entries.length, 10); // 総エントリ数
-  eocd.writeUInt32LE(centralSize, 12);
-  eocd.writeUInt32LE(offset, 16); // セントラルディレクトリの開始位置
-  return Buffer.concat([...localParts, ...centralParts, eocd]);
+  /** セントラルディレクトリと終端レコードを書き、ZIP全体のバイト数を返す */
+  async finish(): Promise<number> {
+    const centralDir = Buffer.concat(this.central);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0); // シグネチャ
+    eocd.writeUInt16LE(this.count, 8); // このディスク上のエントリ数
+    eocd.writeUInt16LE(this.count, 10); // 総エントリ数
+    eocd.writeUInt32LE(centralDir.length, 12);
+    eocd.writeUInt32LE(this.offset, 16); // セントラルディレクトリの開始位置
+    await this.write(centralDir);
+    await this.write(eocd);
+    return this.offset + centralDir.length + eocd.length;
+  }
 }
