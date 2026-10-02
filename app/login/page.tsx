@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, useId } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
 
@@ -13,6 +13,8 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
+  // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
+  const fid = useId();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [checkingStatus, setCheckingStatus] = useState(true);
@@ -66,10 +68,11 @@ function LoginForm() {
         <p className="mb-6 text-sm text-gray-500">観光地訪問記録アプリ</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">
+            <label htmlFor={`${fid}-email`} className="mb-1 block text-sm font-medium">
               メールアドレス
             </label>
             <input
+              id={`${fid}-email`}
               type="email"
               required
               value={email}
@@ -79,8 +82,9 @@ function LoginForm() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">パスワード</label>
+            <label htmlFor={`${fid}-password`} className="mb-1 block text-sm font-medium">パスワード</label>
             <input
+              id={`${fid}-password`}
               type="password"
               required
               value={password}

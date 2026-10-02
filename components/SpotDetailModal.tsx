@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useId } from "react";
 import { api } from "@/lib/api-client";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import {
@@ -38,6 +38,7 @@ import GoogleSpotLinks from "@/components/GoogleSpotLinks";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 import { formatJstDateTime } from "@/lib/datetime";
+import Modal from "@/components/Modal";
 
 /** 星アイコン(Google Material Symbols「star」/「star_border」、Apache License 2.0) */
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
@@ -108,6 +109,8 @@ export default function SpotDetailModal({
    * (呼び出し元が表示対象のスポットIDを差し替える。省略時はリスト詳細を閉じるだけ) */
   onOpenSpot?: (spotId: string) => void;
 }) {
+  // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
+  const fid = useId();
   const typeKey = useCurrentSpotTypeKey();
   const [spot, setSpot] = useState<Spot | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
@@ -460,566 +463,572 @@ export default function SpotDetailModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+    <>
+    <Modal
+      onClose={onClose}
+      panelClassName="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4"
     >
-      <div
-        className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {loading ? (
-          <p className="p-4 text-sm text-gray-500">読み込み中…</p>
-        ) : !spot && loadError ? (
-          <div className="p-4 text-sm">
-            <p className="text-red-600">読み込めませんでした: {loadError}</p>
-            <button
-              type="button"
-              onClick={() => {
-                setLoading(true);
-                load();
-              }}
-              className="mt-2 rounded-lg border border-gray-300 px-3 py-1.5"
-            >
-              もう一度読み込む
-            </button>
-          </div>
-        ) : !spot ? (
-          <p className="p-4 text-sm text-gray-500">スポットが見つかりません。</p>
-        ) : (
-          <>
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                {/* 訪問予定のブックマーク風★トグル(塗り=予定あり)。**×の隣に置かない**
-                    —— 指で押す端末では、閉じるつもりが予定に入る誤爆が起きる。
-                    行の反対側の端(バッジの左)なら、押し間違えても被害が無い */}
-                {!readOnly && (
-                  <button
-                    onClick={toggleVisitPlan}
-                    disabled={planUpdating}
-                    aria-label={planned ? "訪問予定をはずす" : "訪問予定にする"}
-                    title={planned ? "訪問予定をはずす" : "訪問予定にする"}
-                    aria-pressed={planned}
-                    className={`shrink-0 rounded p-1 disabled:opacity-50 ${
-                      planned
-                        ? "text-amber-400 hover:bg-amber-50"
-                        : "text-gray-400 hover:bg-gray-50"
-                    }`}
-                  >
-                    <StarIcon filled={planned} className="size-6" />
-                  </button>
-                )}
-                <SpotBadge
-                  rank={spot.rank}
-                  series={spot.series}
-                  seriesStyles={seriesStyles}
-                  rankEnabled={rankEnabled}
-                  isPrivate={spot.status === "private"}
-                />
-                <div className="min-w-0">
-                  <h2 className="text-lg font-bold leading-tight">
-                    {spot.name}
-                    {/* 名前の最後の文字のすぐ右上。検索や共有へ渡すために
-                        文字を選択させると、モーダルの中では掴みにくい。
-                        読み取り専用(重ね表示)でも出す */}
-                    <CopyTextButton
-                      text={spot.name}
-                      label="スポット名をコピー"
-                      className="ml-0.5"
-                    />
-                    {spot.status === "private" && (
-                      <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-xs font-normal text-gray-600">
-                        非公開
-                      </span>
-                    )}
-                    {spot.status === "pending" && (
-                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-700">
-                        承認待ち
-                      </span>
-                    )}
-                    {spot.status === "rejected" && (
-                      <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-xs font-normal text-red-600">
-                        却下
-                      </span>
-                    )}
-                    {canModerate && (
-                      <>
-                        <button
-                          type="button"
-                          disabled={moderating}
-                          onClick={() => handleModerate("published")}
-                          className="ml-2 text-xs font-normal text-green-600 underline disabled:opacity-50"
-                        >
-                          承認
-                        </button>
-                        <button
-                          type="button"
-                          disabled={moderating}
-                          onClick={() => handleModerate("rejected")}
-                          className="ml-2 text-xs font-normal text-red-500 underline disabled:opacity-50"
-                        >
-                          却下
-                        </button>
-                      </>
-                    )}
-                  </h2>
-                  {actionError && (
-                    <p className="mt-1 text-xs text-red-600">{actionError}</p>
-                  )}
-                  {/* 地域・ランク・シリーズ・カテゴリの1行(一覧と共通。lib/spotMeta.ts) */}
-                  <p className="text-xs text-gray-500">
-                    {formatSpotMeta(spot, { rankEnabled, categories })}
-                    {reviewsEnabled && reviewsTotal > 0 && (
-                      <span className="ml-2 text-gray-400">
-                        口コミ{reviewsTotal}件
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-              {/* 右端は×だけにする。一時期×を外して外側タップだけにしていたが、
-                  このモーダルは画面のほぼ全体を占めるため外側の余白が狭すぎて
-                  閉じにくく、復活させた。スポット名のコピーは名前の直後(h2の中) */}
-              <div className="flex shrink-0 items-center gap-1">
+      {loading ? (
+        <p className="p-4 text-sm text-gray-500">読み込み中…</p>
+      ) : !spot && loadError ? (
+        <div className="p-4 text-sm">
+          <p className="text-red-600">読み込めませんでした: {loadError}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              load();
+            }}
+            className="mt-2 rounded-lg border border-gray-300 px-3 py-1.5"
+          >
+            もう一度読み込む
+          </button>
+        </div>
+      ) : !spot ? (
+        <p className="p-4 text-sm text-gray-500">スポットが見つかりません。</p>
+      ) : (
+        <>
+          <div className="mb-3 flex items-start justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              {/* 訪問予定のブックマーク風★トグル(塗り=予定あり)。**×の隣に置かない**
+                  —— 指で押す端末では、閉じるつもりが予定に入る誤爆が起きる。
+                  行の反対側の端(バッジの左)なら、押し間違えても被害が無い */}
+              {!readOnly && (
                 <button
-                  onClick={onClose}
-                  className="rounded-full px-2 text-xl leading-none text-gray-400"
-                  aria-label="閉じる"
+                  type="button"
+                  onClick={toggleVisitPlan}
+                  disabled={planUpdating}
+                  aria-label={planned ? "訪問予定をはずす" : "訪問予定にする"}
+                  title={planned ? "訪問予定をはずす" : "訪問予定にする"}
+                  aria-pressed={planned}
+                  className={`shrink-0 rounded p-1 disabled:opacity-50 ${
+                    planned
+                      ? "text-amber-400 hover:bg-amber-50"
+                      : "text-gray-400 hover:bg-gray-50"
+                  }`}
                 >
-                  ×
+                  <StarIcon filled={planned} className="size-6" />
                 </button>
-              </div>
-            </div>
-
-            {spot.description && (
-              <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">
-                <LinkedText text={spot.description} />
-              </p>
-            )}
-
-            <div className="relative">
-              <MiniMap
-                lat={spot.lat}
-                lng={spot.lng}
+              )}
+              <SpotBadge
                 rank={spot.rank}
                 series={spot.series}
                 seriesStyles={seriesStyles}
                 rankEnabled={rankEnabled}
+                isPrivate={spot.status === "private"}
               />
-              {(canManage || canFlag) && (
-                <div className="absolute right-2 top-2 z-10 flex gap-2 rounded-lg bg-white/90 px-2 py-1 shadow">
-                  {canManage && (
-                  <button
-                    type="button"
-                    onClick={() => setShowEditForm(true)}
-                    className="text-xs font-normal text-blue-600 underline"
-                  >
-                    編集
-                  </button>
-                  )}
-                  {/* 非公開スポットはドラッグで位置を修正できる(座標だけを直せる) */}
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold leading-tight">
+                  {spot.name}
+                  {/* 名前の最後の文字のすぐ右上。検索や共有へ渡すために
+                      文字を選択させると、モーダルの中では掴みにくい。
+                      読み取り専用(重ね表示)でも出す */}
+                  <CopyTextButton
+                    text={spot.name}
+                    label="スポット名をコピー"
+                    className="ml-0.5"
+                  />
                   {spot.status === "private" && (
-                    <button
-                      type="button"
-                      onClick={() => setShowReposition(true)}
-                      className="text-xs font-normal text-blue-600 underline"
-                    >
-                      位置を修正
-                    </button>
-                  )}
-                  {/* 修正の依頼。理由は空でもよいので、押した時点で入力欄を開き、
-                      空のまま「依頼する」を押せるようにしてある */}
-                  {canFlag && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (flag) {
-                          removeFlag();
-                          return;
-                        }
-                        setFlagReason("");
-                        setFlagFormOpen((v) => !v);
-                      }}
-                      disabled={flagSaving}
-                      className={`text-xs font-normal underline disabled:opacity-50 ${
-                        flag ? "text-amber-700" : "text-gray-600"
-                      }`}
-                    >
-                      {flag ? "⚠ 依頼を取り消す" : "⚠ 修正を依頼"}
-                    </button>
-                  )}
-                  {canManage && (
-                  <button
-                    type="button"
-                    onClick={handleDeleteSpot}
-                    className="text-xs font-normal text-red-500 underline"
-                  >
-                    削除
-                  </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {canFlag && flagFormOpen && !flag && (
-              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
-                <label className="mb-1 block text-xs font-bold text-amber-800">
-                  どこを直してほしいか(空でもよい)
-                </label>
-                <textarea
-                  value={flagReason}
-                  onChange={(e) => setFlagReason(e.target.value)}
-                  rows={2}
-                  placeholder="例: 位置が実際の場所とずれている"
-                  className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                />
-                <div className="mt-1 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={submitFlag}
-                    disabled={flagSaving}
-                    className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-bold text-white disabled:opacity-50"
-                  >
-                    {flagSaving ? "依頼しています…" : "依頼する"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFlagFormOpen(false)}
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs"
-                  >
-                    やめる
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {canFlag && flag && (
-              <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
-                ⚠ 修正を依頼済み{flag.forwarded_at ? "(対応中)" : ""}
-                {flag.reason ? `: ${flag.reason}` : ""}
-              </p>
-            )}
-
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <GoogleSpotLinks
-                spot={spot}
-                spotType={currentSpotType}
-                className="ml-auto"
-              />
-            </div>
-
-            {/* 訪問履歴 */}
-            <div className="mt-4 border-t border-gray-100 pt-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <h3 className="font-bold">訪問履歴</h3>
-                  {/* 未訪問記録は訪問済みに数えないため、✓の回数には含めない */}
-                  {countedVisits(visits).length > 0 && (
-                    <p className="text-sm font-normal text-green-600">
-                      ✓ {countedVisits(visits).length}回
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  {/* 未訪問記録(訪問済みにしない記録)も同じフォームから記録する
-                      (フォーム内のチェックボックスで切り替え) */}
-                  <button
-                    onClick={() => setShowForm(true)}
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
-                  >
-                    + 訪問を記録
-                  </button>
-                </div>
-              </div>
-              {visits.length === 0 ? (
-                <p className="text-sm text-gray-500">
-                  まだ訪問記録がありません。
-                </p>
-              ) : (
-                <ul className="divide-y divide-gray-100">
-                  {visits.map((visit) => (
-                    <li key={visit.id} className="py-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium">
-                            {/* 日時なしの未訪問記録=下調べのメモ(「時期不明」とは意味が違う) */}
-                            {visit.unvisited && !visit.visited_on
-                              ? "下調べ"
-                              : formatVisitedOn(visit.visited_on)}
-                            {visit.unvisited && (
-                              <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-700">
-                                未訪問
-                              </span>
-                            )}
-                          </p>
-                          {visit.memo && (
-                            <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
-                              {visit.memo}
-                            </p>
-                          )}
-                          {visit.photos.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {visit.photos.map((photo, i) => (
-                                <button
-                                  key={i}
-                                  type="button"
-                                  onClick={() =>
-                                    setPhotoPreview({
-                                      photos: visitPhotoGroup(visit),
-                                      index: i,
-                                    })
-                                  }
-                                  className="cursor-zoom-in"
-                                  aria-label="写真を拡大表示"
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={visitPhotoSrc(photo)}
-                                    alt=""
-                                    className="h-14 w-14 rounded-lg object-cover"
-                                  />
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          {/* 追記。**訪問回数は増やさず**、同じ訪問記録の下に
-                              書いた順で積む(写真も元の記録の写真の後ろになる)。
-                              左の縦線で「元の記録にぶら下がっている」ことを示す */}
-                          {(notesByVisit.get(visit.id) ?? []).map((note, ni, notes) => (
-                            <div
-                              key={note.id}
-                              className="mt-2 border-l-2 border-gray-200 pl-2.5"
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <p className="text-xs font-medium text-gray-500">
-                                  {formatVisitNoteAt(note.created_at)}
-                                </p>
-                                {!readOnly && (
-                                  <div className="flex shrink-0 gap-2">
-                                    <button
-                                      onClick={() => setEditingNote(note)}
-                                      className="text-xs text-gray-400 hover:text-blue-600"
-                                    >
-                                      編集
-                                    </button>
-                                    <button
-                                      onClick={() => deleteVisitNote(note.id)}
-                                      className="text-xs text-gray-400 hover:text-red-500"
-                                    >
-                                      削除
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              {note.body && (
-                                <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
-                                  {note.body}
-                                </p>
-                              )}
-                              {note.photos.length > 0 && (
-                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                  {note.photos.map((photo, i) => (
-                                    <button
-                                      key={i}
-                                      type="button"
-                                      onClick={() =>
-                                        setPhotoPreview({
-                                          photos: visitPhotoGroup(visit),
-                                          // 記録本体 + それより前の追記のぶんだけ後ろにある
-                                          index:
-                                            visit.photos.length +
-                                            notes
-                                              .slice(0, ni)
-                                              .reduce(
-                                                (n, p) => n + p.photos.length,
-                                                0
-                                              ) +
-                                            i,
-                                        })
-                                      }
-                                      className="cursor-zoom-in"
-                                      aria-label="写真を拡大表示"
-                                    >
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
-                                        src={visitPhotoSrc(photo)}
-                                        alt=""
-                                        className="h-14 w-14 rounded-lg object-cover"
-                                      />
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                          {/* 追記の追加。訪問記録の編集(右の「編集」)とは別物
-                              —— こちらは記録を書き換えず、後から足すだけ */}
-                          {!readOnly && (
-                            <button
-                              type="button"
-                              onClick={() => setAddingNoteVisit(visit)}
-                              className="mt-2 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
-                            >
-                              + 追記
-                            </button>
-                          )}
-                        </div>
-                        {!readOnly && (
-                          <div className="flex shrink-0 gap-2">
-                            <button
-                              onClick={() => setEditingVisit(visit)}
-                              className="text-xs text-gray-400 hover:text-blue-600"
-                            >
-                              編集
-                            </button>
-                            <button
-                              onClick={() => deleteVisit(visit.id)}
-                              className="text-xs text-gray-400 hover:text-red-500"
-                            >
-                              削除
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {/* 訪問予定(訪問予定リスト)。リストへの追加と、このスポットを含む
-                リストの表示。★(訪問予定の単独ブックマーク)はヘッダー右上 */}
-            <div className="mt-4 border-t border-gray-100 pt-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-bold">訪問予定</h3>
-                <button
-                  onClick={() => setShowAddToList(true)}
-                  className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
-                >
-                  リストに追加
-                </button>
-              </div>
-              {/* 重ね表示から開いた別種別のスポットでも、対象は今開いている地図の
-                  種別のリスト(リストの経由スポットは種別非依存のため混ぜられる) */}
-              {readOnly && viewingSpotType && (
-                <p className="mb-2 text-xs text-gray-400">
-                  今開いている「{viewingSpotType.label}」の地図の訪問予定リストが対象です。
-                </p>
-              )}
-              {containingPlanLists.length === 0 ? (
-                <p className="text-sm text-gray-500">
-                  このスポットを含む訪問予定リストはありません。
-                </p>
-              ) : (
-                <ul className="divide-y divide-gray-100">
-                  {containingPlanLists.map((list) => (
-                    <li key={list.id} className="py-2">
-                      <button
-                        type="button"
-                        onClick={() => setDetailListId(list.id)}
-                        className="text-sm font-medium text-blue-600 underline"
-                      >
-                        {list.title}
-                      </button>
-                      <p className="text-xs text-gray-500">
-                        {formatPlanDateRange(list.start_date, list.end_date)}・
-                        {list.spot_ids.length}件
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {/* 口コミ(公開・掲示板形式) */}
-            {reviewsEnabled && (
-              <div className="mt-4 border-t border-gray-100 pt-4">
-                <h3 className="mb-3 font-bold">
-                  口コミ
-                  {reviewsTotal > 0 && (
-                    <span className="ml-1 font-normal text-gray-400">
-                      ({reviewsTotal}件)
+                    <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-xs font-normal text-gray-600">
+                      非公開
                     </span>
                   )}
-                </h3>
-                {reviews.length === 0 ? (
-                  <p className="text-sm text-gray-500">
-                    まだ口コミがありません。
-                  </p>
-                ) : (
-                  <>
-                    <ul className="divide-y divide-gray-100">
-                      {reviews.map((review) => (
-                        <li key={review.id} className="py-2.5">
-                          <div className="flex items-baseline justify-between gap-2">
-                            <span className="text-sm font-medium">
-                              {review.user_name}
-                            </span>
-                            <span className="shrink-0 text-xs text-gray-400">
-                              {formatReviewDatetime(review.created_at)}
-                            </span>
-                          </div>
-                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-700">
-                            {review.body}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                    {reviewsTotalPages > 1 && (
-                      <div className="mt-3 flex items-center justify-center gap-3">
-                        <button
-                          type="button"
-                          disabled={reviewsPage <= 1}
-                          onClick={() => setReviewsPage((p) => p - 1)}
-                          className="rounded-lg border border-gray-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          前へ
-                        </button>
-                        <span className="text-sm text-gray-500">
-                          {reviewsPage} / {reviewsTotalPages}
-                        </span>
-                        <button
-                          type="button"
-                          disabled={reviewsPage >= reviewsTotalPages}
-                          onClick={() => setReviewsPage((p) => p + 1)}
-                          className="rounded-lg border border-gray-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          次へ
-                        </button>
-                      </div>
-                    )}
-                  </>
+                  {spot.status === "pending" && (
+                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-700">
+                      承認待ち
+                    </span>
+                  )}
+                  {spot.status === "rejected" && (
+                    <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-xs font-normal text-red-600">
+                      却下
+                    </span>
+                  )}
+                  {canModerate && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={moderating}
+                        onClick={() => handleModerate("published")}
+                        className="ml-2 text-xs font-normal text-green-600 underline disabled:opacity-50"
+                      >
+                        承認
+                      </button>
+                      <button
+                        type="button"
+                        disabled={moderating}
+                        onClick={() => handleModerate("rejected")}
+                        className="ml-2 text-xs font-normal text-red-500 underline disabled:opacity-50"
+                      >
+                        却下
+                      </button>
+                    </>
+                  )}
+                </h2>
+                {actionError && (
+                  <p className="mt-1 text-xs text-red-600">{actionError}</p>
+                )}
+                {/* 地域・ランク・シリーズ・カテゴリの1行(一覧と共通。lib/spotMeta.ts) */}
+                <p className="text-xs text-gray-500">
+                  {formatSpotMeta(spot, { rankEnabled, categories })}
+                  {reviewsEnabled && reviewsTotal > 0 && (
+                    <span className="ml-2 text-gray-400">
+                      口コミ{reviewsTotal}件
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+            {/* 右端は×だけにする。一時期×を外して外側タップだけにしていたが、
+                このモーダルは画面のほぼ全体を占めるため外側の余白が狭すぎて
+                閉じにくく、復活させた。スポット名のコピーは名前の直後(h2の中) */}
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-full px-2 text-xl leading-none text-gray-400"
+                aria-label="閉じる"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          {spot.description && (
+            <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">
+              <LinkedText text={spot.description} />
+            </p>
+          )}
+
+          <div className="relative">
+            <MiniMap
+              lat={spot.lat}
+              lng={spot.lng}
+              rank={spot.rank}
+              series={spot.series}
+              seriesStyles={seriesStyles}
+              rankEnabled={rankEnabled}
+            />
+            {(canManage || canFlag) && (
+              <div className="absolute right-2 top-2 z-10 flex gap-2 rounded-lg bg-white/90 px-2 py-1 shadow">
+                {canManage && (
+                <button
+                  type="button"
+                  onClick={() => setShowEditForm(true)}
+                  className="text-xs font-normal text-blue-600 underline"
+                >
+                  編集
+                </button>
+                )}
+                {/* 非公開スポットはドラッグで位置を修正できる(座標だけを直せる) */}
+                {spot.status === "private" && (
+                  <button
+                    type="button"
+                    onClick={() => setShowReposition(true)}
+                    className="text-xs font-normal text-blue-600 underline"
+                  >
+                    位置を修正
+                  </button>
+                )}
+                {/* 修正の依頼。理由は空でもよいので、押した時点で入力欄を開き、
+                    空のまま「依頼する」を押せるようにしてある */}
+                {canFlag && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (flag) {
+                        removeFlag();
+                        return;
+                      }
+                      setFlagReason("");
+                      setFlagFormOpen((v) => !v);
+                    }}
+                    disabled={flagSaving}
+                    className={`text-xs font-normal underline disabled:opacity-50 ${
+                      flag ? "text-amber-700" : "text-gray-600"
+                    }`}
+                  >
+                    {flag ? "⚠ 依頼を取り消す" : "⚠ 修正を依頼"}
+                  </button>
+                )}
+                {canManage && (
+                <button
+                  type="button"
+                  onClick={handleDeleteSpot}
+                  className="text-xs font-normal text-red-500 underline"
+                >
+                  削除
+                </button>
                 )}
               </div>
             )}
-            {/* 非表示スポット(公開スポットを自分の地図・一覧から隠す)。スポット自体には
-                影響しないユーザーごとの設定のため、公開スポットでのみ出す */}
-            {!readOnly && spot.status === "published" && (
-              <div className="mt-4 border-t border-gray-100 pt-4">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-gray-400">
-                    {hidden
-                      ? "このスポットは非表示にしています(自分の地図・一覧に表示されません)。"
-                      : "興味のないスポットは、自分の地図・一覧から非表示にできます(他のユーザーには影響しません)。"}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={toggleHidden}
-                    disabled={hideUpdating}
-                    className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-                      hidden
-                        ? "border-blue-600 text-blue-600"
-                        : "border-gray-300 text-gray-500"
-                    }`}
-                  >
-                    {hidden ? "非表示を解除" : "非表示にする"}
-                  </button>
-                </div>
+          </div>
+
+          {canFlag && flagFormOpen && !flag && (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+              <label htmlFor={`${fid}-flag-reason`} className="mb-1 block text-xs font-bold text-amber-800">
+                どこを直してほしいか(空でもよい)
+              </label>
+              <textarea
+                id={`${fid}-flag-reason`}
+                value={flagReason}
+                onChange={(e) => setFlagReason(e.target.value)}
+                rows={2}
+                placeholder="例: 位置が実際の場所とずれている"
+                className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+              />
+              <div className="mt-1 flex gap-2">
+                <button
+                  type="button"
+                  onClick={submitFlag}
+                  disabled={flagSaving}
+                  className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  {flagSaving ? "依頼しています…" : "依頼する"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFlagFormOpen(false)}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs"
+                >
+                  やめる
+                </button>
               </div>
+            </div>
+          )}
+
+          {canFlag && flag && (
+            <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+              ⚠ 修正を依頼済み{flag.forwarded_at ? "(対応中)" : ""}
+              {flag.reason ? `: ${flag.reason}` : ""}
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <GoogleSpotLinks
+              spot={spot}
+              spotType={currentSpotType}
+              className="ml-auto"
+            />
+          </div>
+
+          {/* 訪問履歴 */}
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold">訪問履歴</h3>
+                {/* 未訪問記録は訪問済みに数えないため、✓の回数には含めない */}
+                {countedVisits(visits).length > 0 && (
+                  <p className="text-sm font-normal text-green-600">
+                    ✓ {countedVisits(visits).length}回
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                {/* 未訪問記録(訪問済みにしない記録)も同じフォームから記録する
+                    (フォーム内のチェックボックスで切り替え) */}
+                <button
+                  type="button"
+                  onClick={() => setShowForm(true)}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
+                >
+                  + 訪問を記録
+                </button>
+              </div>
+            </div>
+            {visits.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                まだ訪問記録がありません。
+              </p>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {visits.map((visit) => (
+                  <li key={visit.id} className="py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">
+                          {/* 日時なしの未訪問記録=下調べのメモ(「時期不明」とは意味が違う) */}
+                          {visit.unvisited && !visit.visited_on
+                            ? "下調べ"
+                            : formatVisitedOn(visit.visited_on)}
+                          {visit.unvisited && (
+                            <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-700">
+                              未訪問
+                            </span>
+                          )}
+                        </p>
+                        {visit.memo && (
+                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
+                            {visit.memo}
+                          </p>
+                        )}
+                        {visit.photos.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {visit.photos.map((photo, i) => (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() =>
+                                  setPhotoPreview({
+                                    photos: visitPhotoGroup(visit),
+                                    index: i,
+                                  })
+                                }
+                                className="cursor-zoom-in"
+                                aria-label="写真を拡大表示"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={visitPhotoSrc(photo)}
+                                  alt=""
+                                  className="h-14 w-14 rounded-lg object-cover"
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {/* 追記。**訪問回数は増やさず**、同じ訪問記録の下に
+                            書いた順で積む(写真も元の記録の写真の後ろになる)。
+                            左の縦線で「元の記録にぶら下がっている」ことを示す */}
+                        {(notesByVisit.get(visit.id) ?? []).map((note, ni, notes) => (
+                          <div
+                            key={note.id}
+                            className="mt-2 border-l-2 border-gray-200 pl-2.5"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-xs font-medium text-gray-500">
+                                {formatVisitNoteAt(note.created_at)}
+                              </p>
+                              {!readOnly && (
+                                <div className="flex shrink-0 gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingNote(note)}
+                                    className="text-xs text-gray-400 hover:text-blue-600"
+                                  >
+                                    編集
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteVisitNote(note.id)}
+                                    className="text-xs text-gray-400 hover:text-red-500"
+                                  >
+                                    削除
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            {note.body && (
+                              <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
+                                {note.body}
+                              </p>
+                            )}
+                            {note.photos.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {note.photos.map((photo, i) => (
+                                  <button
+                                    key={i}
+                                    type="button"
+                                    onClick={() =>
+                                      setPhotoPreview({
+                                        photos: visitPhotoGroup(visit),
+                                        // 記録本体 + それより前の追記のぶんだけ後ろにある
+                                        index:
+                                          visit.photos.length +
+                                          notes
+                                            .slice(0, ni)
+                                            .reduce(
+                                              (n, p) => n + p.photos.length,
+                                              0
+                                            ) +
+                                          i,
+                                      })
+                                    }
+                                    className="cursor-zoom-in"
+                                    aria-label="写真を拡大表示"
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={visitPhotoSrc(photo)}
+                                      alt=""
+                                      className="h-14 w-14 rounded-lg object-cover"
+                                    />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {/* 追記の追加。訪問記録の編集(右の「編集」)とは別物
+                            —— こちらは記録を書き換えず、後から足すだけ */}
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() => setAddingNoteVisit(visit)}
+                            className="mt-2 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                          >
+                            + 追記
+                          </button>
+                        )}
+                      </div>
+                      {!readOnly && (
+                        <div className="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingVisit(visit)}
+                            className="text-xs text-gray-400 hover:text-blue-600"
+                          >
+                            編集
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteVisit(visit.id)}
+                            className="text-xs text-gray-400 hover:text-red-500"
+                          >
+                            削除
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
-          </>
-        )}
-      </div>
+          </div>
+
+          {/* 訪問予定(訪問予定リスト)。リストへの追加と、このスポットを含む
+              リストの表示。★(訪問予定の単独ブックマーク)はヘッダー右上 */}
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-bold">訪問予定</h3>
+              <button
+                type="button"
+                onClick={() => setShowAddToList(true)}
+                className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600"
+              >
+                リストに追加
+              </button>
+            </div>
+            {/* 重ね表示から開いた別種別のスポットでも、対象は今開いている地図の
+                種別のリスト(リストの経由スポットは種別非依存のため混ぜられる) */}
+            {readOnly && viewingSpotType && (
+              <p className="mb-2 text-xs text-gray-400">
+                今開いている「{viewingSpotType.label}」の地図の訪問予定リストが対象です。
+              </p>
+            )}
+            {containingPlanLists.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                このスポットを含む訪問予定リストはありません。
+              </p>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {containingPlanLists.map((list) => (
+                  <li key={list.id} className="py-2">
+                    <button
+                      type="button"
+                      onClick={() => setDetailListId(list.id)}
+                      className="text-sm font-medium text-blue-600 underline"
+                    >
+                      {list.title}
+                    </button>
+                    <p className="text-xs text-gray-500">
+                      {formatPlanDateRange(list.start_date, list.end_date)}・
+                      {list.spot_ids.length}件
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 口コミ(公開・掲示板形式) */}
+          {reviewsEnabled && (
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              <h3 className="mb-3 font-bold">
+                口コミ
+                {reviewsTotal > 0 && (
+                  <span className="ml-1 font-normal text-gray-400">
+                    ({reviewsTotal}件)
+                  </span>
+                )}
+              </h3>
+              {reviews.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  まだ口コミがありません。
+                </p>
+              ) : (
+                <>
+                  <ul className="divide-y divide-gray-100">
+                    {reviews.map((review) => (
+                      <li key={review.id} className="py-2.5">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-sm font-medium">
+                            {review.user_name}
+                          </span>
+                          <span className="shrink-0 text-xs text-gray-400">
+                            {formatReviewDatetime(review.created_at)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-700">
+                          {review.body}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                  {reviewsTotalPages > 1 && (
+                    <div className="mt-3 flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        disabled={reviewsPage <= 1}
+                        onClick={() => setReviewsPage((p) => p - 1)}
+                        className="rounded-lg border border-gray-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        前へ
+                      </button>
+                      <span className="text-sm text-gray-500">
+                        {reviewsPage} / {reviewsTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={reviewsPage >= reviewsTotalPages}
+                        onClick={() => setReviewsPage((p) => p + 1)}
+                        className="rounded-lg border border-gray-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        次へ
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {/* 非表示スポット(公開スポットを自分の地図・一覧から隠す)。スポット自体には
+              影響しないユーザーごとの設定のため、公開スポットでのみ出す */}
+          {!readOnly && spot.status === "published" && (
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-gray-400">
+                  {hidden
+                    ? "このスポットは非表示にしています(自分の地図・一覧に表示されません)。"
+                    : "興味のないスポットは、自分の地図・一覧から非表示にできます(他のユーザーには影響しません)。"}
+                </p>
+                <button
+                  type="button"
+                  onClick={toggleHidden}
+                  disabled={hideUpdating}
+                  className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                    hidden
+                      ? "border-blue-600 text-blue-600"
+                      : "border-gray-300 text-gray-500"
+                  }`}
+                >
+                  {hidden ? "非表示を解除" : "非表示にする"}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </Modal>
 
       {showForm && spot && (
         <VisitFormModal
@@ -1190,6 +1199,6 @@ export default function SpotDetailModal({
           }}
         />
       )}
-    </div>
+    </>
   );
 }

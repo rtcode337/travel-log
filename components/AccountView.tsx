@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useId } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { ROLE_LABELS, type Role, type SpotType } from "@/lib/types";
@@ -8,6 +8,8 @@ import { useExportJobs } from "@/lib/useExportJobs";
 import { formatJstDateTime } from "@/lib/datetime";
 
 export default function AccountView({ typeKey }: { typeKey: string }) {
+  // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
+  const fid = useId();
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
   const [role, setRole] = useState<Role | null>(null);
@@ -81,6 +83,7 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
         )}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
+            type="button"
             onClick={handleLogout}
             className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700"
           >
@@ -89,6 +92,7 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
           {/* ログアウトはこの端末のCookieを消すだけなので、他の端末に残ったログインや
               漏れたCookieはこちらで取り消す */}
           <button
+            type="button"
             onClick={handleLogoutAll}
             className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700"
           >
@@ -142,10 +146,11 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
           </button>
         ) : (
           <div className="mt-3">
-            <label className="block text-xs text-gray-600">
+            <label htmlFor={`${fid}-confirm-email`} className="block text-xs text-gray-600">
               確認のため、ご自身のメールアドレス({email})を入力してください。
             </label>
             <input
+              id={`${fid}-confirm-email`}
               type="email"
               value={deleteAccountInput}
               onChange={(e) => setDeleteAccountInput(e.target.value)}

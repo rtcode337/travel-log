@@ -5,6 +5,7 @@ import * as maplibregl from "@/lib/maplibre";
 import { osmStyle } from "@/lib/mapStyle";
 import { api } from "@/lib/api-client";
 import type { Spot } from "@/lib/types";
+import Modal from "@/components/Modal";
 
 /**
  * 非公開スポットの位置(緯度経度)を、ドラッグできるマーカーで修正するモーダル。
@@ -26,6 +27,7 @@ export default function SpotRepositionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 初期スポットが変わる想定はないので、地図はマウント時に一度だけ作る
   useEffect(() => {
     if (!containerRef.current) return;
     const map = new maplibregl.Map({
@@ -49,7 +51,6 @@ export default function SpotRepositionModal({
       mapRef.current = null;
     };
     // 初期スポットが変わる想定はないので、マウント時に一度だけ作る
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSave = async () => {
@@ -76,54 +77,50 @@ export default function SpotRepositionModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      zIndexClassName="z-[60]"
+      panelClassName="w-full max-w-md space-y-3 rounded-2xl bg-white p-4"
     >
-      <div
-        className="w-full max-w-md space-y-3 rounded-2xl bg-white p-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="font-bold">位置を修正</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="閉じる"
-            className="text-xl leading-none text-gray-400"
-          >
-            ✕
-          </button>
-        </div>
-        <p className="text-xs text-gray-500">
-          赤いピンをドラッグして正しい位置に合わせてください。
-        </p>
-        <div
-          ref={containerRef}
-          className="h-72 w-full overflow-hidden rounded-lg border border-gray-200"
-        />
-        <p className="text-xs text-gray-500">
-          緯度 {pos.lat.toFixed(5)} ・ 経度 {pos.lng.toFixed(5)}
-        </p>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
-          >
-            キャンセル
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {saving ? "保存中…" : "この位置で保存"}
-          </button>
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-bold">位置を修正</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="閉じる"
+          className="text-xl leading-none text-gray-400"
+        >
+          ✕
+        </button>
       </div>
-    </div>
+      <p className="text-xs text-gray-500">
+        赤いピンをドラッグして正しい位置に合わせてください。
+      </p>
+      <div
+        ref={containerRef}
+        className="h-72 w-full overflow-hidden rounded-lg border border-gray-200"
+      />
+      <p className="text-xs text-gray-500">
+        緯度 {pos.lat.toFixed(5)} ・ 経度 {pos.lng.toFixed(5)}
+      </p>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+        >
+          キャンセル
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {saving ? "保存中…" : "この位置で保存"}
+        </button>
+      </div>
+    </Modal>
   );
 }

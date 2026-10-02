@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useId } from "react";
 import { readPhotoTakenAt } from "@/lib/exif";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitPhotoFields from "@/components/VisitPhotoFields";
@@ -33,6 +33,8 @@ export default function VisitFields({
    *  「下調べ」になるため、呼び出し側で差し替えられるようにしてある */
   visitedOnHint?: string;
 }) {
+  // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
+  const fid = useId();
   // 選択中の写真のExif撮影日時のうち最も古いもの(=その場所に着いた時刻)。
   // 訪問日時欄に入れるボタンを出すためだけに持つ(自動では入れない)
   const [earliestTakenAt, setEarliestTakenAt] = useState<Date | null>(null);
@@ -79,9 +81,10 @@ export default function VisitFields({
   return (
     <>
       <div>
-        <label className="mb-1 block text-sm font-medium">訪問日時</label>
+        <label htmlFor={`${fid}-visited-on`} className="mb-1 block text-sm font-medium">訪問日時</label>
         <div className="flex gap-1.5">
           <input
+            id={`${fid}-visited-on`}
             type="datetime-local"
             value={visitedOn}
             onChange={(e) => onVisitedOnChange(e.target.value)}
@@ -147,8 +150,9 @@ export default function VisitFields({
       />
 
       <div className="border-t border-gray-100 pt-3">
-        <label className="mb-1 block text-sm font-medium">メモ(非公開)</label>
+        <label htmlFor={`${fid}-memo`} className="mb-1 block text-sm font-medium">メモ(非公開)</label>
         <textarea
+          id={`${fid}-memo`}
           value={memo}
           onChange={(e) => onMemoChange(e.target.value)}
           rows={3}

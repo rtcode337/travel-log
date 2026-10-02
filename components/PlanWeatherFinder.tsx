@@ -101,6 +101,7 @@ export default function PlanWeatherFinder({
   }, [open, days, loading, load]);
 
   // 予定日が変われば見る範囲も変わるので、取り直させる
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 予定日や地点が変わったら取り直させる(値は中で読まず、変わったことだけを合図に使う)
   useEffect(() => {
     setDays(null);
   }, [date, pointsKey]);

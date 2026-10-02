@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useModalLayer } from "@/components/Modal";
 
 /** 拡大率の下限・上限。1=画面に収まる大きさ */
 const MIN_SCALE = 1;
@@ -85,6 +86,7 @@ export default function PhotoLightbox({
   } | null>(null);
   const lastTapAt = useRef(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 写真をまたいだら拡大を解く(indexは中で読まず、変わったことだけを合図に使う)
   useEffect(() => {
     setTransform(IDENTITY);
     setDragX(0);
@@ -99,16 +101,18 @@ export default function PhotoLightbox({
     [index, photos.length, onIndexChange]
   );
 
-  // Escで閉じ、左右キーで前後の写真へ(ポインタの無い環境でも一通り操作できる)
+  // Escで閉じ(重なりの一番上のときだけ。下のモーダルまで閉じない)、左右キーで前後の写真へ
+  // (ポインタの無い環境でも一通り操作できる)
+  const isTopLayer = useModalLayer(onClose);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft") go(-1);
+      if (!isTopLayer()) return;
+      if (e.key === "ArrowLeft") go(-1);
       else if (e.key === "ArrowRight") go(1);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, go]);
+  }, [go, isTopLayer]);
 
   /**
    * 表示中の写真が画面に占めている矩形(`object-contain`なので要素の箱より小さい)。
@@ -290,9 +294,10 @@ export default function PhotoLightbox({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="写真の拡大表示"
       className="fixed inset-0 z-[60] flex flex-col bg-black/90"
-      // 親のオーバーレイ(スポット詳細を閉じる)まで伝播させない
-      onClick={(e) => e.stopPropagation()}
     >
       <div
         ref={viewportRef}

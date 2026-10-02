@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useId } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PlanBuildPanel from "@/components/PlanBuildPanel";
@@ -109,6 +109,7 @@ import {
   loadSavedOverlayTypeKeys,
   saveOverlayTypeKeys,
 } from "@/lib/map/filterStorage";
+import Modal from "@/components/Modal";
 
 /**
  * 直前に表示していた地図の中心・ズームをスポット種別ごとに覚えておく
@@ -180,6 +181,8 @@ export default function MapView({
   /** 表示対象のスポット種別キー(常に /[type]/map から渡される) */
   spotTypeKey: string;
 }) {
+  // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
+  const fid = useId();
   const router = useRouter();
   const searchParams = useSearchParams();
   const focusSpotId = searchParams.get("spot");
@@ -959,6 +962,7 @@ export default function MapView({
   // 重ね表示のデータ読み込み。スポットもルートも、その種別のダウンロード済み
   // キャッシュ(公開スポットのダウンロード時に公開ルートも一緒に保存される)から読む。
   // 選択が外れた種別のデータ・絞り込みはここで一緒に捨てる
+  // biome-ignore lint/correctness/useExhaustiveDependencies: spotTypesはメッセージの表示名にしか使わないので、変わっても読み直さない
   useEffect(() => {
     let cancelled = false;
     setOverlayFilters(
@@ -1004,8 +1008,6 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-    // spotTypesはメッセージの表示名にしか使わないため、依存に入れて読み直す必要はない
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlayTypeKeys, spotTypeKey]);
 
   /** ダウンロード確認の「キャンセル」: その種別の重ね表示の選択を解除する */
@@ -1570,6 +1572,7 @@ export default function MapView({
   }, [spotTypeKey]);
 
   // データ取得(公開スポット・公開ルートはspotCacheが読み込む)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 種別が変わったときだけ読み直す(読み込み関数は描画のたびに作り直されるので、依存に入れると読み続ける)
   useEffect(() => {
     (async () => {
       await Promise.all([
@@ -1580,7 +1583,6 @@ export default function MapView({
       ]);
       setLoading(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spotTypeKey]);
 
   // /map?spot=<id> で開かれたら、そのスポットの位置にズームする
@@ -1719,6 +1721,7 @@ export default function MapView({
   // マーカーの生成・フィルタ反映。
   // 公開スポットも自分の非公開スポットも同じWebGLクラスタ表示で描画する
   // (非公開はピン画像を破線縁取りにして見分ける)。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: クリックのハンドラ(handleMapSpotSelect)はレイヤーを作るときに一度だけ束ねる(作り直すと二重に発火する)。描き直しの合図は下の配列で決める
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -1831,7 +1834,6 @@ export default function MapView({
     };
   }, [
     spots,
-    spotById,
     pathSpotById,
     pathMemberIds,
     visits,
@@ -1843,7 +1845,6 @@ export default function MapView({
     runWhenMapReady,
     seriesStyles,
     rankEnabled,
-    routes,
   ]);
 
   // ルートの矢印描画。経由地2点以上のルートを、巡った順(seq昇順)に繋いだ
@@ -2580,469 +2581,460 @@ export default function MapView({
           (1回目のタップで閉じると期間を選べない)。選択はその場で反映されるため、
           閉じる操作は「閉じる」だけでよい */}
       {showVisitCalendar && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setShowVisitCalendar(false)}
+        <Modal
+          onClose={() => setShowVisitCalendar(false)}
+          zIndexClassName="z-[60]"
+          panelClassName="max-h-[85dvh] w-full max-w-xs space-y-2 overflow-y-auto rounded-2xl bg-white p-4"
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="max-h-[85dvh] w-full max-w-xs space-y-2 overflow-y-auto rounded-2xl bg-white p-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-bold">訪問日</h2>
-              <button
-                type="button"
-                onClick={() => setShowVisitCalendar(false)}
-                aria-label="閉じる"
-                className="rounded-full px-2 text-xl leading-none text-gray-400"
-              >
-                ×
-              </button>
-            </div>
-            <p className="text-sm">
-              {filters.visitedDate ? (
-                <>
-                  {formatVisitDate(filters.visitedDate)}
-                  {filters.visitedDateTo && (
-                    <> 〜 {formatVisitDate(filters.visitedDateTo)}</>
-                  )}
-                </>
-              ) : (
-                <span className="text-gray-400">表示しない</span>
-              )}
-            </p>
-            <VisitDateCalendar
-              from={filters.visitedDate}
-              to={filters.visitedDateTo}
-              markedDates={visitDateSet}
-              today={visitDateOptions.today}
-              onSelect={handleSelectVisitDate}
-            />
-            <p className="text-xs text-gray-400">
-              日付をタップで1日、続けてもう1日タップで期間。
-              <span className="mx-1 inline-block size-1 rounded-full bg-green-600 align-middle" />
-              の日に訪問記録があります。
-            </p>
-            <div className="flex gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => handleSelectVisitDate(visitDateOptions.today, null)}
-                className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
-              >
-                今日
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectVisitDate(null, null)}
-                className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
-              >
-                表示しない
-              </button>
-            </div>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-bold">訪問日</h2>
+            <button
+              type="button"
+              onClick={() => setShowVisitCalendar(false)}
+              aria-label="閉じる"
+              className="rounded-full px-2 text-xl leading-none text-gray-400"
+            >
+              ×
+            </button>
           </div>
-        </div>
+          <p className="text-sm">
+            {filters.visitedDate ? (
+              <>
+                {formatVisitDate(filters.visitedDate)}
+                {filters.visitedDateTo && (
+                  <> 〜 {formatVisitDate(filters.visitedDateTo)}</>
+                )}
+              </>
+            ) : (
+              <span className="text-gray-400">表示しない</span>
+            )}
+          </p>
+          <VisitDateCalendar
+            from={filters.visitedDate}
+            to={filters.visitedDateTo}
+            markedDates={visitDateSet}
+            today={visitDateOptions.today}
+            onSelect={handleSelectVisitDate}
+          />
+          <p className="text-xs text-gray-400">
+            日付をタップで1日、続けてもう1日タップで期間。
+            <span className="mx-1 inline-block size-1 rounded-full bg-green-600 align-middle" />
+            の日に訪問記録があります。
+          </p>
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => handleSelectVisitDate(visitDateOptions.today, null)}
+              className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+            >
+              今日
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectVisitDate(null, null)}
+              className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+            >
+              表示しない
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* 絞り込みモーダル */}
       {showFilterModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setShowFilterModal(false)}
+        <Modal
+          onClose={() => setShowFilterModal(false)}
+          panelClassName="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              {/* 節の見出しは全部同じ大きさにする —— 絞り込みは訪問日や表示に
-                  掛かっているわけではなく、並んだ節の1つでしかない */}
-              <h2 className="text-sm font-medium">絞り込み</h2>
-              <div className="flex items-center gap-3">
-                {/* 見出しのリセットは絞り込み(シリーズ・カテゴリ・訪問状況)のみを
-                    既定に戻す。訪問日・訪問予定リスト・重ね表示は各セクションの
-                    個別リセットボタンで戻す */}
-                <FilterResetButton filters={filters} onChange={setFilters} />
+          <div className="flex items-center justify-between gap-2">
+            {/* 節の見出しは全部同じ大きさにする —— 絞り込みは訪問日や表示に
+                掛かっているわけではなく、並んだ節の1つでしかない */}
+            <h2 className="text-sm font-medium">絞り込み</h2>
+            <div className="flex items-center gap-3">
+              {/* 見出しのリセットは絞り込み(シリーズ・カテゴリ・訪問状況)のみを
+                  既定に戻す。訪問日・訪問予定リスト・重ね表示は各セクションの
+                  個別リセットボタンで戻す */}
+              <FilterResetButton filters={filters} onChange={setFilters} />
+              <button
+                type="button"
+                onClick={() => setShowFilterModal(false)}
+                aria-label="閉じる"
+                className="text-xl leading-none text-gray-400"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          {/* 経路の表示トグルはここでは出さない(「表示」の節=ダウンロードの上へ移した) */}
+          <FilterBar
+            spots={spots}
+            filters={filters}
+            onChange={setFilters}
+            showReset={false}
+            seriesStyles={seriesStyles}
+            rankEnabled={rankEnabled}
+            categories={categories}
+          />
+
+          {/* 訪問順の経路の対象日(絞り込みではなく、その日に訪問したスポットを
+              訪問順に緑の矢印で結ぶ。重ね表示セクションと同じ区切り線を上に置く) */}
+          <div className="border-t border-gray-100 pt-3">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                訪問日
+                <HelpTip>
+                  選んだ日(期間)に訪問したスポットを、訪問した順に矢印(緑)で結んで地図に表示します。期間を選ぶと日をまたいで1本の経路になります。対象のスポットは、絞り込みで外れていても・別のスポット種別でも表示されます。
+                </HelpTip>
+              </p>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/* 対象日を1年前〜今日にするトグル。押すだけで期間の選択が要らない
+                    (カレンダーだと開始月まで12回さかのぼって2回タップになる)。
+                    **「これだけを表示」とは別の軸**で、こちらが決めるのは対象の期間、
+                    あちらが決めるのは他のスポットを隠すかどうか。
+                    両方を同時に点けられる(過去1年に訪問したスポットだけを出す)。
+                    解除すると既定=今日へ戻す —— 期間だけが1年のまま残ると、
+                    1年ぶんの訪問が1本の経路として繋がって読めなくなる */}
                 <button
                   type="button"
-                  onClick={() => setShowFilterModal(false)}
-                  aria-label="閉じる"
-                  className="text-xl leading-none text-gray-400"
+                  aria-pressed={isPastYearRange}
+                  onClick={() =>
+                    handleSelectVisitDate(
+                      isPastYearRange
+                        ? visitDateOptions.today
+                        : visitDateOptions.oneYearAgo,
+                      isPastYearRange ? null : visitDateOptions.today
+                    )
+                  }
+                  className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                    isPastYearRange
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 bg-white text-gray-500"
+                  }`}
                 >
-                  ✕
+                  過去1年
+                </button>
+                {/* その日のスポットだけに絞る(他のスポット・ルート・訪問予定リストは隠す) */}
+                <button
+                  type="button"
+                  disabled={!filters.visitedDate}
+                  aria-pressed={isolatingVisit}
+                  onClick={() =>
+                    setFilters({
+                      ...filters,
+                      isolate: isolatingVisit ? null : "visit",
+                    })
+                  }
+                  className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-40 ${
+                    isolatingVisit
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 bg-white text-gray-500"
+                  }`}
+                >
+                  これだけを表示
+                </button>
+                {/* このセクションだけのリセット(対象日を既定=今日に戻し、
+                    「これだけを表示」も解除する) */}
+                <SectionResetButton
+                  disabled={
+                    filters.visitedDate === visitDateOptions.today &&
+                    filters.visitedDateTo === null &&
+                    filters.isolate !== "visit"
+                  }
+                  onClick={() =>
+                    setFilters({
+                      ...filters,
+                      visitedDate: todayKey(),
+                      visitedDateTo: null,
+                      isolate:
+                        filters.isolate === "visit" ? null : filters.isolate,
+                    })
+                  }
+                />
+              </div>
+            </div>
+            {/* 選択中の対象日(期間)。タップでカレンダーを別モーダルで開く
+                (絞り込みモーダルにカレンダーを直に置くと、他の条件を見るのに
+                毎回その分スクロールすることになるため)。「今日」「表示しない」は
+                よく使うのでここに残す */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowVisitCalendar(true)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-left text-sm"
+              >
+                <CalendarIcon className="size-4 shrink-0 text-gray-400" />
+                <span className="min-w-0 truncate">
+                  {filters.visitedDate ? (
+                    <>
+                      {formatVisitDate(filters.visitedDate)}
+                      {filters.visitedDateTo && (
+                        <> 〜 {formatVisitDate(filters.visitedDateTo)}</>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-gray-400">表示しない</span>
+                  )}
+                </span>
+              </button>
+              <div className="flex shrink-0 gap-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleSelectVisitDate(visitDateOptions.today, null)
+                  }
+                  className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
+                >
+                  今日
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectVisitDate(null, null)}
+                  className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
+                >
+                  表示しない
                 </button>
               </div>
             </div>
-            {/* 経路の表示トグルはここでは出さない(「表示」の節=ダウンロードの上へ移した) */}
-            <FilterBar
-              spots={spots}
-              filters={filters}
-              onChange={setFilters}
-              showReset={false}
-              seriesStyles={seriesStyles}
-              rankEnabled={rankEnabled}
-              categories={categories}
-            />
+          </div>
 
-            {/* 訪問順の経路の対象日(絞り込みではなく、その日に訪問したスポットを
-                訪問順に緑の矢印で結ぶ。重ね表示セクションと同じ区切り線を上に置く) */}
+          {/* 訪問予定リスト(旅程)の経路。訪問日と同様、リストのスポットを
+              リスト順に矢印(紫)で結び、選ぶと経路全体が画面に収まる */}
+          {planLists.length > 0 && (
             <div className="border-t border-gray-100 pt-3">
               <div className="mb-1 flex items-center justify-between gap-2">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
-                  訪問日
+                  訪問予定リスト
                   <HelpTip>
-                    選んだ日(期間)に訪問したスポットを、訪問した順に矢印(緑)で結んで地図に表示します。期間を選ぶと日をまたいで1本の経路になります。対象のスポットは、絞り込みで外れていても・別のスポット種別でも表示されます。
+                    選んだリストのスポットを、リストの順に矢印(紫)で結んで地図に表示します。リストのスポットは、絞り込みで外れていても表示されます。
                   </HelpTip>
                 </p>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  {/* 対象日を1年前〜今日にするトグル。押すだけで期間の選択が要らない
-                      (カレンダーだと開始月まで12回さかのぼって2回タップになる)。
-                      **「これだけを表示」とは別の軸**で、こちらが決めるのは対象の期間、
-                      あちらが決めるのは他のスポットを隠すかどうか。
-                      両方を同時に点けられる(過去1年に訪問したスポットだけを出す)。
-                      解除すると既定=今日へ戻す —— 期間だけが1年のまま残ると、
-                      1年ぶんの訪問が1本の経路として繋がって読めなくなる */}
+                  {/* そのリストのスポットだけに絞る(他のスポット・ルート・訪問順の経路は隠す) */}
                   <button
                     type="button"
-                    aria-pressed={isPastYearRange}
-                    onClick={() =>
-                      handleSelectVisitDate(
-                        isPastYearRange
-                          ? visitDateOptions.today
-                          : visitDateOptions.oneYearAgo,
-                        isPastYearRange ? null : visitDateOptions.today
-                      )
-                    }
-                    className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                      isPastYearRange
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-gray-300 bg-white text-gray-500"
-                    }`}
-                  >
-                    過去1年
-                  </button>
-                  {/* その日のスポットだけに絞る(他のスポット・ルート・訪問予定リストは隠す) */}
-                  <button
-                    type="button"
-                    disabled={!filters.visitedDate}
-                    aria-pressed={isolatingVisit}
+                    disabled={!filters.planListId}
+                    aria-pressed={filters.isolate === "plan"}
                     onClick={() =>
                       setFilters({
                         ...filters,
-                        isolate: isolatingVisit ? null : "visit",
+                        isolate: filters.isolate === "plan" ? null : "plan",
                       })
                     }
                     className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-40 ${
-                      isolatingVisit
+                      filters.isolate === "plan"
                         ? "border-blue-600 bg-blue-600 text-white"
                         : "border-gray-300 bg-white text-gray-500"
                     }`}
                   >
                     これだけを表示
                   </button>
-                  {/* このセクションだけのリセット(対象日を既定=今日に戻し、
+                  {/* このセクションだけのリセット(「表示しない」へ戻し、
                       「これだけを表示」も解除する) */}
                   <SectionResetButton
                     disabled={
-                      filters.visitedDate === visitDateOptions.today &&
-                      filters.visitedDateTo === null &&
-                      filters.isolate !== "visit"
+                      filters.planListId === null &&
+                      filters.isolate !== "plan"
                     }
                     onClick={() =>
                       setFilters({
                         ...filters,
-                        visitedDate: todayKey(),
-                        visitedDateTo: null,
+                        planListId: null,
                         isolate:
-                          filters.isolate === "visit" ? null : filters.isolate,
+                          filters.isolate === "plan" ? null : filters.isolate,
                       })
                     }
                   />
                 </div>
               </div>
-              {/* 選択中の対象日(期間)。タップでカレンダーを別モーダルで開く
-                  (絞り込みモーダルにカレンダーを直に置くと、他の条件を見るのに
-                  毎回その分スクロールすることになるため)。「今日」「表示しない」は
-                  よく使うのでここに残す */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowVisitCalendar(true)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-left text-sm"
-                >
-                  <CalendarIcon className="size-4 shrink-0 text-gray-400" />
-                  <span className="min-w-0 truncate">
-                    {filters.visitedDate ? (
-                      <>
-                        {formatVisitDate(filters.visitedDate)}
-                        {filters.visitedDateTo && (
-                          <> 〜 {formatVisitDate(filters.visitedDateTo)}</>
+              <select
+                aria-label="経路表示する訪問予定リスト"
+                value={filters.planListId ?? ""}
+                onChange={(e) => handleSelectPlanList(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
+              >
+                <option value="">表示しない</option>
+                {planLists.map((list) => (
+                  <option key={list.id} value={list.id}>
+                    {list.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* 別の種別を重ねて表示(複数選択可)。選んだ順に上へ重なり、
+              種別ごとに絞り込みを編集できる */}
+          {spotTypes.filter((t) => t.key !== spotTypeKey).length > 0 && (
+            <div className="border-t border-gray-100 pt-3">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  別の種別を重ねて表示
+                  <HelpTip>
+                    選んだ種別の公開スポットと経路を半透明で重ねて表示します(複数選べます。未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは種別ごとに、その種別の地図で自分が設定した内容に従います。
+                  </HelpTip>
+                </p>
+                {/* このセクションだけのリセット(すべて「重ねない」へ戻す) */}
+                <SectionResetButton
+                  disabled={overlayTypeKeys.length === 0}
+                  onClick={clearOverlayTypeKeys}
+                />
+              </div>
+              <ul className="max-h-56 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
+                {spotTypes
+                  .filter((t) => t.key !== spotTypeKey)
+                  .map((t) => {
+                    const selected = overlayTypeKeys.includes(t.key);
+                    return (
+                      <li
+                        key={t.key}
+                        className="flex items-center justify-between gap-2 px-2.5 py-1.5"
+                      >
+                        <label className="flex min-w-0 flex-1 items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleOverlayTypeKey(t.key)}
+                            className="size-4 shrink-0 accent-blue-600"
+                          />
+                          <span className="min-w-0 truncate text-sm">
+                            {t.label}
+                          </span>
+                        </label>
+                        {/* 種別を切り替えず、この地図の上のモーダルで重ね表示側の
+                            絞り込みを編集する(変更はその種別のlocalStorageへ
+                            保存され、描画にも即反映) */}
+                        {selected && overlayData.has(t.key) && (
+                          <button
+                            type="button"
+                            onClick={() => setOverlayFilterTypeKey(t.key)}
+                            className="shrink-0 text-xs text-blue-600 underline"
+                          >
+                            絞り込みを編集
+                          </button>
                         )}
-                      </>
-                    ) : (
-                      <span className="text-gray-400">表示しない</span>
-                    )}
-                  </span>
-                </button>
-                <div className="flex shrink-0 gap-1">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSelectVisitDate(visitDateOptions.today, null)
-                    }
-                    className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
-                  >
-                    今日
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectVisitDate(null, null)}
-                    className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-600"
-                  >
-                    表示しない
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 訪問予定リスト(旅程)の経路。訪問日と同様、リストのスポットを
-                リスト順に矢印(紫)で結び、選ぶと経路全体が画面に収まる */}
-            {planLists.length > 0 && (
-              <div className="border-t border-gray-100 pt-3">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="flex items-center gap-1.5 text-sm font-medium">
-                    訪問予定リスト
-                    <HelpTip>
-                      選んだリストのスポットを、リストの順に矢印(紫)で結んで地図に表示します。リストのスポットは、絞り込みで外れていても表示されます。
-                    </HelpTip>
-                  </p>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {/* そのリストのスポットだけに絞る(他のスポット・ルート・訪問順の経路は隠す) */}
-                    <button
-                      type="button"
-                      disabled={!filters.planListId}
-                      aria-pressed={filters.isolate === "plan"}
-                      onClick={() =>
-                        setFilters({
-                          ...filters,
-                          isolate: filters.isolate === "plan" ? null : "plan",
-                        })
-                      }
-                      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-40 ${
-                        filters.isolate === "plan"
-                          ? "border-blue-600 bg-blue-600 text-white"
-                          : "border-gray-300 bg-white text-gray-500"
-                      }`}
-                    >
-                      これだけを表示
-                    </button>
-                    {/* このセクションだけのリセット(「表示しない」へ戻し、
-                        「これだけを表示」も解除する) */}
-                    <SectionResetButton
-                      disabled={
-                        filters.planListId === null &&
-                        filters.isolate !== "plan"
-                      }
-                      onClick={() =>
-                        setFilters({
-                          ...filters,
-                          planListId: null,
-                          isolate:
-                            filters.isolate === "plan" ? null : filters.isolate,
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-                <select
-                  aria-label="経路表示する訪問予定リスト"
-                  value={filters.planListId ?? ""}
-                  onChange={(e) => handleSelectPlanList(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm"
-                >
-                  <option value="">表示しない</option>
-                  {planLists.map((list) => (
-                    <option key={list.id} value={list.id}>
-                      {list.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* 別の種別を重ねて表示(複数選択可)。選んだ順に上へ重なり、
-                種別ごとに絞り込みを編集できる */}
-            {spotTypes.filter((t) => t.key !== spotTypeKey).length > 0 && (
-              <div className="border-t border-gray-100 pt-3">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="flex items-center gap-1.5 text-sm font-medium">
-                    別の種別を重ねて表示
-                    <HelpTip>
-                      選んだ種別の公開スポットと経路を半透明で重ねて表示します(複数選べます。未ダウンロードの種別は、ダウンロードするかどうかの確認が出ます)。絞り込みとルート表示のオン/オフは種別ごとに、その種別の地図で自分が設定した内容に従います。
-                    </HelpTip>
-                  </p>
-                  {/* このセクションだけのリセット(すべて「重ねない」へ戻す) */}
-                  <SectionResetButton
-                    disabled={overlayTypeKeys.length === 0}
-                    onClick={clearOverlayTypeKeys}
-                  />
-                </div>
-                <ul className="max-h-56 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
-                  {spotTypes
-                    .filter((t) => t.key !== spotTypeKey)
-                    .map((t) => {
-                      const selected = overlayTypeKeys.includes(t.key);
-                      return (
-                        <li
-                          key={t.key}
-                          className="flex items-center justify-between gap-2 px-2.5 py-1.5"
-                        >
-                          <label className="flex min-w-0 flex-1 items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={selected}
-                              onChange={() => toggleOverlayTypeKey(t.key)}
-                              className="size-4 shrink-0 accent-blue-600"
-                            />
-                            <span className="min-w-0 truncate text-sm">
-                              {t.label}
-                            </span>
-                          </label>
-                          {/* 種別を切り替えず、この地図の上のモーダルで重ね表示側の
-                              絞り込みを編集する(変更はその種別のlocalStorageへ
-                              保存され、描画にも即反映) */}
-                          {selected && overlayData.has(t.key) && (
-                            <button
-                              type="button"
-                              onClick={() => setOverlayFilterTypeKey(t.key)}
-                              className="shrink-0 text-xs text-blue-600 underline"
-                            >
-                              絞り込みを編集
-                            </button>
-                          )}
-                        </li>
-                      );
-                    })}
-                </ul>
-                {overlayMessage && (
-                  <p className="mt-1 text-xs text-red-600">{overlayMessage}</p>
-                )}
-              </div>
-            )}
-
-            {/* 地図の見せ方の切り替え(絞り込みではない)。ダウンロードのすぐ上に置く */}
-            <div className="border-t border-gray-100 pt-3">
-              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                表示
-                <HelpTip>
-                  {routes.length > 0 && "経路は巡った順の矢印です。"}
-                  クラスタ表示を無効にすると、近くのピンを「N件」の丸にまとめず1件ずつ
-                  出します(件数が多い種別では地図が重くなります)。
-                  「訪問済みも元のピンで表示」をオンにすると、訪問済みのスポットも緑+✓では
-                  なくランク・シリーズの見た目のまま表示します(重ねている種別のピンにも
-                  効きます)。
-                </HelpTip>
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {routes.length > 0 && (
-                  <button
-                    type="button"
-                    aria-pressed={filters.showRoutes}
-                    onClick={() =>
-                      setFilters({ ...filters, showRoutes: !filters.showRoutes })
-                    }
-                    className={`rounded-full border px-3 py-1 text-sm font-medium ${
-                      filters.showRoutes
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-gray-300 bg-white text-gray-400"
-                    }`}
-                  >
-                    経路を表示
-                  </button>
-                )}
-                <button
-                  type="button"
-                  aria-pressed={filters.disableCluster}
-                  onClick={() =>
-                    setFilters({
-                      ...filters,
-                      disableCluster: !filters.disableCluster,
-                    })
-                  }
-                  className={`rounded-full border px-3 py-1 text-sm font-medium ${
-                    filters.disableCluster
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-gray-300 bg-white text-gray-400"
-                  }`}
-                >
-                  クラスタ表示を無効化
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={filters.showVisitedOriginalPin}
-                  onClick={() =>
-                    setFilters({
-                      ...filters,
-                      showVisitedOriginalPin: !filters.showVisitedOriginalPin,
-                    })
-                  }
-                  className={`rounded-full border px-3 py-1 text-sm font-medium ${
-                    filters.showVisitedOriginalPin
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-gray-300 bg-white text-gray-400"
-                  }`}
-                >
-                  訪問済みも元のピンで表示
-                </button>
-              </div>
-            </div>
-
-            <div className="border-t border-gray-100 pt-3">
-              <p className="mb-1 text-sm font-medium">公開スポットのダウンロード</p>
-              <p className="mb-2 text-xs text-gray-500">
-                {spotCache.downloadedAt
-                  ? `前回ダウンロード: ${formatDownloadedAt(spotCache.downloadedAt)}`
-                  : "まだダウンロードしていません。"}
-              </p>
-              {spotCache.error && (
-                <p className="mb-2 text-xs text-red-600">{spotCache.error}</p>
+                      </li>
+                    );
+                  })}
+              </ul>
+              {overlayMessage && (
+                <p className="mt-1 text-xs text-red-600">{overlayMessage}</p>
               )}
-              <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={spotCache.startManualDownload}
-                disabled={spotCache.checkingSize || spotCache.downloading}
-                className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
-              >
-                {spotCache.checkingSize
-                  ? "確認中…"
-                  : spotCache.downloading
-                    ? "ダウンロード中…"
-                    : "ダウンロード"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (
-                    confirm(
-                      "ダウンロード済みの公開スポットデータを削除しますか?次にこの画面を開いたとき、再ダウンロードが必要になります。"
-                    )
-                  ) {
-                    spotCache.clearCache();
+            </div>
+          )}
+
+          {/* 地図の見せ方の切り替え(絞り込みではない)。ダウンロードのすぐ上に置く */}
+          <div className="border-t border-gray-100 pt-3">
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+              表示
+              <HelpTip>
+                {routes.length > 0 && "経路は巡った順の矢印です。"}
+                クラスタ表示を無効にすると、近くのピンを「N件」の丸にまとめず1件ずつ
+                出します(件数が多い種別では地図が重くなります)。
+                「訪問済みも元のピンで表示」をオンにすると、訪問済みのスポットも緑+✓では
+                なくランク・シリーズの見た目のまま表示します(重ねている種別のピンにも
+                効きます)。
+              </HelpTip>
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {routes.length > 0 && (
+                <button
+                  type="button"
+                  aria-pressed={filters.showRoutes}
+                  onClick={() =>
+                    setFilters({ ...filters, showRoutes: !filters.showRoutes })
                   }
-                }}
-                disabled={
-                  !spotCache.downloadedAt ||
-                  spotCache.checkingSize ||
-                  spotCache.downloading
+                  className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                    filters.showRoutes
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 bg-white text-gray-400"
+                  }`}
+                >
+                  経路を表示
+                </button>
+              )}
+              <button
+                type="button"
+                aria-pressed={filters.disableCluster}
+                onClick={() =>
+                  setFilters({
+                    ...filters,
+                    disableCluster: !filters.disableCluster,
+                  })
                 }
-                className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-red-600 disabled:opacity-50"
+                className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                  filters.disableCluster
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-gray-300 bg-white text-gray-400"
+                }`}
               >
-                キャッシュ削除
+                クラスタ表示を無効化
               </button>
-              </div>
+              <button
+                type="button"
+                aria-pressed={filters.showVisitedOriginalPin}
+                onClick={() =>
+                  setFilters({
+                    ...filters,
+                    showVisitedOriginalPin: !filters.showVisitedOriginalPin,
+                  })
+                }
+                className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                  filters.showVisitedOriginalPin
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-gray-300 bg-white text-gray-400"
+                }`}
+              >
+                訪問済みも元のピンで表示
+              </button>
             </div>
           </div>
-        </div>
+
+          <div className="border-t border-gray-100 pt-3">
+            <p className="mb-1 text-sm font-medium">公開スポットのダウンロード</p>
+            <p className="mb-2 text-xs text-gray-500">
+              {spotCache.downloadedAt
+                ? `前回ダウンロード: ${formatDownloadedAt(spotCache.downloadedAt)}`
+                : "まだダウンロードしていません。"}
+            </p>
+            {spotCache.error && (
+              <p className="mb-2 text-xs text-red-600">{spotCache.error}</p>
+            )}
+            <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={spotCache.startManualDownload}
+              disabled={spotCache.checkingSize || spotCache.downloading}
+              className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              {spotCache.checkingSize
+                ? "確認中…"
+                : spotCache.downloading
+                  ? "ダウンロード中…"
+                  : "ダウンロード"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  confirm(
+                    "ダウンロード済みの公開スポットデータを削除しますか?次にこの画面を開いたとき、再ダウンロードが必要になります。"
+                  )
+                ) {
+                  spotCache.clearCache();
+                }
+              }}
+              disabled={
+                !spotCache.downloadedAt ||
+                spotCache.checkingSize ||
+                spotCache.downloading
+              }
+              className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-red-600 disabled:opacity-50"
+            >
+              キャッシュ削除
+            </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* 重ね表示する種別の絞り込みを、種別を切り替えずこの地図の上で編集するモーダル。
@@ -3055,74 +3047,70 @@ export default function MapView({
           const data = overlayData.get(typeKey)!;
           const typeFilters = overlayFilters.get(typeKey) ?? DEFAULT_FILTERS;
           return (
-            <div
-              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-              onClick={() => setOverlayFilterTypeKey(null)}
+            <Modal
+              onClose={() => setOverlayFilterTypeKey(null)}
+              zIndexClassName="z-[60]"
+              panelClassName="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
             >
-              <div
-                onClick={(e) => e.stopPropagation()}
-                className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="font-bold">
-                    「{overlayType?.label ?? typeKey}」の絞り込み
-                  </h2>
-                  <div className="flex items-center gap-3">
-                    <FilterResetButton
-                      filters={typeFilters}
-                      onChange={(next) => setOverlayFiltersAndSave(typeKey, next)}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setOverlayFilterTypeKey(null)}
-                      aria-label="閉じる"
-                      className="text-xl leading-none text-gray-400"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500">
-                  重ねて表示している「{overlayType?.label ?? typeKey}」の
-                  絞り込み・経路表示です。ここでの変更はこの種別の地図にも保存されます。
-                </p>
-                <FilterBar
-                  spots={data.spots}
-                  filters={typeFilters}
-                  onChange={(next) => setOverlayFiltersAndSave(typeKey, next)}
-                  showReset={false}
-                  seriesStyles={overlaySeriesStylesOf(typeKey)}
-                  rankEnabled={overlayRankEnabledOf(typeKey)}
-                  categories={overlayCategoriesOf(typeKey)}
-                  showRouteToggle={data.routes.length > 0}
-                />
-                {/* 地図の見せ方の切り替え(絞り込みではない)。本体の絞り込みパネルの
-                    「表示」の節と同じ扱いで、重ね表示側にも要る —— 重ねた種別のピンが
-                    「N件」の丸にまとまったままだと、本体のピンとの位置関係が読めない。
-                    「訪問済みも元のピンで表示」は本体の値を種別をまたいで効かせる設定
-                    なので、ここには出さない */}
-                <div className="border-t border-gray-100 pt-3">
-                  <p className="mb-2 text-sm font-medium">表示</p>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-bold">
+                  「{overlayType?.label ?? typeKey}」の絞り込み
+                </h2>
+                <div className="flex items-center gap-3">
+                  <FilterResetButton
+                    filters={typeFilters}
+                    onChange={(next) => setOverlayFiltersAndSave(typeKey, next)}
+                  />
                   <button
                     type="button"
-                    aria-pressed={typeFilters.disableCluster}
-                    onClick={() =>
-                      setOverlayFiltersAndSave(typeKey, {
-                        ...typeFilters,
-                        disableCluster: !typeFilters.disableCluster,
-                      })
-                    }
-                    className={`rounded-full border px-3 py-1 text-sm font-medium ${
-                      typeFilters.disableCluster
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-gray-300 bg-white text-gray-400"
-                    }`}
+                    onClick={() => setOverlayFilterTypeKey(null)}
+                    aria-label="閉じる"
+                    className="text-xl leading-none text-gray-400"
                   >
-                    クラスタ表示を無効化
+                    ✕
                   </button>
                 </div>
               </div>
-            </div>
+              <p className="text-xs text-gray-500">
+                重ねて表示している「{overlayType?.label ?? typeKey}」の
+                絞り込み・経路表示です。ここでの変更はこの種別の地図にも保存されます。
+              </p>
+              <FilterBar
+                spots={data.spots}
+                filters={typeFilters}
+                onChange={(next) => setOverlayFiltersAndSave(typeKey, next)}
+                showReset={false}
+                seriesStyles={overlaySeriesStylesOf(typeKey)}
+                rankEnabled={overlayRankEnabledOf(typeKey)}
+                categories={overlayCategoriesOf(typeKey)}
+                showRouteToggle={data.routes.length > 0}
+              />
+              {/* 地図の見せ方の切り替え(絞り込みではない)。本体の絞り込みパネルの
+                  「表示」の節と同じ扱いで、重ね表示側にも要る —— 重ねた種別のピンが
+                  「N件」の丸にまとまったままだと、本体のピンとの位置関係が読めない。
+                  「訪問済みも元のピンで表示」は本体の値を種別をまたいで効かせる設定
+                  なので、ここには出さない */}
+              <div className="border-t border-gray-100 pt-3">
+                <p className="mb-2 text-sm font-medium">表示</p>
+                <button
+                  type="button"
+                  aria-pressed={typeFilters.disableCluster}
+                  onClick={() =>
+                    setOverlayFiltersAndSave(typeKey, {
+                      ...typeFilters,
+                      disableCluster: !typeFilters.disableCluster,
+                    })
+                  }
+                  className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                    typeFilters.disableCluster
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-gray-300 bg-white text-gray-400"
+                  }`}
+                >
+                  クラスタ表示を無効化
+                </button>
+              </div>
+            </Modal>
           );
         })()}
 
@@ -3181,76 +3169,76 @@ export default function MapView({
           名前だけでは入れるか決められないため、スポットの説明とGoogleの導線
           (地図・経路・画像検索・Gemini)も出す。スポット詳細と同じ並び */}
       {addCandidate && buildDraft && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-          onClick={closeAddCandidate}
+        <Modal
+          onClose={closeAddCandidate}
+          zIndexClassName="z-[60]"
+          panelClassName="max-h-[85dvh] w-full max-w-sm space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="max-h-[85dvh] w-full max-w-sm space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
-          >
-            {(() => {
-              const spot = addCandidateSpot;
-              const already = buildDraft.spotIds.includes(addCandidate);
-              return (
-                <>
-                  <p className="text-sm">
-                    <span className="font-bold">{spot?.name ?? "このスポット"}</span>
-                    {already
-                      ? " はすでにリストに入っています。"
-                      : " を訪問予定リストに追加しますか?"}
+          {(() => {
+            const spot = addCandidateSpot;
+            const already = buildDraft.spotIds.includes(addCandidate);
+            return (
+              <>
+                <p className="text-sm">
+                  <span className="font-bold">{spot?.name ?? "このスポット"}</span>
+                  {already
+                    ? " はすでにリストに入っています。"
+                    : " を訪問予定リストに追加しますか?"}
+                </p>
+                {spot?.description && (
+                  <p className="whitespace-pre-wrap text-sm text-gray-600">
+                    <LinkedText text={spot.description} />
                   </p>
-                  {spot?.description && (
-                    <p className="whitespace-pre-wrap text-sm text-gray-600">
-                      <LinkedText text={spot.description} />
-                    </p>
-                  )}
-                  {/* スポット詳細と同じ体裁: 上に区切り線を引いて右へ寄せる */}
-                  {spot && (
-                    <div className="flex border-t border-gray-100 pt-3">
-                      <GoogleSpotLinks
-                        spot={spot}
-                        spotType={addCandidateSpotType}
-                        className="ml-auto"
-                      />
-                    </div>
-                  )}
-                  <div className="flex gap-2">
+                )}
+                {/* スポット詳細と同じ体裁: 上に区切り線を引いて右へ寄せる */}
+                {spot && (
+                  <div className="flex border-t border-gray-100 pt-3">
+                    <GoogleSpotLinks
+                      spot={spot}
+                      spotType={addCandidateSpotType}
+                      className="ml-auto"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={closeAddCandidate}
+                    className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+                  >
+                    {already ? "閉じる" : "キャンセル"}
+                  </button>
+                  {!already && (
                     <button
                       type="button"
-                      onClick={closeAddCandidate}
-                      className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+                      onClick={() => {
+                        updateBuildDraft({
+                          ...buildDraft,
+                          spotIds: [...buildDraft.spotIds, addCandidate],
+                        });
+                        closeAddCandidate();
+                      }}
+                      className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
                     >
-                      {already ? "閉じる" : "キャンセル"}
+                      追加する
                     </button>
-                    {!already && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          updateBuildDraft({
-                            ...buildDraft,
-                            spotIds: [...buildDraft.spotIds, addCandidate],
-                          });
-                          closeAddCandidate();
-                        }}
-                        className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
-                      >
-                        追加する
-                      </button>
-                    )}
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+        </Modal>
       )}
 
       {/* 右クリック/長押しメニュー */}
       {contextMenu && (
         <>
-          <div
-            className="fixed inset-0 z-30"
+          {/* メニューの外を押したら閉じる当たり判定(キーボードからはEscや別の操作で抜ける) */}
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="メニューを閉じる"
+            className="fixed inset-0 z-30 cursor-default"
             onClick={() => setContextMenu(null)}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -3262,6 +3250,7 @@ export default function MapView({
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             <button
+              type="button"
               onClick={() => {
                 setAddSpotAt({ lat: contextMenu.lat, lng: contextMenu.lng });
                 setContextMenu(null);
@@ -3272,6 +3261,7 @@ export default function MapView({
             </button>
             {role && SPOT_ADMIN_ROLES.includes(role) && (
               <button
+                type="button"
                 onClick={() => {
                   setAddRequestAt({ lat: contextMenu.lat, lng: contextMenu.lng });
                   setAddRequestReason("");
@@ -3289,70 +3279,66 @@ export default function MapView({
 
       {/* 追加の依頼。理由は空でもよい(修正の依頼と同じく、気づいた時点で印だけ付けられる) */}
       {addRequestAt && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => !addRequestSaving && setAddRequestAt(null)}
+        <Modal
+          onClose={() => !addRequestSaving && setAddRequestAt(null)}
+          panelClassName="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl"
         >
-          <div
-            className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="mb-1 font-bold">ここにスポット追加を依頼</h2>
-            <p className="mb-2 text-xs text-gray-500">
-              {addRequestAt.lat.toFixed(5)}, {addRequestAt.lng.toFixed(5)}
-              。管理画面の「修正・追加の依頼」に残ります(スポットは作られません)。
-            </p>
-            <label className="mb-1 block text-xs font-bold text-gray-700">
-              何が足りないか(空でもよい)
-            </label>
-            <textarea
-              value={addRequestReason}
-              onChange={(e) => setAddRequestReason(e.target.value)}
-              rows={3}
-              placeholder="例: 「○○」という店がこの辺りにある"
-              className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-            />
-            {addRequestError && (
-              <p className="mt-1 text-xs text-red-600">{addRequestError}</p>
-            )}
-            <div className="mt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setAddRequestAt(null)}
-                disabled={addRequestSaving}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
-              >
-                やめる
-              </button>
-              <button
-                type="button"
-                disabled={addRequestSaving}
-                onClick={async () => {
-                  setAddRequestSaving(true);
-                  setAddRequestError(null);
-                  const { error } = await api.spotFlags.requestAdd(
-                    spotTypeKey,
-                    addRequestAt.lat,
-                    addRequestAt.lng,
-                    addRequestReason
-                  );
-                  setAddRequestSaving(false);
-                  if (error) {
-                    setAddRequestError("依頼を送れませんでした: " + error.message);
-                    return;
-                  }
-                  setAddRequestAt(null);
-                  loadMyRequests();
-                  setAddRequestNotice("スポット追加を依頼しました");
-                  window.setTimeout(() => setAddRequestNotice(null), 3000);
-                }}
-                className="rounded-lg bg-green-600 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
-              >
-                {addRequestSaving ? "依頼しています…" : "依頼する"}
-              </button>
-            </div>
+          <h2 className="mb-1 font-bold">ここにスポット追加を依頼</h2>
+          <p className="mb-2 text-xs text-gray-500">
+            {addRequestAt.lat.toFixed(5)}, {addRequestAt.lng.toFixed(5)}
+            。管理画面の「修正・追加の依頼」に残ります(スポットは作られません)。
+          </p>
+          <label htmlFor={`${fid}-add-request-reason`} className="mb-1 block text-xs font-bold text-gray-700">
+            何が足りないか(空でもよい)
+          </label>
+          <textarea
+            id={`${fid}-add-request-reason`}
+            value={addRequestReason}
+            onChange={(e) => setAddRequestReason(e.target.value)}
+            rows={3}
+            placeholder="例: 「○○」という店がこの辺りにある"
+            className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+          />
+          {addRequestError && (
+            <p className="mt-1 text-xs text-red-600">{addRequestError}</p>
+          )}
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setAddRequestAt(null)}
+              disabled={addRequestSaving}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
+            >
+              やめる
+            </button>
+            <button
+              type="button"
+              disabled={addRequestSaving}
+              onClick={async () => {
+                setAddRequestSaving(true);
+                setAddRequestError(null);
+                const { error } = await api.spotFlags.requestAdd(
+                  spotTypeKey,
+                  addRequestAt.lat,
+                  addRequestAt.lng,
+                  addRequestReason
+                );
+                setAddRequestSaving(false);
+                if (error) {
+                  setAddRequestError("依頼を送れませんでした: " + error.message);
+                  return;
+                }
+                setAddRequestAt(null);
+                loadMyRequests();
+                setAddRequestNotice("スポット追加を依頼しました");
+                window.setTimeout(() => setAddRequestNotice(null), 3000);
+              }}
+              className="rounded-lg bg-green-600 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {addRequestSaving ? "依頼しています…" : "依頼する"}
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
       {addRequestNotice && (
         <div className="pointer-events-none fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-800 px-3 py-2 text-sm text-white shadow-lg">
@@ -3396,166 +3382,161 @@ export default function MapView({
       {/* ルート・経路の詳細モーダル(ルート/訪問順の経路/訪問予定リストの経路の線・矢印の
           タップで開く。重ね表示のルートも共用) */}
       {routeDetailView && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={closeRouteDetail}
+        <Modal
+          onClose={closeRouteDetail}
+          panelClassName="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
+          panelRef={detailPanelRef}
         >
-          <div
-            ref={detailPanelRef}
-            onClick={(e) => e.stopPropagation()}
-            className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                {/* 3種(ルート/訪問順の経路/訪問予定リスト)を同じ見た目のモーダルで
-                    出すため、何の線を見ているのかを見出しの上に必ず出す */}
-                <p className="text-xs font-medium text-gray-500">
-                  {routeDetailView.kindLabel}
-                </p>
-                <h2 className="font-bold">{routeDetailView.title}</h2>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                {/* 訪問予定リストの経路のときは、そのリストの基本情報編集へ遷移する */}
-                {routeDetailView.editList && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const list = routeDetailView.editList!;
-                      // この編集は地図から始まった。完了・キャンセルで地図へ戻す
-                      buildFromMapRef.current = true;
-                      closeRouteDetail();
-                      setEditingPlanList(list);
-                    }}
-                    className="text-sm text-blue-600 underline"
-                  >
-                    編集
-                  </button>
-                )}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              {/* 3種(ルート/訪問順の経路/訪問予定リスト)を同じ見た目のモーダルで
+                  出すため、何の線を見ているのかを見出しの上に必ず出す */}
+              <p className="text-xs font-medium text-gray-500">
+                {routeDetailView.kindLabel}
+              </p>
+              <h2 className="font-bold">{routeDetailView.title}</h2>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              {/* 訪問予定リストの経路のときは、そのリストの基本情報編集へ遷移する */}
+              {routeDetailView.editList && (
                 <button
                   type="button"
-                  onClick={closeRouteDetail}
-                  aria-label="閉じる"
-                  className="text-xl leading-none text-gray-400"
+                  onClick={() => {
+                    const list = routeDetailView.editList!;
+                    // この編集は地図から始まった。完了・キャンセルで地図へ戻す
+                    buildFromMapRef.current = true;
+                    closeRouteDetail();
+                    setEditingPlanList(list);
+                  }}
+                  className="text-sm text-blue-600 underline"
                 >
-                  ✕
+                  編集
                 </button>
-              </div>
+              )}
+              <button
+                type="button"
+                onClick={closeRouteDetail}
+                aria-label="閉じる"
+                className="text-xl leading-none text-gray-400"
+              >
+                ✕
+              </button>
             </div>
-            {routeDetailView.description && (
-              <p className="whitespace-pre-wrap text-sm text-gray-700">
-                <LinkedText text={routeDetailView.description} />
-              </p>
-            )}
-            {routeDetailView.points.length > 0 && (
-              <div className="border-t border-gray-100 pt-3 text-sm">
-                {/* 全地点を巡った順に並べ、2点の間にその区間の説明(ルートのみ)を挟む */}
-                <ol className="space-y-0.5">
-                  {routeDetailView.points.map((point, i) => (
-                    <li key={point.key} ref={setPointRowRef(i)}>
-                      <div
-                        className={`flex items-center gap-2 ${
-                          pointDragIndex === i ? "bg-blue-100" : ""
-                        }`}
+          </div>
+          {routeDetailView.description && (
+            <p className="whitespace-pre-wrap text-sm text-gray-700">
+              <LinkedText text={routeDetailView.description} />
+            </p>
+          )}
+          {routeDetailView.points.length > 0 && (
+            <div className="border-t border-gray-100 pt-3 text-sm">
+              {/* 全地点を巡った順に並べ、2点の間にその区間の説明(ルートのみ)を挟む */}
+              <ol className="space-y-0.5">
+                {routeDetailView.points.map((point, i) => (
+                  <li key={point.key} ref={setPointRowRef(i)}>
+                    <div
+                      className={`flex items-center gap-2 ${
+                        pointDragIndex === i ? "bg-blue-100" : ""
+                      }`}
+                    >
+                      {/* 訪問予定リストのときだけ、つかんで回る順番を入れ替えられる。
+                          touch-action: noneはハンドルにだけ当てる(行本体まで
+                          当てると一覧がタッチスクロールできなくなる) */}
+                      {reorderList && (
+                        <span
+                          {...pointHandleProps(i)}
+                          className={`${REORDER_HANDLE_CLASS} self-stretch py-1 pl-0.5 pr-0.5 text-base leading-none`}
+                        >
+                          <span className="flex h-full items-center">≡</span>
+                        </span>
+                      )}
+                      <span className="w-6 shrink-0 text-right text-xs font-medium tabular-nums text-gray-500">
+                        {i + 1}
+                      </span>
+                      {/* ランク(シリーズ)のバッジ。地点がどのランクなのかは
+                          経路を辿るときの判断材料になるため名前の隣に出す。
+                          手元に無いスポット(未ダウンロード等)は出さない */}
+                      {point.badge && (
+                        <SpotBadge
+                          rank={point.badge.rank}
+                          series={point.badge.series}
+                          seriesStyles={point.badge.seriesStyles}
+                          rankEnabled={point.badge.rankEnabled}
+                          isPrivate={point.badge.isPrivate}
+                          size="sm"
+                        />
+                      )}
+                      {/* スポット名のタップでその位置へ飛び、続けてそのスポットの
+                          詳細を開く(一覧から辿ったときに、そこが何なのかを
+                          見に行くまでが1タップで済むように)。詳細は本体種別の
+                          スポットなら通常のモーダル、別種別なら読み取り専用
+                          (ピンをタップしたときと同じ出し分け) */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          closeRouteDetail();
+                          mapRef.current?.flyTo({
+                            center: [point.lng, point.lat],
+                            zoom: 16,
+                          });
+                          if (spotById.has(point.spotId)) {
+                            setDetailSpotId(point.spotId);
+                          } else {
+                            setOverlayDetailSpotId(point.spotId);
+                          }
+                        }}
+                        className="min-w-0 truncate text-left font-medium text-blue-600 underline"
                       >
-                        {/* 訪問予定リストのときだけ、つかんで回る順番を入れ替えられる。
-                            touch-action: noneはハンドルにだけ当てる(行本体まで
-                            当てると一覧がタッチスクロールできなくなる) */}
-                        {reorderList && (
-                          <span
-                            {...pointHandleProps(i)}
-                            className={`${REORDER_HANDLE_CLASS} self-stretch py-1 pl-0.5 pr-0.5 text-base leading-none`}
-                          >
-                            <span className="flex h-full items-center">≡</span>
+                        {point.name}
+                      </button>
+                      {/* そのスポットの、予定の日の天気。**リスト詳細と同じものを
+                          ここにも出す** —— 旅程を見る場所が2つあり、片方だけに
+                          天気があると地図から見たときだけ調べ直すことになる */}
+                      {point.weatherSpot && routeDetailView.weatherDate && (
+                        <WeatherAskLink
+                          spot={point.weatherSpot}
+                          date={routeDetailView.weatherDate}
+                          weather={weatherBySpot.get(point.weatherSpot.id)}
+                          className="-my-1"
+                        />
+                      )}
+                    </div>
+                    {/* 区間の説明は次の地点との間に表示(最終地点には次の区間が無い) */}
+                    {i < routeDetailView.points.length - 1 && (
+                      <div className="flex items-baseline gap-2 py-0.5 text-xs text-gray-500">
+                        {/* 並び替えハンドルのぶんの空き(番号の列を上下でそろえる) */}
+                        {reorderList && <span className="w-5 shrink-0" />}
+                        <span className="w-6 shrink-0 text-right">↓</span>
+                        {point.legDescription && (
+                          <span className="min-w-0 whitespace-pre-wrap">
+                            <LinkedText text={point.legDescription} />
                           </span>
                         )}
-                        <span className="w-6 shrink-0 text-right text-xs font-medium tabular-nums text-gray-500">
-                          {i + 1}
-                        </span>
-                        {/* ランク(シリーズ)のバッジ。地点がどのランクなのかは
-                            経路を辿るときの判断材料になるため名前の隣に出す。
-                            手元に無いスポット(未ダウンロード等)は出さない */}
-                        {point.badge && (
-                          <SpotBadge
-                            rank={point.badge.rank}
-                            series={point.badge.series}
-                            seriesStyles={point.badge.seriesStyles}
-                            rankEnabled={point.badge.rankEnabled}
-                            isPrivate={point.badge.isPrivate}
-                            size="sm"
-                          />
-                        )}
-                        {/* スポット名のタップでその位置へ飛び、続けてそのスポットの
-                            詳細を開く(一覧から辿ったときに、そこが何なのかを
-                            見に行くまでが1タップで済むように)。詳細は本体種別の
-                            スポットなら通常のモーダル、別種別なら読み取り専用
-                            (ピンをタップしたときと同じ出し分け) */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            closeRouteDetail();
-                            mapRef.current?.flyTo({
-                              center: [point.lng, point.lat],
-                              zoom: 16,
-                            });
-                            if (spotById.has(point.spotId)) {
-                              setDetailSpotId(point.spotId);
-                            } else {
-                              setOverlayDetailSpotId(point.spotId);
-                            }
-                          }}
-                          className="min-w-0 truncate text-left font-medium text-blue-600 underline"
-                        >
-                          {point.name}
-                        </button>
-                        {/* そのスポットの、予定の日の天気。**リスト詳細と同じものを
-                            ここにも出す** —— 旅程を見る場所が2つあり、片方だけに
-                            天気があると地図から見たときだけ調べ直すことになる */}
-                        {point.weatherSpot && routeDetailView.weatherDate && (
-                          <WeatherAskLink
-                            spot={point.weatherSpot}
-                            date={routeDetailView.weatherDate}
-                            weather={weatherBySpot.get(point.weatherSpot.id)}
-                            className="-my-1"
-                          />
-                        )}
                       </div>
-                      {/* 区間の説明は次の地点との間に表示(最終地点には次の区間が無い) */}
-                      {i < routeDetailView.points.length - 1 && (
-                        <div className="flex items-baseline gap-2 py-0.5 text-xs text-gray-500">
-                          {/* 並び替えハンドルのぶんの空き(番号の列を上下でそろえる) */}
-                          {reorderList && <span className="w-5 shrink-0" />}
-                          <span className="w-6 shrink-0 text-right">↓</span>
-                          {point.legDescription && (
-                            <span className="min-w-0 whitespace-pre-wrap">
-                              <LinkedText text={point.legDescription} />
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-                <p className="pt-2 text-xs text-gray-500">
-                  {routeDetailView.pointNoun}
-                  {routeDetailView.points.length}件。スポット名をタップすると、その位置へ移動して詳細を開きます。
-                  {reorderList &&
-                    routeDetailView.points.length > 1 &&
-                    (savingOrder
-                      ? "並び順を保存中…"
-                      : "左端の≡をつかんで動かすと、回る順番を入れ替えられます(訪問済みのスポットは経路に出ないため動きません)。")}
-                </p>
-                {orderError && (
-                  <p className="pt-1 text-xs text-red-600">{orderError}</p>
-                )}
-                {/* 経路全体をGoogle マップの経路検索で開く(先頭が出発地、
-                    途中が経由地、最後が目的地) */}
-                <div className="pt-2">
-                  <GoogleMapsRouteLink points={routeDetailView.points} />
-                </div>
+                    )}
+                  </li>
+                ))}
+              </ol>
+              <p className="pt-2 text-xs text-gray-500">
+                {routeDetailView.pointNoun}
+                {routeDetailView.points.length}件。スポット名をタップすると、その位置へ移動して詳細を開きます。
+                {reorderList &&
+                  routeDetailView.points.length > 1 &&
+                  (savingOrder
+                    ? "並び順を保存中…"
+                    : "左端の≡をつかんで動かすと、回る順番を入れ替えられます(訪問済みのスポットは経路に出ないため動きません)。")}
+              </p>
+              {orderError && (
+                <p className="pt-1 text-xs text-red-600">{orderError}</p>
+              )}
+              {/* 経路全体をGoogle マップの経路検索で開く(先頭が出発地、
+                  途中が経由地、最後が目的地) */}
+              <div className="pt-2">
+                <GoogleMapsRouteLink points={routeDetailView.points} />
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          )}
+        </Modal>
       )}
 
       {/* 訪問予定リストの基本情報編集モーダル(経路詳細の「編集」で開く)。保存すると
@@ -3623,93 +3604,89 @@ export default function MapView({
             ? overlaySeriesStylesOf(overlayTypeKey)
             : seriesStyles;
           return (
-            <div
-              className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
-              onClick={() => {
+            <Modal
+              onClose={() => {
                 setStack(null);
                 setStackReturn(null);
               }}
+              containerClassName="items-end sm:items-center"
+              panelClassName="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
             >
-              {/* 横幅は一覧に必要な分だけ。件数が多いと縦に伸びるので、画面の高さいっぱいまで
-                  使い、はみ出す分だけ一覧側をスクロールさせる */}
-              <div
-                className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-                  <div className="min-w-0">
-                    <h2 className="text-sm font-semibold">
-                      この地点のスポット({stack.ids.length}件)
-                    </h2>
-                    {/* 簡単な住所。同じ地点に積まれているので1つだけ出す
-                        (引けなかったときは行ごと出さない) */}
-                    {stackAddress && (
-                      <p className="truncate text-xs text-slate-500">{stackAddress}</p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="shrink-0 text-slate-400 hover:text-slate-600"
-                    aria-label="閉じる"
-                    onClick={() => {
-                      setStack(null);
-                      setStackReturn(null);
-                    }}
-                  >
-                    ✕
-                  </button>
+            {/* 横幅は一覧に必要な分だけ。件数が多いと縦に伸びるので、画面の高さいっぱいまで
+                使い、はみ出す分だけ一覧側をスクロールさせる */}
+              <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold">
+                    この地点のスポット({stack.ids.length}件)
+                  </h2>
+                  {/* 簡単な住所。同じ地点に積まれているので1つだけ出す
+                      (引けなかったときは行ごと出さない) */}
+                  {stackAddress && (
+                    <p className="truncate text-xs text-slate-500">{stackAddress}</p>
+                  )}
                 </div>
-                <ul className="min-h-0 flex-1 divide-y overflow-y-auto">
-                  {stack.ids.map((id) => {
-                    const spot = stackSpotById.get(id);
-                    if (!spot) return null;
-                    return (
-                      <li key={id}>
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50"
-                          onClick={() => {
-                            // 詳細を閉じたらこの一覧へ戻す(地図からは開き直せない)
-                            setStackReturn(stack);
-                            setStack(null);
-                            if (overlayTypeKey) openOverlaySpot(id);
-                            else handleSpotSelect(id);
-                          }}
-                        >
-                          {/* 一覧・詳細と同じスポットの印。ランクは色と大きさで出る ——
-                              同じ地点に積まれたピンは地図側で区別が付かないので、
-                              ここで並べたときにどれが目立つスポットかを読めるようにする */}
-                          <SpotBadge
-                            rank={spot.rank}
-                            series={spot.series}
-                            seriesStyles={stackSeriesStyles}
-                            rankEnabled={stackRankEnabled}
-                            isPrivate={spot.status === "private"}
-                            size="sm"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm">{spot.name}</span>
-                            {/* 一覧・詳細と同じ1行(同じ地点なので地域は出さない) */}
-                            <span className="block truncate text-xs text-slate-500">
-                              {formatSpotMeta(spot, {
-                                rankEnabled: stackRankEnabled,
-                                categories: stackCategories,
-                                includeRegion: false,
-                              })}
-                            </span>
-                          </span>
-                          {visitedIds.has(id) && (
-                            <span className="shrink-0 text-xs text-green-600">
-                              ✓訪問済み
-                            </span>
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <button
+                  type="button"
+                  className="shrink-0 text-slate-400 hover:text-slate-600"
+                  aria-label="閉じる"
+                  onClick={() => {
+                    setStack(null);
+                    setStackReturn(null);
+                  }}
+                >
+                  ✕
+                </button>
               </div>
-            </div>
+              <ul className="min-h-0 flex-1 divide-y overflow-y-auto">
+                {stack.ids.map((id) => {
+                  const spot = stackSpotById.get(id);
+                  if (!spot) return null;
+                  return (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50"
+                        onClick={() => {
+                          // 詳細を閉じたらこの一覧へ戻す(地図からは開き直せない)
+                          setStackReturn(stack);
+                          setStack(null);
+                          if (overlayTypeKey) openOverlaySpot(id);
+                          else handleSpotSelect(id);
+                        }}
+                      >
+                        {/* 一覧・詳細と同じスポットの印。ランクは色と大きさで出る ——
+                            同じ地点に積まれたピンは地図側で区別が付かないので、
+                            ここで並べたときにどれが目立つスポットかを読めるようにする */}
+                        <SpotBadge
+                          rank={spot.rank}
+                          series={spot.series}
+                          seriesStyles={stackSeriesStyles}
+                          rankEnabled={stackRankEnabled}
+                          isPrivate={spot.status === "private"}
+                          size="sm"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm">{spot.name}</span>
+                          {/* 一覧・詳細と同じ1行(同じ地点なので地域は出さない) */}
+                          <span className="block truncate text-xs text-slate-500">
+                            {formatSpotMeta(spot, {
+                              rankEnabled: stackRankEnabled,
+                              categories: stackCategories,
+                              includeRegion: false,
+                            })}
+                          </span>
+                        </span>
+                        {visitedIds.has(id) && (
+                          <span className="shrink-0 text-xs text-green-600">
+                            ✓訪問済み
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Modal>
           );
         })()}
 

@@ -6,6 +6,7 @@ import { type Visit } from "@/lib/types";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitFields from "@/components/VisitFields";
 import HelpTip from "@/components/HelpTip";
+import Modal from "@/components/Modal";
 
 export default function VisitFormModal({
   spotId,
@@ -89,123 +90,118 @@ export default function VisitFormModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      panelClassName="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4"
     >
-      <div
-        className="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="mb-1 font-bold">
-          {visit
-            ? unvisited
-              ? "未訪問記録を編集"
-              : "訪問記録を編集"
-            : unvisited
-              ? "未訪問記録を追加"
-              : "訪問を記録"}
-        </h2>
-        <p className="mb-4 text-sm text-gray-500">{spotName}</p>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <VisitFields
-            visitedOn={visitedOn}
-            onVisitedOnChange={setVisitedOn}
-            memo={memo}
-            onMemoChange={setMemo}
-            photos={photos}
-            onPhotosChange={setPhotos}
-            onProcessingChange={setProcessingPhotos}
-            visitedOnHint={
-              unvisited
-                ? "「削除」で空にすると下調べのメモになります(どの経路にも含まれず、訪問予定も残ります)。"
-                : undefined
-            }
-          />
+      <h2 className="mb-1 font-bold">
+        {visit
+          ? unvisited
+            ? "未訪問記録を編集"
+            : "訪問記録を編集"
+          : unvisited
+            ? "未訪問記録を追加"
+            : "訪問を記録"}
+      </h2>
+      <p className="mb-4 text-sm text-gray-500">{spotName}</p>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <VisitFields
+          visitedOn={visitedOn}
+          onVisitedOnChange={setVisitedOn}
+          memo={memo}
+          onMemoChange={setMemo}
+          photos={photos}
+          onPhotosChange={setPhotos}
+          onProcessingChange={setProcessingPhotos}
+          visitedOnHint={
+            unvisited
+              ? "「削除」で空にすると下調べのメモになります(どの経路にも含まれず、訪問予定も残ります)。"
+              : undefined
+          }
+        />
 
-          {/* 未訪問記録の切り替え。訪問記録と同じフォーム・同じ訪問履歴に記録し、
-              訪問済みに数えるかどうかだけをこのフラグで分ける。
-              説明はHelpTipに畳む(常に出していると保存ボタンが画面外へ押し出される)。
-              HelpTipのボタンはlabelの外に置く —— 中に入れると押したときに
-              チェックボックスまで切り替わってしまう */}
-          <div className="border-t border-gray-100 pt-3">
-            <div className="flex items-center gap-2 text-sm">
-              <label className="flex items-center gap-2 font-medium">
-                <input
-                  type="checkbox"
-                  checked={unvisited}
-                  onChange={(e) => setUnvisited(e.target.checked)}
-                />
-                未訪問記録にする(訪問済みにしない)
-              </label>
-              <HelpTip>
-                休みや時間の都合でちゃんと見られなかったときや、事前の下調べのメモに。
-                訪問日時を入れると「訪れたが改めて来たい」記録としてその日の経路に含まれ、
-                訪問予定からも外れます。訪問日時が空欄なら下調べのメモになり、
-                どの経路にも含まれず、訪問予定も残ります。
-              </HelpTip>
-            </div>
+        {/* 未訪問記録の切り替え。訪問記録と同じフォーム・同じ訪問履歴に記録し、
+            訪問済みに数えるかどうかだけをこのフラグで分ける。
+            説明はHelpTipに畳む(常に出していると保存ボタンが画面外へ押し出される)。
+            HelpTipのボタンはlabelの外に置く —— 中に入れると押したときに
+            チェックボックスまで切り替わってしまう */}
+        <div className="border-t border-gray-100 pt-3">
+          <div className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 font-medium">
+              <input
+                type="checkbox"
+                checked={unvisited}
+                onChange={(e) => setUnvisited(e.target.checked)}
+              />
+              未訪問記録にする(訪問済みにしない)
+            </label>
+            <HelpTip>
+              休みや時間の都合でちゃんと見られなかったときや、事前の下調べのメモに。
+              訪問日時を入れると「訪れたが改めて来たい」記録としてその日の経路に含まれ、
+              訪問予定からも外れます。訪問日時が空欄なら下調べのメモになり、
+              どの経路にも含まれず、訪問予定も残ります。
+            </HelpTip>
           </div>
+        </div>
 
-          {/* 口コミは訪問記録とは独立のデータのため、編集モードと未訪問記録では出さない。
-              書かないことのほうが多いため既定では畳んでおく(入力欄を開いたままだと
-              保存ボタンが画面外へ押し出される)。**畳んでも入力済みの本文は投稿する**
-              ため、畳んだ状態でも入力があることが分かるようにしてある */}
-          {reviewsEnabled && !visit && !unvisited && (
-            <div className="border-t border-gray-100 pt-3">
-              <button
-                type="button"
-                onClick={() => setShowReview((v) => !v)}
-                aria-expanded={showReview}
-                className="flex w-full items-center gap-1 text-sm font-medium text-blue-600"
-              >
-                <span aria-hidden="true" className="text-xs">
-                  {showReview ? "▾" : "▸"}
-                </span>
-                口コミを投稿する(公開・任意)
-                {!showReview && reviewBody.trim() && (
-                  <span className="text-xs font-normal text-gray-400">
-                    入力済み
-                  </span>
-                )}
-              </button>
-              {showReview && (
-                <>
-                  <p className="mb-2 mt-2 text-xs text-gray-400">
-                    他のユーザーにも公開されます。投稿するたびに新しい口コミとして
-                    追加されます(上書きはされません)。
-                  </p>
-                  <textarea
-                    value={reviewBody}
-                    onChange={(e) => setReviewBody(e.target.value)}
-                    rows={2}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                    placeholder="行ってみた感想など"
-                  />
-                </>
-              )}
-            </div>
-          )}
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <div className="flex gap-2">
+        {/* 口コミは訪問記録とは独立のデータのため、編集モードと未訪問記録では出さない。
+            書かないことのほうが多いため既定では畳んでおく(入力欄を開いたままだと
+            保存ボタンが画面外へ押し出される)。**畳んでも入力済みの本文は投稿する**
+            ため、畳んだ状態でも入力があることが分かるようにしてある */}
+        {reviewsEnabled && !visit && !unvisited && (
+          <div className="border-t border-gray-100 pt-3">
             <button
               type="button"
-              onClick={onClose}
-              className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+              onClick={() => setShowReview((v) => !v)}
+              aria-expanded={showReview}
+              className="flex w-full items-center gap-1 text-sm font-medium text-blue-600"
             >
-              キャンセル
+              <span aria-hidden="true" className="text-xs">
+                {showReview ? "▾" : "▸"}
+              </span>
+              口コミを投稿する(公開・任意)
+              {!showReview && reviewBody.trim() && (
+                <span className="text-xs font-normal text-gray-400">
+                  入力済み
+                </span>
+              )}
             </button>
-            <button
-              type="submit"
-              disabled={saving || processingPhotos}
-              className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {saving ? "保存中…" : "保存"}
-            </button>
+            {showReview && (
+              <>
+                <p className="mb-2 mt-2 text-xs text-gray-400">
+                  他のユーザーにも公開されます。投稿するたびに新しい口コミとして
+                  追加されます(上書きはされません)。
+                </p>
+                <textarea
+                  value={reviewBody}
+                  onChange={(e) => setReviewBody(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  placeholder="行ってみた感想など"
+                />
+              </>
+            )}
           </div>
-        </form>
-      </div>
-    </div>
+        )}
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-lg border border-gray-300 py-2 text-sm"
+          >
+            キャンセル
+          </button>
+          <button
+            type="submit"
+            disabled={saving || processingPhotos}
+            className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

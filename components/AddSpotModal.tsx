@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useId } from "react";
 import { api } from "@/lib/api-client";
 import {
   ALLOWED_STATUS_BY_ROLE,
@@ -23,6 +23,7 @@ import { UNSET_SERIES } from "@/lib/seriesStyle";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitFields from "@/components/VisitFields";
+import Modal from "@/components/Modal";
 
 export default function AddSpotModal({
   lat,
@@ -53,6 +54,8 @@ export default function AddSpotModal({
   onSaved: (spot: Spot, visitRecorded: boolean) => void;
   onDeleted?: () => void;
 }) {
+  // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
+  const fid = useId();
   const isEdit = !!spot;
   // 編集モード(SpotDetailModal経由)はspotTypeKeyが渡らないため、URLの[type]で補う
   const currentTypeKey = useCurrentSpotTypeKey();
@@ -229,14 +232,10 @@ export default function AddSpotModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
+    <Modal onClose={onClose} panelClassName="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white">
       <form
         onSubmit={handleSubmit}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
+        className="space-y-3 p-4"
       >
         <h2 className="font-bold">
           {isEdit ? "スポットを編集" : "この場所にスポットを追加"}
@@ -258,8 +257,9 @@ export default function AddSpotModal({
           </p>
         ) : allowedStatuses.length > 1 ? (
           <div>
-            <label className="mb-1 block text-sm font-medium">状態</label>
+            <label htmlFor={`${fid}-status`} className="mb-1 block text-sm font-medium">状態</label>
             <select
+              id={`${fid}-status`}
               value={status}
               onChange={(e) => setStatus(e.target.value as SpotStatus)}
               className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
@@ -284,8 +284,9 @@ export default function AddSpotModal({
           </p>
         )}
         <div>
-          <label className="mb-1 block text-sm font-medium">名前 *</label>
+          <label htmlFor={`${fid}-name`} className="mb-1 block text-sm font-medium">名前 *</label>
           <input
+            id={`${fid}-name`}
             required
             autoComplete="off"
             value={name}
@@ -335,8 +336,9 @@ export default function AddSpotModal({
           </div>
         )}
         <div>
-          <label className="mb-1 block text-sm font-medium">よみがな</label>
+          <label htmlFor={`${fid}-kana`} className="mb-1 block text-sm font-medium">よみがな</label>
           <input
+            id={`${fid}-kana`}
             autoComplete="off"
             value={nameKana}
             onChange={(e) => setNameKana(e.target.value)}
@@ -346,8 +348,9 @@ export default function AddSpotModal({
         {(isEdit || lat == null) && (
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-sm font-medium">緯度 *</label>
+              <label htmlFor={`${fid}-lat`} className="mb-1 block text-sm font-medium">緯度 *</label>
               <input
+                id={`${fid}-lat`}
                 required
                 type="number"
                 step="any"
@@ -357,8 +360,9 @@ export default function AddSpotModal({
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">経度 *</label>
+              <label htmlFor={`${fid}-lng`} className="mb-1 block text-sm font-medium">経度 *</label>
               <input
+                id={`${fid}-lng`}
                 required
                 type="number"
                 step="any"
@@ -373,9 +377,9 @@ export default function AddSpotModal({
           <p className="text-xs text-gray-400">座標から住所を自動取得中…</p>
         )}
         <div>
-          <label className="mb-1 block text-sm font-medium">
+          <p className="mb-1 block text-sm font-medium">
             {regionFieldLabel(scope)} *
-          </label>
+          </p>
           {scope === "jp" ? (
             <select
               required
@@ -411,8 +415,9 @@ export default function AddSpotModal({
         {/* ランクはピンの色と大きさを決める段階(A〜E)。使う種別でだけ出す */}
         {rankEnabled && (
           <div>
-            <label className="mb-1 block text-sm font-medium">ランク</label>
+            <label htmlFor={`${fid}-rank`} className="mb-1 block text-sm font-medium">ランク</label>
             <select
+              id={`${fid}-rank`}
               value={rank}
               onChange={(e) => setRank(e.target.value as Rank | "")}
               className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"
@@ -430,10 +435,11 @@ export default function AddSpotModal({
           </div>
         )}
         <div>
-          <label className="mb-1 block text-sm font-medium">
+          <label htmlFor={`${fid}-series`} className="mb-1 block text-sm font-medium">
             シリーズ {seriesRequired && "*"}
           </label>
           <select
+            id={`${fid}-series`}
             required={seriesRequired}
             value={series}
             onChange={(e) => setSeries(e.target.value as Series)}
@@ -458,12 +464,12 @@ export default function AddSpotModal({
         {/* カテゴリは1スポットに複数付けられるため、選択チップ(トグル)で選ぶ。
             一覧に無いものは下の入力欄から足す(足した値もチップとして並ぶ) */}
         <div>
-          <label className="mb-1 block text-sm font-medium">
+          <p className="mb-1 block text-sm font-medium">
             カテゴリ
             <span className="ml-1 text-xs font-normal text-gray-500">
               (複数選択可)
             </span>
-          </label>
+          </p>
           {availableCategories.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {availableCategories.map((c) => (
@@ -507,8 +513,9 @@ export default function AddSpotModal({
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium">説明</label>
+          <label htmlFor={`${fid}-description`} className="mb-1 block text-sm font-medium">説明</label>
           <textarea
+            id={`${fid}-description`}
             rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -547,6 +554,6 @@ export default function AddSpotModal({
           </button>
         )}
       </form>
-    </div>
+    </Modal>
   );
 }

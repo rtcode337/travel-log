@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useId } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import HelpTip from "@/components/HelpTip";
@@ -64,6 +64,8 @@ export default function AdminView({
   typeKey: string;
   buildNumber?: string | null;
 }) {
+  // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
+  const fid = useId();
   const router = useRouter();
   /**
    * 狭い画面での柱の切り替え(広い画面では使わない)。既定は「スポット」——
@@ -1481,10 +1483,11 @@ export default function AdminView({
                   className="flex flex-wrap items-end gap-2"
                 >
                   <div>
-                    <label className="mb-1 block text-xs font-medium">
+                    <label htmlFor={`${fid}-github-repo`} className="mb-1 block text-xs font-medium">
                       リポジトリ(owner/リポジトリ名)
                     </label>
                     <input
+                      id={`${fid}-github-repo`}
                       required
                       value={githubRepo}
                       onChange={(e) => {
@@ -1616,6 +1619,7 @@ export default function AdminView({
                 </label>
                 {pendingCount > 0 && (
                   <button
+                    type="button"
                     onClick={handleBulkApprove}
                     className="rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-700"
                   >
@@ -1874,6 +1878,7 @@ export default function AdminView({
                 )}
                 {deleteKeysPreview && deleteKeysPreview.matchedCount > 0 && (
                   <button
+                    type="button"
                     onClick={handleApplyDeleteKeys}
                     disabled={deleteKeysApplying}
                     className="rounded-lg border border-red-400 bg-white px-3 py-1.5 text-sm font-medium text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1927,6 +1932,7 @@ export default function AdminView({
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
+                  type="button"
                   onClick={handleCheckPurge}
                   disabled={purgeChecking}
                   className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm"
@@ -1950,6 +1956,7 @@ export default function AdminView({
                     className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
                   />
                   <button
+                    type="button"
                     onClick={handleApplyPurge}
                     disabled={purgeApplying || purgeConfirmText !== typeKey}
                     className="w-fit rounded-lg border border-red-400 bg-white px-3 py-1.5 text-sm font-medium text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
@@ -2190,15 +2197,11 @@ export default function AdminView({
           {isAdmin && (
             <details>
               {/* summaryにdisplay:flexを掛けると開閉の三角が消えるので、既定の表示のまま
-                  「?」を後ろに並べる。「?」を押しただけで開閉しないよう、
-                  クリックはこのspanで止める(HelpTipの吹き出しと背面の当たり判定も
-                  この中に描かれるので、吹き出しを触っても畳まれない) */}
+                  「?」を後ろに並べる。「?」を押しても開閉しないのは、HelpTipが自分のクリックを
+                  止め、吹き出しをbodyへ描いているため */}
               <summary className="cursor-pointer select-none text-base font-bold">
                 別のスポット種別の管理
-                <span
-                  className="ml-1.5 inline-flex align-middle"
-                  onClick={(e) => e.stopPropagation()}
-                >
+                <span className="ml-1.5 inline-flex align-middle">
                 <HelpTip>
                   スポット種別の一覧。種別名をクリックするとそのページに移動する
                   (公開/非公開の切り替えは、移動先の「スポット種別の設定」から行う)。
@@ -2278,10 +2281,11 @@ export default function AdminView({
                   className="flex flex-wrap items-end gap-2"
                 >
                   <div>
-                    <label className="mb-1 block text-xs font-medium">
+                    <label htmlFor={`${fid}-type-key`} className="mb-1 block text-xs font-medium">
                       キー(英数字)
                     </label>
                     <input
+                      id={`${fid}-type-key`}
                       required
                       value={newTypeKey}
                       onChange={(e) => setNewTypeKey(e.target.value)}
@@ -2290,10 +2294,11 @@ export default function AdminView({
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium">
+                    <label htmlFor={`${fid}-type-label`} className="mb-1 block text-xs font-medium">
                       表示名
                     </label>
                     <input
+                      id={`${fid}-type-label`}
                       required
                       value={newTypeLabel}
                       onChange={(e) => setNewTypeLabel(e.target.value)}
@@ -2419,14 +2424,10 @@ export default function AdminView({
           {/* 一度決めたら滅多に変えない設定なので、他の節と同じく畳んでおく */}
           {isAdmin && (
             <details>
-              {/* 「?」を押しただけで開閉しないよう、クリックはこのspanで止める
-                  (「別のスポット種別の管理」と同じ体裁) */}
+              {/* 「別のスポット種別の管理」と同じ体裁(「?」を押しても開閉しない) */}
               <summary className="cursor-pointer select-none text-base font-bold">
                 ログイン後に自動で開く種別
-                <span
-                  className="ml-1.5 inline-flex align-middle"
-                  onClick={(e) => e.stopPropagation()}
-                >
+                <span className="ml-1.5 inline-flex align-middle">
                   <HelpTip>
                     ログイン後・ルート(/)アクセス時に自動で開く地図/リストの既定(全ユーザー共通)。
                     ここでの選択は既定を切り替えるだけで、他の種別を非表示にするものではない。
@@ -2570,10 +2571,11 @@ export default function AdminView({
               className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3"
             >
               <div>
-                <label className="mb-1 block text-sm font-medium">
+                <label htmlFor={`${fid}-user-email`} className="mb-1 block text-sm font-medium">
                   メールアドレス
                 </label>
                 <input
+                  id={`${fid}-user-email`}
                   type="email"
                   autoComplete="email"
                   required
@@ -2584,10 +2586,11 @@ export default function AdminView({
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium">
+                <label htmlFor={`${fid}-user-password`} className="mb-1 block text-sm font-medium">
                   初期パスワード
                 </label>
                 <input
+                  id={`${fid}-user-password`}
                   type="password"
                   autoComplete="new-password"
                   required
@@ -2598,10 +2601,11 @@ export default function AdminView({
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium">
+                <label htmlFor={`${fid}-user-nickname`} className="mb-1 block text-sm font-medium">
                   ニックネーム(任意)
                 </label>
                 <input
+                  id={`${fid}-user-nickname`}
                   type="text"
                   autoComplete="off"
                   value={newUserNickname}
@@ -2611,8 +2615,9 @@ export default function AdminView({
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium">ロール</label>
+                <label htmlFor={`${fid}-user-role`} className="mb-1 block text-sm font-medium">ロール</label>
                 <select
+                  id={`${fid}-user-role`}
                   value={newUserRole}
                   onChange={(e) => setNewUserRole(e.target.value as Role)}
                   className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm"

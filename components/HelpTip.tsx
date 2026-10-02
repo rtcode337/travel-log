@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 /** 吹き出しの幅(px)。Tailwindの`w-72`と同じ値 */
 const ANCHORED_WIDTH = 288;
@@ -20,6 +21,11 @@ const ANCHORED_MARGIN = 12;
  * **横は「?」の左端に合わせるのが基本だが、右へはみ出すときは右端に合わせる。**
  * 画面の右寄りにある「?」を左端合わせのままにすると、吹き出しが画面の外まで伸びて
  * 読めなくなる。最後に画面の内側へ寄せて、どちらの端も余白を残す。
+ *
+ * **吹き出しと外側の当たり判定は`body`へ描く(ポータル)。** `<summary>`や`<label>`の中に
+ * 置かれたとき、DOMの上で中にあると、吹き出しを触っただけで折り畳みが開閉したり
+ * チェックボックスが切り替わったりする。「?」自身のクリックも既定の動作を止める。
+ * `body`に出すぶん、モーダル(z-50/60)より上に来るよう z を高くしてある。
  *
  * **`sheet`**は位置を問わず**画面の下端に固定して出す**。「?」が画面の端にあって
  * 真下・真上のどちらにも収まらないときや、地図の上のように吹き出しが操作の邪魔に
@@ -83,18 +89,23 @@ export default function HelpTip({
         type="button"
         aria-label="説明を表示"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          // <summary>・<label>の中でも、押したことで開閉・切り替えが起きないように
+          e.preventDefault();
+          setOpen((v) => !v);
+        }}
         className="flex h-4 w-4 items-center justify-center rounded-full border border-gray-300 text-[10px] font-bold leading-none text-gray-500 hover:bg-gray-50"
       >
         ?
       </button>
-      {open && (
+      {open &&
+        createPortal(
         <>
           <button
             type="button"
             aria-label="説明を閉じる"
             onClick={() => setOpen(false)}
-            className="fixed inset-0 z-10 cursor-default"
+            className="fixed inset-0 z-[75] cursor-default"
           />
           <span
             style={
@@ -108,7 +119,7 @@ export default function HelpTip({
                   }
                 : undefined
             }
-            className={`z-20 block rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal leading-relaxed text-gray-600 shadow-lg ${
+            className={`z-[80] block rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal leading-relaxed text-gray-600 shadow-lg ${
               sheet
                 ? "fixed inset-x-3 bottom-3 mx-auto max-w-sm"
                 : // 位置が決まるまでは描かない(左上に一瞬出てから飛ぶのを防ぐ)
@@ -117,7 +128,8 @@ export default function HelpTip({
           >
             {children}
           </span>
-        </>
+        </>,
+        document.body
       )}
     </span>
   );

@@ -26,7 +26,7 @@ LAN内の別端末から開発サーバを開くときは`ALLOWED_DEV_ORIGINS`(`
 
 **リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
 
-テストは`npm test`(`lib/**/*.test.ts`を`node:test`+`tsx`で流す。`@/`の別名もそのまま解決される)。**対象は`lib/`の純粋な関数**(日時の書式・CSV・ZIPの書き出しと読み戻し・セッション・レート制限・入力の検査など)で、画面とAPIは含まない。DBに触る検査は`scripts/bootstrap-sql_test.sh`(スキーマ本体+マイグレーションを2回当てて冪等であること、Supabase向けの一括SQLと同じ状態になることを確かめる。`db/migrations/README.md`参照)。リンターは`npm run lint`(Biome。**lintだけで整形はしない**)。ESLintは`eslint-config-next`の依存チェーンに未修正の脆弱性(GHSA-mh99-v99m-4gvg)があり見送った。`biome.json`は推奨ルールのうち、**いまのコードで通るものだけを有効にしてある** —— a11y(ボタンの`type`・クリックできる要素の役割など)とフックの依存配列は直す量が多く、まとめて直すまで切ってある。型チェックは`next build`が行う。CIはこの3つと`next build`を回す(`.github/workflows/ci.yml`)。
+テストは`npm test`(`lib/**/*.test.ts`を`node:test`+`tsx`で流す。`@/`の別名もそのまま解決される)。**対象は`lib/`の純粋な関数**(日時の書式・CSV・ZIPの書き出しと読み戻し・セッション・レート制限・入力の検査など)で、画面とAPIは含まない。DBに触る検査は`scripts/bootstrap-sql_test.sh`(スキーマ本体+マイグレーションを2回当てて冪等であること、Supabase向けの一括SQLと同じ状態になることを確かめる。`db/migrations/README.md`参照)。リンターは`npm run lint`(Biome。**lintだけで整形はしない**)。ESLintは`eslint-config-next`の依存チェーンに未修正の脆弱性(GHSA-mh99-v99m-4gvg)があり見送った。`biome.json`は推奨ルールを基本に、誤検出の多いもの(配列の添字をkeyにする・`forEach`の戻り値など)と書き方の好みのルールだけを切ってある。**フックの依存配列を意図して絞るときは`biome-ignore lint/correctness/useExhaustiveDependencies: <理由>`を書く**(理由の無い抑止は残さない)。**モーダルは`components/Modal.tsx`の器を使う**(`fixed inset-0`の重ねを画面ごとに手で書かない。理由は`docs/design/map.md`「モーダルの器」)。型チェックは`next build`が行う。CIはこの3つと`next build`を回す(`.github/workflows/ci.yml`)。
 
 ### スキーマ変更のルール
 

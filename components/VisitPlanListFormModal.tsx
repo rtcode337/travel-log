@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useId } from "react";
 import { useRouter } from "next/navigation";
 import { savePlanListDraft } from "@/lib/planListDraft";
 import { api } from "@/lib/api-client";
 import type { VisitPlanList } from "@/lib/types";
+import Modal from "@/components/Modal";
 
 /** 今日のローカル日付(`YYYY-MM-DD`)。開始日の初期値に使う */
 function todayKey(): string {
@@ -46,6 +47,8 @@ export default function VisitPlanListFormModal({
    *  (未指定なら閉じるだけ。地図へ遷移する側の出口では呼ばれない) */
   onSaved?: (list: VisitPlanList) => void;
 }) {
+  // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
+  const fid = useId();
   const router = useRouter();
   const [title, setTitle] = useState(edit?.title ?? "");
   const [description, setDescription] = useState(edit?.description ?? "");
@@ -134,14 +137,10 @@ export default function VisitPlanListFormModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
+    <Modal onClose={onClose} panelClassName="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white">
       <form
         onSubmit={handleSubmit}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4"
+        className="space-y-3 p-4"
       >
         {/* キャンセルは見出し行の右端に置く(下の行は「保存」と
             「スポットを選ぶ」という前へ進む2つの操作に使うため) */}
@@ -164,8 +163,9 @@ export default function VisitPlanListFormModal({
           {edit ? "編集" : "選ぶ"}こともできます。
         </p>
         <div>
-          <label className="mb-1 block text-sm font-medium">タイトル *</label>
+          <label htmlFor={`${fid}-title`} className="mb-1 block text-sm font-medium">タイトル *</label>
           <input
+            id={`${fid}-title`}
             required
             autoComplete="off"
             value={title}
@@ -175,8 +175,9 @@ export default function VisitPlanListFormModal({
           />
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium">説明</label>
+          <label htmlFor={`${fid}-description`} className="mb-1 block text-sm font-medium">説明</label>
           <textarea
+            id={`${fid}-description`}
             rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -194,10 +195,11 @@ export default function VisitPlanListFormModal({
         </label>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="mb-1 block text-sm font-medium">
+            <label htmlFor={`${fid}-start`} className="mb-1 block text-sm font-medium">
               開始日{!undecided && " *"}
             </label>
             <input
+              id={`${fid}-start`}
               required={!undecided}
               disabled={undecided}
               type="date"
@@ -207,8 +209,9 @@ export default function VisitPlanListFormModal({
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">終了日</label>
+            <label htmlFor={`${fid}-end`} className="mb-1 block text-sm font-medium">終了日</label>
             <input
+              id={`${fid}-end`}
               type="date"
               disabled={undecided}
               value={endDate}
@@ -242,6 +245,6 @@ export default function VisitPlanListFormModal({
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

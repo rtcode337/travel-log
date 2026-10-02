@@ -378,6 +378,7 @@ export default function SpotsView({
   );
 
   // データ取得
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 種別が変わったら読み直す(読み込み関数は種別ごとに作り直されるが、合図として種別も明示しておく)
   useEffect(() => {
     (async () => {
       await Promise.all([
@@ -541,6 +542,7 @@ export default function SpotsView({
   const privateSpotsPager = usePagedItems(myPrivateSpots, CLIENT_PAGE_SIZE);
   const filteredSpotsPager = usePagedItems(filteredSpots, CLIENT_PAGE_SIZE);
   const { setPage: setFilteredPage } = filteredSpotsPager;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 絞り込み・並び順・地域が変わったら1ページ目に戻す(値は中で読まず、変わったことだけを合図に使う)
   useEffect(() => {
     setFilteredPage(1);
   }, [selectedRegion, filters, sortKey, setFilteredPage]);
@@ -613,6 +615,7 @@ export default function SpotsView({
                   {plannedPager.pageItems.map(({ plan, spot }) => (
                     <li key={plan.id}>
                       <button
+                        type="button"
                         onClick={() => setDetailSpotId(spot.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
@@ -680,6 +683,7 @@ export default function SpotsView({
                   {planLists.map((list) => (
                     <li key={list.id}>
                       <button
+                        type="button"
                         onClick={() => setDetailListId(list.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
@@ -728,6 +732,7 @@ export default function SpotsView({
                       return (
                         <li key={visit.id}>
                           <button
+                            type="button"
                             onClick={() => setDetailSpotId(spot.id)}
                             className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                           >
@@ -782,6 +787,7 @@ export default function SpotsView({
                   {myReviewsPager.pageItems.map((review) => (
                     <li key={review.id}>
                       <button
+                        type="button"
                         onClick={() => setDetailSpotId(review.spot_id)}
                         className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
@@ -835,6 +841,7 @@ export default function SpotsView({
                   {privateSpotsPager.pageItems.map((spot) => (
                     <li key={spot.id}>
                       <button
+                        type="button"
                         onClick={() => setDetailSpotId(spot.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
@@ -884,6 +891,7 @@ export default function SpotsView({
                   {hiddenSpotsPager.pageItems.map((spot) => (
                     <li key={spot.id}>
                       <button
+                        type="button"
                         onClick={() => setDetailSpotId(spot.id)}
                         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                       >
@@ -956,6 +964,7 @@ export default function SpotsView({
                   {regionRows.map((row) => (
                     <li key={row.region}>
                       <button
+                        type="button"
                         onClick={() => setSelectedRegion(row.region)}
                         className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
                       >
@@ -1033,6 +1042,7 @@ export default function SpotsView({
                     {managementItems.map((spot) => (
                       <li key={spot.id}>
                         <button
+                          type="button"
                           onClick={() => setDetailSpotId(spot.id)}
                           className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                         >
@@ -1152,6 +1162,7 @@ export default function SpotsView({
     <main className="mx-auto max-w-lg p-4">
       <div className="mb-3 flex items-center gap-2">
         <button
+          type="button"
           onClick={() => setSelectedRegion(null)}
           className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-600"
         >
@@ -1192,6 +1203,7 @@ export default function SpotsView({
         {filteredSpotsPager.pageItems.map((spot) => (
           <li key={spot.id}>
             <button
+              type="button"
               onClick={() => setDetailSpotId(spot.id)}
               className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
             >

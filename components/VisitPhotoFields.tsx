@@ -85,7 +85,7 @@ export default function VisitPhotoFields({
 
   return (
     <div className="border-t border-gray-100 pt-3">
-      <label className="mb-1 block text-sm font-medium">写真(非公開)</label>
+      <p className="mb-1 block text-sm font-medium">写真(非公開)</p>
       {photosEnabled &&
         (hint ?? (
           <p className="mb-2 text-xs text-gray-400">

@@ -17,6 +17,7 @@ import WeatherAskLink from "@/components/WeatherAskLink";
 import PlanWeatherFinder from "@/components/PlanWeatherFinder";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { usePathname } from "next/navigation";
+import Modal from "@/components/Modal";
 
 /**
  * 訪問予定リスト(旅程)の詳細モーダル。タイトル・説明・訪問予定期間と、
@@ -220,262 +221,258 @@ export default function VisitPlanListDetailModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      panelClassName="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4"
+      panelRef={panelRef}
     >
-      <div
-        ref={panelRef}
-        className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {loading ? (
-          <p className="p-4 text-sm text-gray-500">読み込み中…</p>
-        ) : !list ? (
-          <p className="p-4 text-sm text-gray-500">
-            リストが見つかりません。
-          </p>
-        ) : (
-          <>
-            <div className="mb-2 flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <h2 className="text-lg font-bold leading-tight">
-                  {list.title}
-                  {archived && (
-                    <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-xs font-normal text-gray-600">
-                      アーカイブ済み
-                    </span>
-                  )}
-                </h2>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  {formatPlanDateRange(list.start_date, list.end_date)}
-                  {" ・ "}
-                  {list.spot_ids.length}スポット
-                  {visitedIds.size > 0 && `(訪問済み ${visitedIds.size})`}
-                </p>
-              </div>
-              <button
-                onClick={onClose}
-                aria-label="閉じる"
-                className="rounded-full px-2 text-xl leading-none text-gray-400"
-              >
-                ×
-              </button>
-            </div>
-
-            {list.description && (
-              <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">
-                <LinkedText text={list.description} />
+      {loading ? (
+        <p className="p-4 text-sm text-gray-500">読み込み中…</p>
+      ) : !list ? (
+        <p className="p-4 text-sm text-gray-500">
+          リストが見つかりません。
+        </p>
+      ) : (
+        <>
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold leading-tight">
+                {list.title}
+                {archived && (
+                  <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-xs font-normal text-gray-600">
+                    アーカイブ済み
+                  </span>
+                )}
+              </h2>
+              <p className="mt-0.5 text-xs text-gray-500">
+                {formatPlanDateRange(list.start_date, list.end_date)}
+                {" ・ "}
+                {list.spot_ids.length}スポット
+                {visitedIds.size > 0 && `(訪問済み ${visitedIds.size})`}
               </p>
-            )}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="閉じる"
+              className="rounded-full px-2 text-xl leading-none text-gray-400"
+            >
+              ×
+            </button>
+          </div>
 
-            <ol className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
-              {list.spot_ids.map((spotId, i) => {
-                const spot = spotsById.get(spotId) ?? extraSpots.get(spotId);
-                const visited = visitedIds.has(spotId);
-                return (
-                  <li
-                    key={spotId}
-                    ref={setRowRef(i)}
-                    className={`flex items-center ${
-                      dragIndex === i
-                        ? "bg-blue-100"
-                        : visited
-                          ? "bg-gray-50"
-                          : ""
-                    }`}
+          {list.description && (
+            <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">
+              <LinkedText text={list.description} />
+            </p>
+          )}
+
+          <ol className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">
+            {list.spot_ids.map((spotId, i) => {
+              const spot = spotsById.get(spotId) ?? extraSpots.get(spotId);
+              const visited = visitedIds.has(spotId);
+              return (
+                <li
+                  key={spotId}
+                  ref={setRowRef(i)}
+                  className={`flex items-center ${
+                    dragIndex === i
+                      ? "bg-blue-100"
+                      : visited
+                        ? "bg-gray-50"
+                        : ""
+                  }`}
+                >
+                  {/* 並び替えハンドル。touch-action: noneはここにだけ当てる
+                      (行本体まで当てると一覧がタッチスクロールできなくなる) */}
+                  <span
+                    {...handleProps(i)}
+                    className={`${REORDER_HANDLE_CLASS} self-stretch py-2 pl-2.5 pr-1 text-base leading-none`}
                   >
-                    {/* 並び替えハンドル。touch-action: noneはここにだけ当てる
-                        (行本体まで当てると一覧がタッチスクロールできなくなる) */}
-                    <span
-                      {...handleProps(i)}
-                      className={`${REORDER_HANDLE_CLASS} self-stretch py-2 pl-2.5 pr-1 text-base leading-none`}
-                    >
-                      <span className="flex h-full items-center">≡</span>
-                    </span>
-                    {/* 解決できたスポットだけタップで詳細へ。解決できていない行は
-                        ボタンにしない —— 説明の「?」を入れ子のボタンにできないため
-                        (押せなくなるうえHTMLとしても不正) */}
-                    {spot ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenSpot(spot.id)}
-                        className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-1 pr-3 text-left hover:bg-gray-50"
-                      >
-                        <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums text-gray-400">
-                          {i + 1}
-                        </span>
-                        <SpotBadge
-                          rank={spot.rank}
-                          series={spot.series}
-                          seriesStyles={seriesStyles}
-                          rankEnabled={rankEnabled}
-                          isPrivate={spot.status === "private"}
-                          size="sm"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p
-                            className={`truncate text-sm font-medium ${
-                              visited ? "text-gray-400 line-through" : ""
-                            }`}
-                          >
-                            {spot.name}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {formatSpotMeta(spot, { rankEnabled })}
-                          </p>
-                        </div>
-                        <span className="shrink-0 text-gray-400">›</span>
-                      </button>
-                    ) : (
-                      <div className="flex min-w-0 flex-1 items-center gap-2 py-2.5 pl-1 pr-3 text-sm text-gray-400">
-                        <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums">
-                          {i + 1}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          (読み込まれていないスポット)
-                        </span>
-                        <HelpTip sheet>
-                          そのスポットの情報が手元に無いときの表示です。IDから
-                          取り直している最中なら、終わりしだい名前に変わります。
-                          いつまでも変わらないときは、
-                          <b>スポットが削除された</b>・
-                          <b>他の人の非公開スポットで見られない</b>・
-                          <b>通信に失敗した</b>のいずれかです。
-                          名前が出ていなくてもリストからは外れず、経路にも出ます。
-                        </HelpTip>
-                      </div>
-                    )}
-                    {/* そのスポットの、予定の日の天気(地図の経路詳細にも同じものを出す)。
-                        訪問日未定のリストでは日が決まらないので出さない */}
-                    {spot && weatherDate && (
-                      <WeatherAskLink
-                        spot={spot}
-                        date={weatherDate}
-                        weather={weatherBySpot.get(spot.id)}
-                        className="mr-1"
-                      />
-                    )}
-                    {/* 訪問済みの付け外し。訪問記録を付ければ自動で付くが、ここでも直せる
-                        (訪問済みは経路から外れるだけで、リストからは消えない) */}
+                    <span className="flex h-full items-center">≡</span>
+                  </span>
+                  {/* 解決できたスポットだけタップで詳細へ。解決できていない行は
+                      ボタンにしない —— 説明の「?」を入れ子のボタンにできないため
+                      (押せなくなるうえHTMLとしても不正) */}
+                  {spot ? (
                     <button
                       type="button"
-                      onClick={() => toggleVisited(spotId, !visited)}
-                      disabled={togglingSpotId === spotId}
-                      aria-pressed={visited}
-                      title={
-                        visited
-                          ? "訪問済み(経路から外れています)。タップで未訪問に戻す"
-                          : "タップで訪問済みにする(経路から外れます)"
-                      }
-                      className={`mr-2 shrink-0 rounded-full border px-2 py-1 text-xs disabled:opacity-50 ${
-                        visited
-                          ? "border-green-600 bg-green-600 text-white"
-                          : "border-gray-300 text-gray-500"
-                      }`}
+                      onClick={() => onOpenSpot(spot.id)}
+                      className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-1 pr-3 text-left hover:bg-gray-50"
                     >
-                      {visited ? "訪問済み" : "未訪問"}
+                      <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums text-gray-400">
+                        {i + 1}
+                      </span>
+                      <SpotBadge
+                        rank={spot.rank}
+                        series={spot.series}
+                        seriesStyles={seriesStyles}
+                        rankEnabled={rankEnabled}
+                        isPrivate={spot.status === "private"}
+                        size="sm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className={`truncate text-sm font-medium ${
+                            visited ? "text-gray-400 line-through" : ""
+                          }`}
+                        >
+                          {spot.name}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {formatSpotMeta(spot, { rankEnabled })}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-gray-400">›</span>
                     </button>
-                  </li>
-                );
-              })}
-              {list.spot_ids.length === 0 && (
-                <li className="px-3 py-3 text-sm text-gray-500">
-                  スポットがありません。
+                  ) : (
+                    <div className="flex min-w-0 flex-1 items-center gap-2 py-2.5 pl-1 pr-3 text-sm text-gray-400">
+                      <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums">
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        (読み込まれていないスポット)
+                      </span>
+                      <HelpTip sheet>
+                        そのスポットの情報が手元に無いときの表示です。IDから
+                        取り直している最中なら、終わりしだい名前に変わります。
+                        いつまでも変わらないときは、
+                        <b>スポットが削除された</b>・
+                        <b>他の人の非公開スポットで見られない</b>・
+                        <b>通信に失敗した</b>のいずれかです。
+                        名前が出ていなくてもリストからは外れず、経路にも出ます。
+                      </HelpTip>
+                    </div>
+                  )}
+                  {/* そのスポットの、予定の日の天気(地図の経路詳細にも同じものを出す)。
+                      訪問日未定のリストでは日が決まらないので出さない */}
+                  {spot && weatherDate && (
+                    <WeatherAskLink
+                      spot={spot}
+                      date={weatherDate}
+                      weather={weatherBySpot.get(spot.id)}
+                      className="mr-1"
+                    />
+                  )}
+                  {/* 訪問済みの付け外し。訪問記録を付ければ自動で付くが、ここでも直せる
+                      (訪問済みは経路から外れるだけで、リストからは消えない) */}
+                  <button
+                    type="button"
+                    onClick={() => toggleVisited(spotId, !visited)}
+                    disabled={togglingSpotId === spotId}
+                    aria-pressed={visited}
+                    title={
+                      visited
+                        ? "訪問済み(経路から外れています)。タップで未訪問に戻す"
+                        : "タップで訪問済みにする(経路から外れます)"
+                    }
+                    className={`mr-2 shrink-0 rounded-full border px-2 py-1 text-xs disabled:opacity-50 ${
+                      visited
+                        ? "border-green-600 bg-green-600 text-white"
+                        : "border-gray-300 text-gray-500"
+                    }`}
+                  >
+                    {visited ? "訪問済み" : "未訪問"}
+                  </button>
                 </li>
-              )}
-            </ol>
-
-            {list.spot_ids.length > 1 && (
-              <p className="mt-1.5 text-xs text-gray-500">
-                {savingOrder
-                  ? "並び順を保存中…"
-                  : "左端の≡をつかんで動かすと、回る順番を入れ替えられます。"}
-              </p>
+              );
+            })}
+            {list.spot_ids.length === 0 && (
+              <li className="px-3 py-3 text-sm text-gray-500">
+                スポットがありません。
+              </li>
             )}
+          </ol>
 
-            {/* このリストを地図で見る。地図側は`?planList=`を受け取ると、そのリストを
-                経路の対象に選び、経路全体が入るよう移動する(MapView)。
-                **「これだけを表示」にはしない** —— 経路の周りに何があるかを見ながら
-                旅程を確かめたいので、他のスポットを消してしまうと寄り道を足せない。
-                絞り込みたいときは地図側のセクションで切り替えられる。
-                地図から開いたときは出さない —— 今いる画面へのリンクになるため */}
-            {/* アーカイブ済みは地図側の一覧(現役のリストだけを引く)に出てこないため、
-                リンクを押しても経路が選ばれない。出さずに、戻してから使ってもらう */}
-            {!onMapPage && typeKey && !archived && (
-              <a
-                href={`/${typeKey}/map?planList=${encodeURIComponent(list.id)}`}
-                className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-600 py-2 text-sm font-medium text-blue-600"
-              >
-                🗺️ このリストを地図で表示
-              </a>
-            )}
-
-            {/* 予定日の前後1週間の天気。予定を立てたあとに雨予報になったとき、
-                近い日にずらせるかをこの画面で確かめられるようにする。
-                訪問日未定のリストは中心に置く日が無いので出さない
-                (日を決めるのは編集画面から) */}
-            {weatherDate && (
-              <PlanWeatherFinder
-                points={weatherPoints}
-                date={weatherDate}
-                endDate={list.end_date ?? weatherDate}
-                onPick={movePlanDate}
-                saving={movingDate}
-              />
-            )}
-
-            {/* 残りのスポットをGoogle マップの経路検索で開く(途中のスポットは経由地、
-                最後のスポットは目的地になる)。読み込めていないスポットは飛ばし、
-                訪問済みも外す —— 地図の経路と同じで、これから回る先だけを繋ぐ */}
-            <div className="mt-3">
-              <GoogleMapsRouteLink
-                points={list.spot_ids.flatMap((id) => {
-                  if (visitedIds.has(id)) return [];
-                  const spot = spotsById.get(id) ?? extraSpots.get(id);
-                  return spot ? [{ lat: spot.lat, lng: spot.lng }] : [];
-                })}
-              />
-            </div>
-
-            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-            <button
-              type="button"
-              onClick={() => onEdit(list)}
-              className="mt-4 w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
-            >
-              このリストを編集
-            </button>
-            <button
-              type="button"
-              onClick={toggleArchived}
-              disabled={archiving}
-              className="mt-2 w-full rounded-lg border border-gray-300 py-2 text-sm text-gray-600 disabled:opacity-50"
-            >
-              {archiving
-                ? "更新中…"
-                : archived
-                  ? "アーカイブから戻す"
-                  : "このリストをアーカイブする"}
-            </button>
-            {/* 押す前に「消えるわけではない」と分かるようにしておく
-                (削除ボタンが隣にあるので、取り違えると取り返しがつかない) */}
-            <p className="mt-1 text-xs text-gray-400">
-              {archived
-                ? "戻すと、訪問予定リストの一覧と地図の経路にまた出るようになります。"
-                : "回り終わった旅程を一覧から下げます。中身は残り、スポット画面の「アーカイブ」からいつでも読めます。"}
+          {list.spot_ids.length > 1 && (
+            <p className="mt-1.5 text-xs text-gray-500">
+              {savingOrder
+                ? "並び順を保存中…"
+                : "左端の≡をつかんで動かすと、回る順番を入れ替えられます。"}
             </p>
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="mt-2 w-full rounded-lg border border-red-300 py-2 text-sm text-red-600 disabled:opacity-50"
+          )}
+
+          {/* このリストを地図で見る。地図側は`?planList=`を受け取ると、そのリストを
+              経路の対象に選び、経路全体が入るよう移動する(MapView)。
+              **「これだけを表示」にはしない** —— 経路の周りに何があるかを見ながら
+              旅程を確かめたいので、他のスポットを消してしまうと寄り道を足せない。
+              絞り込みたいときは地図側のセクションで切り替えられる。
+              地図から開いたときは出さない —— 今いる画面へのリンクになるため */}
+          {/* アーカイブ済みは地図側の一覧(現役のリストだけを引く)に出てこないため、
+              リンクを押しても経路が選ばれない。出さずに、戻してから使ってもらう */}
+          {!onMapPage && typeKey && !archived && (
+            <a
+              href={`/${typeKey}/map?planList=${encodeURIComponent(list.id)}`}
+              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-600 py-2 text-sm font-medium text-blue-600"
             >
-              {deleting ? "削除中…" : "このリストを削除"}
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+              🗺️ このリストを地図で表示
+            </a>
+          )}
+
+          {/* 予定日の前後1週間の天気。予定を立てたあとに雨予報になったとき、
+              近い日にずらせるかをこの画面で確かめられるようにする。
+              訪問日未定のリストは中心に置く日が無いので出さない
+              (日を決めるのは編集画面から) */}
+          {weatherDate && (
+            <PlanWeatherFinder
+              points={weatherPoints}
+              date={weatherDate}
+              endDate={list.end_date ?? weatherDate}
+              onPick={movePlanDate}
+              saving={movingDate}
+            />
+          )}
+
+          {/* 残りのスポットをGoogle マップの経路検索で開く(途中のスポットは経由地、
+              最後のスポットは目的地になる)。読み込めていないスポットは飛ばし、
+              訪問済みも外す —— 地図の経路と同じで、これから回る先だけを繋ぐ */}
+          <div className="mt-3">
+            <GoogleMapsRouteLink
+              points={list.spot_ids.flatMap((id) => {
+                if (visitedIds.has(id)) return [];
+                const spot = spotsById.get(id) ?? extraSpots.get(id);
+                return spot ? [{ lat: spot.lat, lng: spot.lng }] : [];
+              })}
+            />
+          </div>
+
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          <button
+            type="button"
+            onClick={() => onEdit(list)}
+            className="mt-4 w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white"
+          >
+            このリストを編集
+          </button>
+          <button
+            type="button"
+            onClick={toggleArchived}
+            disabled={archiving}
+            className="mt-2 w-full rounded-lg border border-gray-300 py-2 text-sm text-gray-600 disabled:opacity-50"
+          >
+            {archiving
+              ? "更新中…"
+              : archived
+                ? "アーカイブから戻す"
+                : "このリストをアーカイブする"}
+          </button>
+          {/* 押す前に「消えるわけではない」と分かるようにしておく
+              (削除ボタンが隣にあるので、取り違えると取り返しがつかない) */}
+          <p className="mt-1 text-xs text-gray-400">
+            {archived
+              ? "戻すと、訪問予定リストの一覧と地図の経路にまた出るようになります。"
+              : "回り終わった旅程を一覧から下げます。中身は残り、スポット画面の「アーカイブ」からいつでも読めます。"}
+          </p>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="mt-2 w-full rounded-lg border border-red-300 py-2 text-sm text-red-600 disabled:opacity-50"
+          >
+            {deleting ? "削除中…" : "このリストを削除"}
+          </button>
+        </>
+      )}
+    </Modal>
   );
 }
