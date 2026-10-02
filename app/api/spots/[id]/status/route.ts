@@ -23,9 +23,16 @@ export async function PATCH(
     return NextResponse.json({ error: "invalid status" }, { status: 400 });
   }
 
+  // 他人の非公開スポットには触らない(非公開はロールに関わらず本人だけのもの)。
+  // 当たらなければ、存在そのものを伏せて404にする
   const { rows } = await query<Spot>(
-    "update spots set status = $1 where id = $2 returning *",
-    [status, id]
+    `update spots set status = $1
+      where id = $2 and (status <> 'private' or created_by = $3)
+      returning *`,
+    [status, id, user.id]
   );
-  return NextResponse.json({ data: rows[0] ?? null });
+  if (rows.length === 0) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  return NextResponse.json({ data: rows[0] });
 }

@@ -68,12 +68,19 @@ export async function verifySessionToken(
   if (!payloadB64 || !sigB64) return null;
 
   const key = await importHmacKey(getSecret(), "verify");
-  const valid = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    base64UrlToBytes(sigB64) as BufferSource,
-    new TextEncoder().encode(payloadB64)
-  );
+  // 署名がbase64として読めない(壊れた・手で書き換えたCookie)ときは、例外を外へ
+  // 出さず未ログイン扱いにする。投げるとproxyで落ち、Cookieを消すまで全ページが500になる
+  let valid = false;
+  try {
+    valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      base64UrlToBytes(sigB64) as BufferSource,
+      new TextEncoder().encode(payloadB64)
+    );
+  } catch {
+    return null;
+  }
   if (!valid) return null;
 
   try {

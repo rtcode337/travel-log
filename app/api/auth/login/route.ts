@@ -4,6 +4,10 @@ import { createSessionToken, SESSION_COOKIE, SESSION_MAX_AGE } from "@/lib/auth/
 import { isSecureRequest } from "@/lib/auth/request-url";
 import { clearAttempts, getClientIp, isRateLimited, recordFailure } from "@/lib/auth/rate-limit";
 
+/** メールアドレス単位の失敗回数の上限(15分あたり)。IP単位(10回)より緩くし、
+ *  別の場所から本人がログインし直す余地を残す */
+const ACCOUNT_MAX_ATTEMPTS = 30;
+
 export async function POST(request: Request) {
   const { email, password } = await request.json();
 
@@ -12,9 +16,12 @@ export async function POST(request: Request) {
   }
 
   // IP+メールアドレス単位で試行回数を制限する(総当たり対策)。認証情報を
-  // 検証する前にチェックすることで、制限中はDBへの問い合わせ自体を避ける
+  // 検証する前にチェックすることで、制限中はDBへの問い合わせ自体を避ける。
+  // IPは偽装できる構成もあるので、メールアドレスだけの枠も別に持つ(上限は緩め)
+  // —— IPを変えながら1つのアカウントを総当たりされても、ここで止まる
   const rateLimitKey = `${getClientIp(request)}:${email.toLowerCase()}`;
-  if (isRateLimited(rateLimitKey)) {
+  const accountKey = `account:${email.toLowerCase()}`;
+  if (isRateLimited(rateLimitKey) || isRateLimited(accountKey, ACCOUNT_MAX_ATTEMPTS)) {
     return NextResponse.json(
       { error: "試行回数が多すぎます。しばらく待ってから再度お試しください。" },
       { status: 429 }
@@ -30,12 +37,14 @@ export async function POST(request: Request) {
   const user = rows[0];
   if (!user) {
     recordFailure(rateLimitKey);
+    recordFailure(accountKey);
     return NextResponse.json(
       { error: "メールアドレスまたはパスワードが正しくありません。" },
       { status: 401 }
     );
   }
   clearAttempts(rateLimitKey);
+  clearAttempts(accountKey);
   // Googleログインを設定済みのアカウントはパスワードログイン不可
   if (user.has_google) {
     return NextResponse.json(
