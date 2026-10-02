@@ -209,8 +209,8 @@ erDiagram
 - **見た目の軸は `rank` と `series` の2つ**。`rank`(A〜E か null)はアプリに
   決め打ちで色と大きさを決め、`series` はピンの中身(アイコン・文字)と形を決める
   (種別ごとの `series_styles` 設定)。`rank` を使うかは種別ごとの `rank_enabled`
-  設定で、使わない種別では色も `series` が決める。`categories` は絞り込み専用で
-  見た目には効かない(かつての `category_styles` 設定は廃止した)
+  設定。`series` に色の指定があれば、ランクを使う種別でもランクの色より優先する。
+  `categories` は絞り込み専用で見た目には効かない(かつての `category_styles` 設定は廃止した)
 - **`spot_deletions` は削除の墓標**。CSV 由来の公開スポットを画面から個別削除した
   ときだけ記録し、travel-log-data 側の `exclude.txt` へ追記する候補として
   還元用エクスポートに出す(行が消えるので値をコピーして残す)

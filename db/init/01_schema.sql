@@ -17,9 +17,9 @@
 -- トリガーで自動更新する(下部にまとめてトリガーを定義してある)。
 --
 -- このファイルは postgres の docker-entrypoint-initdb.d には置かず(dbコンテナに
--- マウントもしない)、db-migrate サービスが '000_init_schema' という名前の
+-- マウントもしない)、アプリが起動時に '000_init_schema' という名前の
 -- 「先頭のマイグレーション」として流す。空のDBには実行され、既にテーブルがある
--- DBには実行されず適用済みとして記録されるだけになる(db/entrypoint.sh 参照)。
+-- DBには実行されず適用済みとして記録されるだけになる(scripts/migrate.mjs 参照)。
 
 create extension if not exists pgcrypto;
 
@@ -51,16 +51,16 @@ create table spot_types (
 
 -- =============================================================
 -- spot_type_settings: スポット種別ごとの設定をkey/valueで持つ
--- (口コミ・Wikipediaリンク・閲覧を管理者以外不可にするなど)。設定を追加するたびに
+-- (口コミの有無・閲覧を管理者以外不可にするなど)。設定を追加するたびに
 -- spot_types に列を増やさずに済むよう、EAV形式にしてある。値はboolean相当を
 -- 'true'/'false'の文字列で保存するもの(既知のキー・既定値・表示名は
 -- lib/types.ts の SPOT_TYPE_SETTING_DEFAULTS/SPOT_TYPE_SETTING_LABELS 参照)のほか、
 -- 文字列値のキーもある: series_styles(シリーズ定義のJSON、lib/seriesStyle.ts)、
 -- categories(カテゴリ一覧のJSON、lib/category.ts)、region_scope(対象地域
--- 'jp'/国コード/'world')・wikipedia_lang(言語コード。いずれも lib/region.ts 参照)。
+-- 'jp'/国コード/'world'、lib/region.ts 参照)。
 -- 行が存在しないキーは設定ごとの既定値として扱う(設定により既定値は異なる)。
 -- かつて存在した spot_types.visibility 列(public/admin_only/disabled の3値)は廃止し、
--- admin_only設定(true/false)に一本化した。disabled相当(誰にも見せない)は、
+-- public_visible設定(true/false)に一本化した。disabled相当(誰にも見せない)は、
 -- スポット種別そのものの削除(/[type]/admin の「スポット種別の管理」)で代替する
 -- =============================================================
 create table spot_type_settings (

@@ -90,8 +90,8 @@ services:
       init:
         condition: service_completed_successfully
     environment:
-      # ホストにポート公開しないコンテナ間だけの接続。変えるなら init の
-      # PG* と app の DATABASE_URL も同じ値に揃えること
+      # ホストにポート公開しないコンテナ間だけの接続。変えるなら app の
+      # DATABASE_URL も同じ値に揃えること
       POSTGRES_USER: travel_log
       POSTGRES_PASSWORD: travel_log
       POSTGRES_DB: travel_log

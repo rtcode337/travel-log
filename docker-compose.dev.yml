@@ -11,7 +11,7 @@ services:
       # (本番と同じ形。docker-compose.ymlのdbサービスのコメント参照)
       PGDATA: /data/db/18/docker
     volumes:
-      # db/initはマウントしない。スキーマ本体(01_schema.sql)はinitサービスが流す
+      # db/initはマウントしない。スキーマ本体(01_schema.sql)はappが起動時に流す
       # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
       #  スキーマを更新したときにgit pullが失敗するようになるため)
       # マウント先とPGDATAの決め方は本番用と同じ(docker-compose.ymlのコメント参照)

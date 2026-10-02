@@ -71,7 +71,7 @@ cp .env.remote.example .env.remote   # 値を入れる(Session pooler の情報)
 sh scripts/migrate-remote.sh
 ```
 
-`migrate: migrations done (applied=13, skipped=0)` のように出れば完了。
+`migrate: migrations done (applied=…, skipped=0)` のように出れば完了(applied はその時点のマイグレーションの本数)。
 **接続情報を書いた `.env.remote` がこの機械に残る**点に注意(gitignore 済みだが、
 共用の機械や、他人が触る環境では A のほうがよい)。
 

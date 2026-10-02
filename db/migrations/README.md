@@ -78,7 +78,7 @@ docker compose -f docker-compose.dev.yml run --rm --no-deps \
 # 1. 旧スキーマのダンプを復元したDBにマイグレーションを当てる
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres -c "create database t_old"
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d t_old < <旧スキーマのダンプ>.sql
-docker compose -f docker-compose.dev.yml run --rm -e PGDATABASE=t_old init
+docker compose -f docker-compose.dev.yml run --rm --no-deps -e DATABASE_URL=postgres://travel_log:travel_log@db:5432/t_old app node scripts/migrate.mjs
 
 # 2. 最新スキーマで新規作成したDBを用意する
 docker compose -f docker-compose.dev.yml exec -T db psql -U travel_log -d postgres -c "create database t_fresh"

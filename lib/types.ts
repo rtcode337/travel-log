@@ -41,7 +41,7 @@ export interface Spot {
   id: string;
   spot_type_id: string;
   /** CSV等の外部データからこのスポットを参照するための、種別内で一意な省略可のキー
-   * (ルートCSVのspot_key列が指す先。db/init/02_spot_key_routes.sql参照) */
+   * (ルートCSVのspot_key列が指す先。db/init/01_schema.sql参照) */
   key: string | null;
   name: string;
   name_kana: string | null;
@@ -233,7 +233,7 @@ export function getSpotTypeSetting(
  * travel-log-data(例: `<スポットキー>/settings.json`)にスポットデータのCSVと並べて置く想定
  * (詳細はtravel-log-data/README.md参照)。settingsは省略したキーが既定値のまま
  * (SPOT_TYPE_SETTING_DEFAULTS)になる点はDBのEAV設計と同じ。boolean設定のほか、
- * region_scope('jp'/国コード/'world')・wikipedia_lang('en'等)のような文字列値の
+ * region_scope('jp'/国コード/'world')のような文字列値の
  * 設定もそのまま指定できる(妥当性はPATCH /api/spot-types/[id]側で検証される)。
  * seriesを省略した場合(または画面から手入力で種別を追加した場合)はシリーズ定義なし
  * (lib/seriesStyle.ts)、categoriesを省略した場合はカテゴリ定義なし
