@@ -3,6 +3,7 @@ import { isTooLong, parseJsonBody, PHOTO_BODY_MAX_BYTES } from "@/lib/requestBod
 import { query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import { deleteVisitPhotos, saveVisitPhoto } from "@/lib/photos";
+import { photoQuotaError } from "@/lib/photoQuota";
 import { MAX_PHOTOS_PER_VISIT } from "@/lib/visitPhoto";
 import { PHOTOS_DISABLED_MESSAGE, photosEnabled } from "@/lib/features";
 import type { VisitNote } from "@/lib/types";
@@ -102,6 +103,16 @@ export async function POST(request: Request) {
       { error: "本文か写真のどちらかを入れてください。" },
       { status: 400 }
     );
+  }
+
+  // ユーザーごとの写真の容量の上限(lib/photoQuota.ts)。保存する前に見る
+  // (保存してから消す形にすると、途中で落ちたときに上限を超えた写真が残る)
+  const quotaError = await photoQuotaError(
+    userId,
+    (inputPhotos as string[]).filter((p) => p.startsWith("data:"))
+  );
+  if (quotaError) {
+    return NextResponse.json({ error: quotaError }, { status: 413 });
   }
 
   const photoPaths: string[] = [];

@@ -54,6 +54,7 @@ import {
   runSpotsCsvImport,
   runRouteCsvImport,
 } from "@/lib/adminImport";
+import { formatBytes } from "@/lib/bytes";
 
 const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
 
@@ -2499,6 +2500,12 @@ export default function AdminView({
                         {u.has_password && "パスワード"}
                         {u.has_password && u.has_google && " / "}
                         {u.has_google && "Google"}
+                        {/* 誰が保存先を使っているかを見られるように、写真の使用量も並べる */}
+                        {u.photo_bytes != null && (
+                          <span className="ml-2">
+                            写真 {formatBytes(u.photo_bytes)}({(u.photo_count ?? 0).toLocaleString("ja-JP")} 枚)
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

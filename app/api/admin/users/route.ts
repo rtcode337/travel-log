@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import type { AppUser, Role } from "@/lib/types";
+import { getPhotoUsage } from "@/lib/photoQuota";
 
 const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
 
@@ -21,7 +22,19 @@ export async function GET() {
      from users
      order by created_at asc`
   );
-  return NextResponse.json({ data: rows });
+  // 写真の使用量も並べる(誰が保存先を使っているかを管理者が見られるように)。
+  // 数えられなかった人は空欄にし、一覧そのものは出す
+  const withUsage = await Promise.all(
+    rows.map(async (u) => {
+      try {
+        const usage = await getPhotoUsage(u.id);
+        return { ...u, photo_bytes: usage.usedBytes, photo_count: usage.photoCount };
+      } catch {
+        return { ...u, photo_bytes: null, photo_count: null };
+      }
+    })
+  );
+  return NextResponse.json({ data: withUsage });
 }
 
 export async function POST(request: Request) {

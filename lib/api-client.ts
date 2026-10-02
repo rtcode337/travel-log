@@ -122,6 +122,12 @@ export const api = {
   account: {
     /** アカウント削除(自分のアカウントと個人データの削除)。成功するとセッションも切れる */
     remove: () => request<{ ok: boolean }>("/api/account", { method: "DELETE" }),
+    /** 自分の写真の使用量と上限(quotaBytes が null なら上限なし)。保存のたびに変わるので毎回取り直す */
+    photoUsage: () =>
+      request<{ usedBytes: number; photoCount: number; quotaBytes: number | null }>(
+        "/api/account/photo-usage",
+        { fresh: true }
+      ),
   },
   spots: {
     list: (status: string | undefined, opts: { type: string }) => {

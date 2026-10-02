@@ -365,6 +365,9 @@ export interface AppUser {
   has_password: boolean;
   has_google: boolean;
   created_at: string;
+  /** 写真の使用量(管理者のユーザー一覧でだけ付く。数えられなかったときはnull) */
+  photo_bytes?: number | null;
+  photo_count?: number | null;
 }
 
 export interface Visit {

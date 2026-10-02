@@ -6,6 +6,7 @@ import { api } from "@/lib/api-client";
 import { ROLE_LABELS, type Role, type SpotType } from "@/lib/types";
 import { useExportJobs } from "@/lib/useExportJobs";
 import { formatJstDateTime } from "@/lib/datetime";
+import { formatBytes } from "@/lib/bytes";
 
 export default function AccountView({ typeKey }: { typeKey: string }) {
   // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
@@ -19,6 +20,11 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
   const { jobs: exportJobs } = useExportJobs();
   const exportJob = exportJobs[0] ?? null;
 
+  const [photoUsage, setPhotoUsage] = useState<{
+    usedBytes: number;
+    photoCount: number;
+    quotaBytes: number | null;
+  } | null>(null);
   useEffect(() => {
     api.auth.me().then(({ data }) => {
       if (!data) return;
@@ -26,6 +32,8 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
       setRole(data.role);
     });
     api.spotTypes.list().then(({ data }) => setSpotTypes(data ?? []));
+    // 使用量は数えるのに時間がかかることがあるので、ほかの表示を待たせない
+    api.account.photoUsage().then(({ data }) => setPhotoUsage(data ?? null));
   }, []);
 
   const currentType = spotTypes.find((t) => t.key === typeKey) ?? null;
@@ -100,6 +108,46 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
           </button>
         </div>
       </section>
+
+      {/* 写真の使用量。上限は環境ごと(PHOTO_QUOTA_MB)で、超える追加は保存のときに断られる。
+          どれだけ使っているかが分からないと、断られて初めて上限を知ることになる */}
+      {photoUsage && (
+        <section className="mb-4 rounded-xl border border-gray-200 bg-white p-4">
+          <h2 className="text-sm font-bold">写真の容量</h2>
+          <p className="mt-1 text-sm text-gray-700">
+            {formatBytes(photoUsage.usedBytes)}
+            {photoUsage.quotaBytes !== null && <> / {formatBytes(photoUsage.quotaBytes)}</>}
+            <span className="ml-2 text-xs text-gray-500">(写真 {photoUsage.photoCount.toLocaleString("ja-JP")} 枚)</span>
+          </p>
+          {photoUsage.quotaBytes !== null ? (
+            (() => {
+              const ratio = Math.min(1, photoUsage.usedBytes / photoUsage.quotaBytes);
+              return (
+                <>
+                  <div
+                    className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100"
+                    role="progressbar"
+                    aria-label="写真の容量の使用率"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(ratio * 100)}
+                  >
+                    <div
+                      className={`h-full ${ratio >= 0.9 ? "bg-red-500" : ratio >= 0.7 ? "bg-amber-500" : "bg-blue-500"}`}
+                      style={{ width: `${ratio * 100}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    上限を超える写真は追加できません。訪問記録や追記から写真を外すと空きます。
+                  </p>
+                </>
+              );
+            })()
+          ) : (
+            <p className="mt-1 text-xs text-gray-500">この環境では上限はありません。</p>
+          )}
+        </section>
+      )}
 
       {/* 管理者が作った自分の訪問記録のZIP。作成は管理画面からしかできないので、
           何も無いときは節ごと出さない(ここに作成ボタンは置かない)。

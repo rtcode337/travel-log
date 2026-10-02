@@ -25,27 +25,58 @@ export interface PhotoStorage {
   get(relPath: string): Promise<Uint8Array<ArrayBuffer> | null>;
   /** 相対パスを削除する。存在しなくてもエラーにしない */
   delete(relPath: string): Promise<void>;
+  /**
+   * 前置き(`<ユーザーID>/`)の下にある写真の合計バイト数と枚数。ユーザーごとの
+   * 容量の上限と使用量の表示に使う。DBに数を持たず実物を数えるので、ずれない
+   */
+  usage(prefix: string): Promise<PhotoUsage>;
 }
 
-/** `fs`バックエンドの保存先ディレクトリ(既定はcwd直下のphotos) */
-const PHOTOS_DIR = process.env.PHOTOS_DIR ?? path.join(process.cwd(), "photos");
+export interface PhotoUsage {
+  bytes: number;
+  count: number;
+}
+
+/** `fs`バックエンドの保存先ディレクトリ(既定はcwd直下のphotos)。使うたびに環境変数から読む */
+const photosDir = () => process.env.PHOTOS_DIR ?? path.join(process.cwd(), "photos");
 
 const fsStorage: PhotoStorage = {
   async put(relPath, data) {
-    const absPath = path.join(PHOTOS_DIR, relPath);
+    const absPath = path.join(photosDir(), relPath);
     await fs.mkdir(path.dirname(absPath), { recursive: true });
     await fs.writeFile(absPath, data);
   },
   async get(relPath) {
     try {
-      return Uint8Array.from(await fs.readFile(path.join(PHOTOS_DIR, relPath)));
+      return Uint8Array.from(await fs.readFile(path.join(photosDir(), relPath)));
     } catch {
       return null;
     }
   },
   async delete(relPath) {
     // 既に無いファイルは無視する(訪問記録の削除自体は妨げない)
-    await fs.unlink(path.join(PHOTOS_DIR, relPath)).catch(() => {});
+    await fs.unlink(path.join(photosDir(), relPath)).catch(() => {});
+  },
+  async usage(prefix) {
+    const total: PhotoUsage = { bytes: 0, count: 0 };
+    const walk = async (dir: string) => {
+      let entries: import("fs").Dirent[];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return; // まだ1枚も無い(ディレクトリが無い)
+      }
+      for (const entry of entries) {
+        const p = path.join(dir, entry.name);
+        if (entry.isDirectory()) await walk(p);
+        else if (entry.isFile()) {
+          total.bytes += (await fs.stat(p)).size;
+          total.count++;
+        }
+      }
+    };
+    await walk(path.join(photosDir(), prefix));
+    return total;
   },
 };
 
@@ -82,6 +113,7 @@ function supabaseConfig() {
   return {
     objectUrl: (relPath: string) =>
       `${url.replace(/\/$/, "")}/storage/v1/object/${bucket}/${relPath}`,
+    listUrl: `${url.replace(/\/$/, "")}/storage/v1/object/list/${bucket}`,
     headers,
   };
 }
@@ -115,6 +147,37 @@ const supabaseStorage: PhotoStorage = {
     const { objectUrl, headers } = supabaseConfig();
     // 失敗しても訪問記録の削除自体は妨げない
     await fetch(objectUrl(relPath), { method: "DELETE", headers }).catch(() => {});
+  },
+  async usage(prefix) {
+    // 一覧APIは1階層ずつ返す(フォルダは id が null)ので、<年>/<月>/ と降りていく
+    const { listUrl, headers } = supabaseConfig();
+    const total: PhotoUsage = { bytes: 0, count: 0 };
+    const walk = async (dir: string) => {
+      for (let offset = 0; ; offset += 1000) {
+        const res = await fetch(listUrl, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ prefix: dir, limit: 1000, offset }),
+        });
+        if (!res.ok) throw new Error(`写真の一覧を取得できませんでした (${res.status})`);
+        const items = (await res.json()) as {
+          name: string;
+          id: string | null;
+          metadata?: { size?: number } | null;
+        }[];
+        for (const item of items) {
+          if (item.id === null) await walk(`${dir}/${item.name}`);
+          else {
+            total.bytes += item.metadata?.size ?? 0;
+            total.count++;
+          }
+        }
+        if (items.length < 1000) return;
+      }
+    };
+    // supabase-js と同じく、フォルダは末尾の / を付けずに渡す
+    await walk(prefix.replace(/\/+$/, ""));
+    return total;
   },
 };
 
