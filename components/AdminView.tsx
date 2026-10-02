@@ -110,6 +110,7 @@ export default function AdminView({
   const [adminTab, setAdminTab] = useState<"spots" | "users">("spots");
   const [checkingRole, setCheckingRole] = useState(true);
   const [hasPageAccess, setHasPageAccess] = useState(false);
+  const [roleCheckError, setRoleCheckError] = useState<string | null>(null);
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
   const isAdmin = myRole === "admin";
@@ -262,7 +263,13 @@ export default function AdminView({
   }, [currentType]);
 
   useEffect(() => {
-    api.auth.me().then(({ data }) => {
+    api.auth.me().then(({ data, error }) => {
+      // 通信断・サーバーの一時的な失敗では地図へ戻さず、理由を出す
+      // (権限が無いと決まったわけではないので、戻すと開き直すまで管理画面に入れない)
+      if (error && error.status !== 401) {
+        setRoleCheckError(error.message);
+        return;
+      }
       if (!data || !SPOT_ADMIN_ROLES.includes(data.role)) {
         router.replace(`/${typeKey}/map`);
         return;
@@ -1914,6 +1921,13 @@ export default function AdminView({
     loadRoutes();
   };
 
+  if (roleCheckError) {
+    return (
+      <p className="p-4 text-sm text-red-600">
+        権限を確認できませんでした: {roleCheckError}
+      </p>
+    );
+  }
   if (checkingRole || !hasPageAccess) return null;
 
   return (

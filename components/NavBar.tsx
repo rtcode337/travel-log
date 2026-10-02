@@ -27,8 +27,11 @@ export default function NavBar() {
 
   useEffect(() => {
     if (pathname.startsWith("/login")) return;
-    api.auth.me().then(async ({ data }) => {
+    api.auth.me().then(async ({ data, error }) => {
       if (!data) {
+        // ログアウトさせるのは401(ユーザーが居ない)のときだけ。通信断やDBの再起動中の
+        // 500/502でも追い出すと、セッションが有効なのにログイン画面へ戻されてしまう
+        if (error?.status !== 401) return;
         // Cookieの署名は有効でも、DBを作り直す等でユーザー自体が
         // 既に存在しない場合はここに来る。Cookieを消してログイン画面に戻す
         // (消さないとproxyが「署名は正しい」と判断し/loginへ戻れなくなる)
