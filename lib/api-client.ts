@@ -22,8 +22,12 @@ import type { DailyWeather } from "@/lib/weather";
 
 interface Result<T> {
   data: T | null;
-  error: { message: string } | null;
+  /** `status`はHTTPのステータスコード。通信そのものが失敗したとき(オフライン等)は0 */
+  error: { message: string; status: number } | null;
 }
+
+/** 通信そのものが失敗したとき(応答が無い)のメッセージ */
+const NETWORK_ERROR_MESSAGE = "通信できませんでした。電波の状況を確かめてください。";
 
 // ページ(/map ↔ /spots など)を行き来するたびに同じGETを取り直さないための
 // タブ内キャッシュ。pathをキーに、進行中/完了済みのリクエストをそのまま保持する
@@ -35,13 +39,24 @@ async function fetchAndParse<T>(
   path: string,
   init?: RequestInit
 ): Promise<Result<T>> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
+  // 通信断(オフライン・電波の切り替わり・デプロイ中の接続断)では fetch が reject する。
+  // 呼び出し側はどこも { data, error } しか見ていないので、ここで error に揃えて返す
+  // (reject のまま流すと loading の解除まで届かず、画面が読み込み中のまま固まる)
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...init?.headers },
+    });
+  } catch {
+    return { data: null, error: { message: NETWORK_ERROR_MESSAGE, status: 0 } };
+  }
   const body = await res.json().catch(() => null);
   if (!res.ok) {
-    return { data: null, error: { message: body?.error ?? res.statusText } };
+    return {
+      data: null,
+      error: { message: body?.error ?? res.statusText, status: res.status },
+    };
   }
   // APIは基本 { data: T } でラップして返すが、一部( /api/auth/status 等)は素のJSONを返す。
   // `body?.data ?? body` だと data: null (該当データなしの正常系)を素のJSON側と区別できず
