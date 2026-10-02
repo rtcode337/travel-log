@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api-client";
 import { isStaleRunning, useExportJobs } from "@/lib/useExportJobs";
 import type { ExportJob } from "@/lib/types";
+import { formatJstDateTime } from "@/lib/datetime";
 
 function formatBytes(size: number | null): string {
   if (size === null) return "";
@@ -13,7 +14,7 @@ function formatBytes(size: number | null): string {
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("ja-JP");
+  return formatJstDateTime(iso);
 }
 
 /**

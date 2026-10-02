@@ -11,6 +11,7 @@ import {
   expandSpot,
   type StoredSpotCache,
 } from "@/lib/spotCacheDb";
+import { formatJstDateTime } from "@/lib/datetime";
 
 /** アプリ内で扱う公開スポットキャッシュ(spotsは表示用にSpotへ復元済み) */
 export interface SpotCacheEntry {
@@ -50,13 +51,7 @@ export interface DownloadProgress {
 }
 
 export function formatDownloadedAt(iso: string): string {
-  return new Date(iso).toLocaleString("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatJstDateTime(iso);
 }
 
 /** aとbのうち新しい方のISO日時を返す(null・不正値は無視する) */

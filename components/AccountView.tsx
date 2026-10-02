@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { ROLE_LABELS, type Role, type SpotType } from "@/lib/types";
 import { useExportJobs } from "@/lib/useExportJobs";
+import { formatJstDateTime } from "@/lib/datetime";
 
 export default function AccountView({ typeKey }: { typeKey: string }) {
   const router = useRouter();
@@ -88,7 +89,7 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
           ) : (
             <>
               <p className="mt-0.5 text-xs text-gray-500">
-                {new Date(exportJob.created_at).toLocaleString("ja-JP")}に作成 ・{" "}
+                {formatJstDateTime(exportJob.created_at)}に作成 ・{" "}
                 {exportJob.visit_count}件の記録 / 写真{exportJob.photo_count}枚
               </p>
               <a

@@ -43,6 +43,7 @@ import { useRankEnabled } from "@/lib/useRankEnabled";
 import { useCategories } from "@/lib/useCategories";
 import { formatSpotMeta } from "@/lib/spotMeta";
 import { useSpotCache } from "@/lib/useSpotCache";
+import { formatJstDate } from "@/lib/datetime";
 
 type SortKey = "series" | "name" | "visited";
 type BrowseMode = "region" | "series";
@@ -605,7 +606,7 @@ export default function SpotsView({
                           </p>
                         </div>
                         <span className="shrink-0 text-xs text-gray-400">
-                          {new Date(plan.created_at).toLocaleDateString("ja-JP")}
+                          {formatJstDate(plan.created_at)}
                         </span>
                       </button>
                     </li>
@@ -783,7 +784,7 @@ export default function SpotsView({
                           </p>
                         </div>
                         <span className="shrink-0 text-xs text-gray-400">
-                          {new Date(review.created_at).toLocaleDateString("ja-JP")}
+                          {formatJstDate(review.created_at)}
                         </span>
                       </button>
                     </li>

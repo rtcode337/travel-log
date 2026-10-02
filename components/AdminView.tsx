@@ -49,6 +49,7 @@ import {
   type SpotType,
   type SpotTypeSettingKey,
 } from "@/lib/types";
+import { formatJstDateTime, jstDateStamp } from "@/lib/datetime";
 
 const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
 
@@ -1215,7 +1216,7 @@ export default function AdminView({
       }
 
       const now = new Date();
-      const dateKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+      const dateKey = jstDateStamp(now);
       const spotsCsv = buildCsv([
         ["name", "name_kana", "lat", "lng", "region", "rank", "series", "categories", "description"],
         ...manualSpots.map((s) => [
@@ -1235,7 +1236,7 @@ export default function AdminView({
         `# travel-log-data 還元用エクスポート`,
         ``,
         `- スポット種別: \`${typeKey}\``,
-        `- エクスポート日時: ${now.toLocaleString("ja-JP")}`,
+        `- エクスポート日時: ${formatJstDateTime(now)}`,
         `- 画面から手動追加された公開スポットと、画面から個別削除されたCSV由来の公開スポットの一覧。`,
         `  travel-log-data への還元(スポットCSVへの収録・exclude.txt への追記)に使う`,
         ``,
@@ -1268,7 +1269,7 @@ export default function AdminView({
               ``,
               ...deleted.map(
                 (d) =>
-                  `- ${d.name}(key: ${d.key ?? "未設定"}、${d.region}、lat: ${d.lat}、lng: ${d.lng}、削除日時: ${new Date(d.created_at).toLocaleString("ja-JP")})`
+                  `- ${d.name}(key: ${d.key ?? "未設定"}、${d.region}、lat: ${d.lat}、lng: ${d.lng}、削除日時: ${formatJstDateTime(d.created_at)})`
               ),
             ]),
         ``,
@@ -2239,7 +2240,7 @@ export default function AdminView({
                         <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
                           <p className="text-xs text-gray-400">
                             {f.flagged_by_name ?? "不明"} /{" "}
-                            {new Date(f.created_at).toLocaleString("ja-JP")}
+                            {formatJstDateTime(f.created_at)}
                           </p>
                           <button
                             type="button"

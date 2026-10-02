@@ -37,6 +37,7 @@ import CopyTextButton from "@/components/CopyTextButton";
 import GoogleSpotLinks from "@/components/GoogleSpotLinks";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
+import { formatJstDateTime } from "@/lib/datetime";
 
 /** 星アイコン(Google Material Symbols「star」/「star_border」、Apache License 2.0) */
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
@@ -52,13 +53,7 @@ function StarIcon({ filled, className }: { filled: boolean; className?: string }
 }
 
 function formatReviewDatetime(iso: string): string {
-  return new Date(iso).toLocaleString("ja-JP", {
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatJstDateTime(iso);
 }
 
 export default function SpotDetailModal({
