@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/apiError";
 import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { deleteVisitPhotos } from "@/lib/photos";
@@ -147,10 +148,7 @@ export async function POST(request: Request) {
     await client.query("commit");
   } catch (err) {
     await client.query("rollback").catch(() => {});
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "delete failed" },
-      { status: 500 }
-    );
+    return errorResponse(err, "スポットを削除できませんでした。", "delete-by-keys");
   } finally {
     client.release();
   }

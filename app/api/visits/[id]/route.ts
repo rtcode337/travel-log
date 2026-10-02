@@ -86,7 +86,9 @@ export async function PATCH(
         throw new Error("unknown photo path");
       }
     }
-  } catch {
+  } catch (e) {
+    // 書き込み権限や容量の不足はここに来る。利用者には400しか見えないので、原因はログに残す
+    console.error("写真の保存に失敗しました", e);
     await deleteVisitPhotos(newPhotoPaths);
     return NextResponse.json(
       { error: "写真の保存に失敗しました。" },

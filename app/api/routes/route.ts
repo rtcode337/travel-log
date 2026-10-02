@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/apiError";
 import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import {
@@ -196,10 +197,7 @@ export async function POST(request: Request) {
     await client.query("commit");
   } catch (err) {
     await client.query("rollback").catch(() => {});
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "insert failed" },
-      { status: 400 }
-    );
+    return errorResponse(err, "経路を登録できませんでした。", "routes POST");
   } finally {
     client.release();
   }

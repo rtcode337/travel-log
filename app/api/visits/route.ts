@@ -77,7 +77,9 @@ export async function POST(request: Request) {
     for (const dataUrl of inputPhotos as string[]) {
       photoPaths.push(await saveVisitPhoto(userId, dataUrl));
     }
-  } catch {
+  } catch (e) {
+    // 書き込み権限や容量の不足はここに来る。利用者には400しか見えないので、原因はログに残す
+    console.error("写真の保存に失敗しました", e);
     await deleteVisitPhotos(photoPaths);
     return NextResponse.json(
       { error: "写真の保存に失敗しました。" },

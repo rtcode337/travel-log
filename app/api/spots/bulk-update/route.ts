@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/apiError";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { SPOT_ADMIN_ROLES, type Spot, type SpotType } from "@/lib/types";
@@ -130,9 +131,6 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({ data: rows });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "update failed" },
-      { status: 400 }
-    );
+    return errorResponse(err, "スポットを更新できませんでした。", "bulk-update");
   }
 }

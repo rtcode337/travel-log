@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/apiError";
 import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getSpotTypeSetting, type SpotType } from "@/lib/types";
@@ -184,10 +185,7 @@ export async function DELETE(
     await client.query("commit");
   } catch (err) {
     await client.query("rollback").catch(() => {});
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "delete failed" },
-      { status: 500 }
-    );
+    return errorResponse(err, "スポット種別を削除できませんでした。", "spot-types DELETE");
   } finally {
     client.release();
   }
