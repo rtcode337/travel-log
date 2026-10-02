@@ -44,6 +44,7 @@ import { useCategories } from "@/lib/useCategories";
 import { formatSpotMeta } from "@/lib/spotMeta";
 import { useSpotCache } from "@/lib/useSpotCache";
 import { formatJstDate } from "@/lib/datetime";
+import LoadErrorBanner from "@/components/LoadErrorBanner";
 
 type SortKey = "series" | "name" | "visited";
 type BrowseMode = "region" | "series";
@@ -226,6 +227,8 @@ export default function SpotsView({
   // 絞る処理は表示側で行う)
   const [spotHides, setSpotHides] = useState<SpotHide[]>([]);
   const [loading, setLoading] = useState(true);
+  // 取得に失敗したとき、手元の一覧を空で上書きせずに理由を出す(「0件」に見せない)
+  const [dataError, setDataError] = useState<string | null>(null);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>("series");
@@ -302,40 +305,47 @@ export default function SpotsView({
   const managementTotalPages = Math.max(1, Math.ceil(managementTotal / SPOTS_PAGE_SIZE));
 
   const loadVisits = useCallback(async () => {
-    const { data } = await api.visits.list();
+    const { data, error } = await api.visits.list();
+    if (error) return setDataError(error.message);
     setVisits(data ?? []);
   }, []);
 
   const loadVisitPlans = useCallback(async () => {
-    const { data } = await api.visitPlans.list();
+    const { data, error } = await api.visitPlans.list();
+    if (error) return setDataError(error.message);
     setVisitPlans(data ?? []);
   }, []);
 
   // 現役のリストとアーカイブしたリストは別々に引く(APIは既定でアーカイブを返さない)。
   // 片方だけ取り直すと、アーカイブした直後に一覧と件数が食い違う
   const loadPlanLists = useCallback(async () => {
-    const [{ data }, { data: archived }] = await Promise.all([
+    const [{ data, error }, { data: archived, error: archivedError }] = await Promise.all([
       api.visitPlanLists.list(spotTypeKey),
       api.visitPlanLists.list(spotTypeKey, { archived: true }),
     ]);
+    const failed = error ?? archivedError;
+    if (failed) return setDataError(failed.message);
     setPlanLists(data ?? []);
     setArchivedPlanLists(archived ?? []);
   }, [spotTypeKey]);
 
   const loadMyReviews = useCallback(async () => {
-    const { data } = await api.reviews.listMine(spotTypeKey);
+    const { data, error } = await api.reviews.listMine(spotTypeKey);
+    if (error) return setDataError(error.message);
     setMyReviews(data ?? []);
   }, [spotTypeKey]);
 
   const loadSpotHides = useCallback(async () => {
-    const { data } = await api.spotHides.list();
+    const { data, error } = await api.spotHides.list();
+    if (error) return setDataError(error.message);
     setSpotHides(data ?? []);
   }, []);
 
   // 公開スポットはIndexedDBの明示ダウンロードキャッシュ(spotCache)から得るため、
   // ここでは自分の非公開スポットだけをAPIから取り直す
   const loadPrivateSpots = useCallback(async () => {
-    const { data } = await api.spots.list("private", { type: spotTypeKey });
+    const { data, error } = await api.spots.list("private", { type: spotTypeKey });
+    if (error) return setDataError(error.message);
     setPrivateSpots(data ?? []);
   }, [spotTypeKey]);
 
@@ -549,6 +559,21 @@ export default function SpotsView({
       <>
       <main className="mx-auto max-w-4xl p-4">
         <h1 className="mb-4 text-lg font-bold">スポット</h1>
+        {dataError && (
+          <LoadErrorBanner
+            message={dataError}
+            onRetry={() => {
+              setDataError(null);
+              loadPrivateSpots();
+              loadVisits();
+              loadVisitPlans();
+              loadPlanLists();
+              loadMyReviews();
+              loadSpotHides();
+            }}
+            className="mb-4"
+          />
+        )}
 
         {/* 狭い画面では2つの柱をタブで切り替える(管理画面と同じ考え方)。
             縦に積むと、自分の記録を全部スクロールしないと「探す」に届かない。

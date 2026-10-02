@@ -71,6 +71,7 @@ import VisitDateCalendar from "@/components/VisitDateCalendar";
 import SpotDownloadDialogs, { DownloadProgressDialog } from "@/components/SpotDownloadDialogs";
 import GoogleMapsRouteLink from "@/components/GoogleMapsRouteLink";
 import SpotBadge from "@/components/SpotBadge";
+import LoadErrorBanner from "@/components/LoadErrorBanner";
 import {
   CLUSTER_SOURCE_ID,
   FOCUS_SOURCE_ID,
@@ -1051,6 +1052,8 @@ export default function MapView({
   }, [overlayDownloadPrompt, toggleOverlayTypeKey]);
 
   const [loading, setLoading] = useState(true);
+  // 取得に失敗したとき、手元の一覧を空で上書きせずに理由を出す(「0件」に見せない)
+  const [dataError, setDataError] = useState<string | null>(null);
 
   const [role, setRole] = useState<Role | null>(null);
   const roleRef = useRef<Role | null>(null);
@@ -1502,15 +1505,18 @@ export default function MapView({
   }, [regionScope, spots, focusSpotId]);
 
   const loadVisits = async () => {
-    const { data } = await api.visits.list();
+    const { data, error } = await api.visits.list();
+    if (error) return setDataError(error.message);
     setVisits(data ?? []);
   };
   const loadPlanLists = async () => {
-    const { data } = await api.visitPlanLists.list(spotTypeKey);
+    const { data, error } = await api.visitPlanLists.list(spotTypeKey);
+    if (error) return setDataError(error.message);
     setPlanLists(data ?? []);
   };
   const loadHides = async () => {
-    const { data } = await api.spotHides.list();
+    const { data, error } = await api.spotHides.list();
+    if (error) return setDataError(error.message);
     setHiddenIds(new Set((data ?? []).map((h) => h.spot_id)));
   };
 
@@ -1558,7 +1564,8 @@ export default function MapView({
   // 公開スポットはIndexedDBの明示ダウンロードキャッシュ(spotCache)から得るため、
   // ここでは自分の非公開スポットだけをAPIから取り直す
   const loadPrivateSpots = useCallback(async () => {
-    const { data } = await api.spots.list("private", { type: spotTypeKey });
+    const { data, error } = await api.spots.list("private", { type: spotTypeKey });
+    if (error) return setDataError(error.message);
     setPrivateSpots(data ?? []);
   }, [spotTypeKey]);
 
@@ -3123,6 +3130,20 @@ export default function MapView({
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60">
           <p className="text-sm text-gray-600">読み込み中…</p>
         </div>
+      )}
+
+      {dataError && (
+        <LoadErrorBanner
+          message={dataError}
+          onRetry={() => {
+            setDataError(null);
+            loadPrivateSpots();
+            loadVisits();
+            loadPlanLists();
+            loadHides();
+          }}
+          className="absolute inset-x-2 top-16 z-30 mx-auto max-w-lg shadow"
+        />
       )}
 
       {/* 訪問予定リスト作成モード: 右側パネル(選択済みスポットの並び替え・削除・入力完了) */}

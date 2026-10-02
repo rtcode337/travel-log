@@ -150,6 +150,8 @@ export default function SpotDetailModal({
   const [hidden, setHidden] = useState(false);
   const [hideUpdating, setHideUpdating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // スポット自体を読めなかった理由(通信断・サーバーの失敗)。404はnullのまま「見つかりません」
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [moderating, setModerating] = useState(false);
   // 訪問履歴のサムネイルをタップしたときの拡大表示。**その訪問記録の写真をまとめて渡す**
   // ので、開いたあとスワイプで前後の写真へ移れる(下記 visitPhotoGroup)
@@ -188,14 +190,7 @@ export default function SpotDetailModal({
   );
 
   const load = useCallback(async () => {
-    const [
-      { data: spotData },
-      { data: visitsData },
-      { data: notesData },
-      { data: typesData },
-      { data: plansData },
-      { data: hidesData },
-    ] = await Promise.all([
+    const results = await Promise.all([
       api.spots.get(spotId),
       api.visits.list(spotId),
       api.visitNotes.list({ spotId }),
@@ -203,6 +198,23 @@ export default function SpotDetailModal({
       api.visitPlans.list(spotId),
       api.spotHides.list(spotId),
     ]);
+    const [
+      { data: spotData, error: spotError },
+      { data: visitsData },
+      { data: notesData },
+      { data: typesData },
+      { data: plansData },
+      { data: hidesData },
+    ] = results;
+    // 取得の失敗を「スポットが無い」「記録が無い」に見せない。404だけが本当に無いスポット
+    setLoadError(
+      spotError && spotError.status !== 404 ? spotError.message : null
+    );
+    setActionError(
+      results.slice(1).some((r) => r.error)
+        ? "一部を読み込めませんでした(訪問記録・訪問予定など)。閉じて開き直してください。"
+        : null
+    );
     setSpot(spotData ?? null);
     setVisits(visitsData ?? []);
     setVisitNotes(notesData ?? []);
@@ -241,7 +253,10 @@ export default function SpotDetailModal({
       ? await api.visitPlans.delete(spotId)
       : await api.visitPlans.create(spotId);
     setPlanUpdating(false);
-    if (error) return;
+    if (error) {
+      setActionError("訪問予定を変更できませんでした: " + error.message);
+      return;
+    }
     setPlanned((prev) => !prev);
     onVisitPlanChange?.();
   };
@@ -379,7 +394,11 @@ export default function SpotDetailModal({
 
   const deleteVisit = async (id: string) => {
     if (!confirm("この訪問記録を削除しますか?")) return;
-    await api.visits.delete(id);
+    const { error } = await api.visits.delete(id);
+    if (error) {
+      setActionError("訪問記録を削除できませんでした: " + error.message);
+      return;
+    }
     load();
     onVisitChange?.();
   };
@@ -388,7 +407,11 @@ export default function SpotDetailModal({
   // 呼び出し元へ知らせる必要はなく、この画面を読み直すだけでよい
   const deleteVisitNote = async (id: string) => {
     if (!confirm("この追記を削除しますか?")) return;
-    await api.visitNotes.delete(id);
+    const { error } = await api.visitNotes.delete(id);
+    if (error) {
+      setActionError("追記を削除できませんでした: " + error.message);
+      return;
+    }
     load();
   };
 
@@ -399,7 +422,10 @@ export default function SpotDetailModal({
       ? await api.spotHides.delete(spotId)
       : await api.spotHides.create(spotId);
     setHideUpdating(false);
-    if (error) return;
+    if (error) {
+      setActionError("非表示を切り替えられませんでした: " + error.message);
+      return;
+    }
     setHidden((prev) => !prev);
     onHideChange?.();
   };
@@ -444,6 +470,20 @@ export default function SpotDetailModal({
       >
         {loading ? (
           <p className="p-4 text-sm text-gray-500">読み込み中…</p>
+        ) : !spot && loadError ? (
+          <div className="p-4 text-sm">
+            <p className="text-red-600">読み込めませんでした: {loadError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                load();
+              }}
+              className="mt-2 rounded-lg border border-gray-300 px-3 py-1.5"
+            >
+              もう一度読み込む
+            </button>
+          </div>
         ) : !spot ? (
           <p className="p-4 text-sm text-gray-500">スポットが見つかりません。</p>
         ) : (
