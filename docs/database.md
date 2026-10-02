@@ -127,9 +127,14 @@ erDiagram
         text google_id UK "Googleログイン用"
         text role "admin / spot_admin / moderator / user"
         text nickname "口コミ等の表示名。未設定は「匿名」"
+        timestamptz sessions_valid_after "これより前に発行したセッションは無効"
     }
 ```
 
+- **`sessions_valid_after` はセッションの取り消し**。セッションは署名付きCookieで
+  サーバーに状態を持たないので、「すべての端末からログアウト」でこの列に現在時刻を入れ、
+  それより前に発行されたCookie(発行時刻`iat`を持つ)を受け付けないようにする。
+  null は制限なし。`iat` を持たない古いCookieは、この列が入った時点で無効になる
 - 既定では自由サインアップは無く、管理者が作成する。**最初の1アカウントだけ**セットアップ
   画面から作成でき、自動的に admin になる(`GOOGLE_AUTO_SIGNUP=true` の環境では、
   Googleログインで一般ユーザーが自動作成される)

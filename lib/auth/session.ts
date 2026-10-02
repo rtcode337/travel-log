@@ -10,6 +10,8 @@ export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30日
 interface SessionPayload {
   sub: string;
   exp: number;
+  /** 発行時刻(ミリ秒)。`users.sessions_valid_after`より前なら取り消し済み。古いCookieには無い */
+  iat?: number;
 }
 
 function getSecret(): string {
@@ -47,6 +49,7 @@ export async function createSessionToken(userId: string): Promise<string> {
   const payload: SessionPayload = {
     sub: userId,
     exp: Math.floor(Date.now() / 1000) + SESSION_MAX_AGE,
+    iat: Date.now(),
   };
   const payloadB64 = bytesToBase64Url(
     new TextEncoder().encode(JSON.stringify(payload))
@@ -62,7 +65,7 @@ export async function createSessionToken(userId: string): Promise<string> {
 
 export async function verifySessionToken(
   token: string | undefined | null
-): Promise<{ userId: string } | null> {
+): Promise<{ userId: string; issuedAt: number } | null> {
   if (!token) return null;
   const [payloadB64, sigB64] = token.split(".");
   if (!payloadB64 || !sigB64) return null;
@@ -88,7 +91,7 @@ export async function verifySessionToken(
       new TextDecoder().decode(base64UrlToBytes(payloadB64))
     ) as SessionPayload;
     if (payload.exp < Math.floor(Date.now() / 1000)) return null;
-    return { userId: payload.sub };
+    return { userId: payload.sub, issuedAt: payload.iat ?? 0 };
   } catch {
     return null;
   }

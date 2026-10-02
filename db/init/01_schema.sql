@@ -100,6 +100,8 @@ create table users (
   google_id     text unique,
   role          text not null default 'user' check (role in ('admin', 'spot_admin', 'moderator', 'user')),
   nickname      text, -- 口コミ等に表示する表示名(未設定なら「匿名」と表示。メールアドレスは出さない)
+  -- この時刻より前に発行したセッションは受け付けない(「すべての端末からログアウト」で入れる。nullは制限なし)
+  sessions_valid_after timestamptz,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
   constraint users_has_login_method check (password_hash is not null or google_id is not null)

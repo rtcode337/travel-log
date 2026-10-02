@@ -28,6 +28,17 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
 
   const currentType = spotTypes.find((t) => t.key === typeKey) ?? null;
 
+  const handleLogoutAll = async () => {
+    if (!confirm("ほかの端末も含めて、すべてのログインを終了しますか?")) return;
+    const { error } = await api.auth.logoutAll();
+    if (error) {
+      alert("ログアウトできませんでした: " + error.message);
+      return;
+    }
+    router.push("/login");
+    router.refresh();
+  };
+
   const handleLogout = async () => {
     await api.auth.logout();
     router.push("/login");
@@ -68,12 +79,22 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
             現在のモード: {currentType.label}
           </p>
         )}
-        <button
-          onClick={handleLogout}
-          className="mt-3 flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700"
-        >
-          🚪 ログアウト
-        </button>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700"
+          >
+            🚪 ログアウト
+          </button>
+          {/* ログアウトはこの端末のCookieを消すだけなので、他の端末に残ったログインや
+              漏れたCookieはこちらで取り消す */}
+          <button
+            onClick={handleLogoutAll}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700"
+          >
+            すべての端末からログアウト
+          </button>
+        </div>
       </section>
 
       {/* 管理者が作った自分の訪問記録のZIP。作成は管理画面からしかできないので、

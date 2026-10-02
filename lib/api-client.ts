@@ -115,6 +115,8 @@ export const api = {
         body: JSON.stringify({ email, password }),
       }),
     logout: () => request("/api/auth/logout", { method: "POST" }),
+    /** すべての端末のセッションを取り消す(この端末もログアウトする) */
+    logoutAll: () => request("/api/auth/logout-all", { method: "POST" }),
     me: () => request<{ id: string; role: Role; email: string }>("/api/auth/me"),
   },
   account: {

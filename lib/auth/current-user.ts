@@ -5,7 +5,7 @@ import type { Role } from "@/lib/types";
 
 /**
  * Cookieの署名が正しくても、そのユーザーが既にDBに存在しない(削除された/
- * DBを作り直した)場合はnullを返す。署名検証だけだと、DBを作り直した後も
+ * DBを作り直した)場合や、セッションが取り消し済みの場合はnullを返す。署名検証だけだと、DBを作り直した後も
  * 古いCookieが「有効なセッション」として通ってしまうため必ずDBを引く。
  */
 export async function getCurrentUserId(): Promise<string | null> {
@@ -14,9 +14,13 @@ export async function getCurrentUserId(): Promise<string | null> {
   const session = await verifySessionToken(token);
   if (!session) return null;
 
+  // 「すべての端末からログアウト」より前に発行されたセッションは取り消し済みとして扱う
   const { rows } = await query<{ id: string }>(
-    "select id from users where id = $1",
-    [session.userId]
+    `select id from users
+      where id = $1
+        and (sessions_valid_after is null
+             or sessions_valid_after <= to_timestamp($2::double precision / 1000))`,
+    [session.userId, session.issuedAt]
   );
   return rows[0]?.id ?? null;
 }
