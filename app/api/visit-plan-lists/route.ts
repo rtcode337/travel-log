@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import { pool, query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import type { VisitPlanList } from "@/lib/types";
-import { PLAN_LIST_COLUMNS } from "@/lib/visitPlanListSql";
+import { PLAN_LIST_COLUMNS, parsePlanSpotIds } from "@/lib/visitPlanListSql";
 import { normalizePlanDates } from "@/lib/visitPlanListDates";
 
 /**
@@ -65,15 +65,16 @@ export async function POST(request: Request) {
       : null;
   // 日付は未指定なら「訪問日未定」(両方null)。終了日だけの指定は断る
   const dates = normalizePlanDates(body ?? {});
-  const spotIds: string[] = Array.isArray(body?.spot_ids)
-    ? body.spot_ids.filter((s: unknown): s is string => typeof s === "string")
-    : [];
+  const ordered = parsePlanSpotIds(body?.spot_ids);
 
   if (typeof type !== "string" || !title) {
     return NextResponse.json(
       { error: "type と title は必須です。" },
       { status: 400 }
     );
+  }
+  if (!ordered) {
+    return NextResponse.json({ error: "spot_ids が不正です。" }, { status: 400 });
   }
   if (!dates.ok) {
     return NextResponse.json({ error: dates.error }, { status: 400 });
@@ -91,28 +92,40 @@ export async function POST(request: Request) {
     );
   }
 
-  const { rows } = await query<{ id: string }>(
-    `insert into visit_plan_lists
-       (user_id, spot_type_id, title, description, start_date, end_date)
-     values ($1, $2, $3, $4, $5, $6)
-     returning id`,
-    [userId, spotTypeId, title, description, dates.start, dates.end]
-  );
-  const listId = rows[0].id;
-
-  // 重複を除いた並び順のままseqを振って経由スポットを登録する。
-  // 存在するスポットだけを入れる(defensive)。地図で別スポット種別を重ねて追加できる
-  // ため種別は問わない(itemsテーブルも種別非依存。リスト自体のspot_type_idは所属の目印)
-  const ordered = spotIds.filter((s, i) => spotIds.indexOf(s) === i);
-  if (ordered.length > 0) {
-    await query(
-      `insert into visit_plan_list_items (list_id, spot_id, seq)
-       select $1, s.id, ord.seq
-       from unnest($2::uuid[]) with ordinality as ord(spot_id, seq)
-       join spots s on s.id = ord.spot_id
-       on conflict (list_id, spot_id) do nothing`,
-    [listId, ordered]
+  // リストと経由スポットは1つのトランザクションで作る
+  // (経由スポットの登録で失敗したとき、中身の無いリストだけが残らないように)
+  const client = await pool.connect();
+  let listId: string;
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<{ id: string }>(
+      `insert into visit_plan_lists
+         (user_id, spot_type_id, title, description, start_date, end_date)
+       values ($1, $2, $3, $4, $5, $6)
+       returning id`,
+      [userId, spotTypeId, title, description, dates.start, dates.end]
     );
+    listId = rows[0].id;
+
+    // 重複を除いた並び順のままseqを振って経由スポットを登録する。
+    // 存在するスポットだけを入れる(defensive)。地図で別スポット種別を重ねて追加できる
+    // ため種別は問わない(itemsテーブルも種別非依存。リスト自体のspot_type_idは所属の目印)
+    if (ordered.length > 0) {
+      await client.query(
+        `insert into visit_plan_list_items (list_id, spot_id, seq)
+         select $1, s.id, ord.seq
+         from unnest($2::uuid[]) with ordinality as ord(spot_id, seq)
+         join spots s on s.id = ord.spot_id
+         on conflict (list_id, spot_id) do nothing`,
+        [listId, ordered]
+      );
+    }
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
 
   const created = await query<VisitPlanList>(
