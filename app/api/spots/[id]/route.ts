@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { deleteVisitPhotos } from "@/lib/photos";
+import { collectVisitPhotoPaths } from "@/lib/visitPhotoPaths";
 import { MODERATION_ROLES, SPOT_ADMIN_ROLES, type Role, type Spot } from "@/lib/types";
 import { parseRank } from "@/lib/rank";
 
@@ -139,22 +140,36 @@ export async function DELETE(
   }
 
   // スポット削除はvisitsへカスケードするため、先に全ユーザー分の写真パスを
-  // 集めておき、削除成功後にファイルも消す(孤児ファイルを残さない)
-  const { rows: photoRows } = await query<{ photos: string[] }>(
-    "select photos from visits where spot_id = $1",
-    [id]
-  );
-  // CSV由来の公開スポットの個別削除は「削除の墓標」に記録し、travel-log-data側の
-  // exclude.txtへ追記する候補として還元用エクスポートに出す(手動追加(manual)は
-  // travel-log-data側に元の行が無いため記録不要。purge等の一括削除はこのAPIを
-  // 通らないため記録されない — travel-log-data側発の操作なのでそれで正しい)
-  await query(
-    `insert into spot_deletions (spot_type_id, key, name, lat, lng, region, deleted_by)
-     select spot_type_id, key, name, lat, lng, region, $2
-       from spots where id = $1 and status = 'published' and origin = 'csv'`,
-    [id, user.id]
-  );
-  await query("delete from spots where id = $1", [id]);
-  await deleteVisitPhotos(photoRows.flatMap((r) => r.photos));
+  // (追記の写真も)集めておき、削除成功後にファイルも消す(孤児ファイルを残さない)。
+  // 墓標と削除は1つのトランザクションにする —— 削除だけ失敗すると、まだあるスポットが
+  // 墓標に載って還元用エクスポートの候補に出てしまう
+  const client = await pool.connect();
+  let photoPaths: string[] = [];
+  try {
+    await client.query("begin");
+    photoPaths = await collectVisitPhotoPaths(
+      client,
+      "select id from visits where spot_id = $1",
+      [id]
+    );
+    // CSV由来の公開スポットの個別削除は「削除の墓標」に記録し、travel-log-data側の
+    // exclude.txtへ追記する候補として還元用エクスポートに出す(手動追加(manual)は
+    // travel-log-data側に元の行が無いため記録不要。purge等の一括削除はこのAPIを
+    // 通らないため記録されない — travel-log-data側発の操作なのでそれで正しい)
+    await client.query(
+      `insert into spot_deletions (spot_type_id, key, name, lat, lng, region, deleted_by)
+       select spot_type_id, key, name, lat, lng, region, $2
+         from spots where id = $1 and status = 'published' and origin = 'csv'`,
+      [id, user.id]
+    );
+    await client.query("delete from spots where id = $1", [id]);
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  await deleteVisitPhotos(photoPaths);
   return NextResponse.json({ ok: true });
 }

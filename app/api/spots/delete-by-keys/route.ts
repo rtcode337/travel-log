@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { pool, query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { deleteVisitPhotos } from "@/lib/photos";
+import { collectVisitPhotoPaths } from "@/lib/visitPhotoPaths";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
 // (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
@@ -126,18 +127,18 @@ export async function POST(request: Request) {
   }
 
   const client = await pool.connect();
-  let photoRows: { photos: string[] }[] = [];
+  let photoPaths: string[] = [];
   let deletedCount = 0;
   try {
     await client.query("begin");
     // 写真ファイルはvisitsがカスケードで消える前に集めておく(purgeと同じ手順)
-    const photoResult = await client.query<{ photos: string[] }>(
-      `select v.photos from visits v
+    photoPaths = await collectVisitPhotoPaths(
+      client,
+      `select v.id from visits v
        join spots s on v.spot_id = s.id
        where ${matchCondition("s.")}`,
       [spotType.id, keys]
     );
-    photoRows = photoResult.rows;
     const { rowCount } = await client.query(
       `delete from spots where ${matchCondition("")}`,
       [spotType.id, keys]
@@ -154,6 +155,6 @@ export async function POST(request: Request) {
     client.release();
   }
 
-  await deleteVisitPhotos(photoRows.flatMap((r) => r.photos));
+  await deleteVisitPhotos(photoPaths);
   return NextResponse.json({ data: { deletedCount, notFoundKeys } });
 }

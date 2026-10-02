@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { getSpotTypeSetting, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { deleteVisitPhotos } from "@/lib/photos";
+import { collectVisitPhotoPaths } from "@/lib/visitPhotoPaths";
 import { parseSeriesStyles, SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
 import { CATEGORIES_SETTING_KEY, parseCategories } from "@/lib/category";
 import {
@@ -168,16 +169,16 @@ export async function DELETE(
   }
 
   const client = await pool.connect();
-  let photoRows: { photos: string[] }[] = [];
+  let photoPaths: string[] = [];
   try {
     await client.query("begin");
-    const photoResult = await client.query<{ photos: string[] }>(
-      `select v.photos from visits v
+    photoPaths = await collectVisitPhotoPaths(
+      client,
+      `select v.id from visits v
        join spots s on v.spot_id = s.id
        where s.spot_type_id = $1`,
       [id]
     );
-    photoRows = photoResult.rows;
     await client.query("delete from spots where spot_type_id = $1", [id]);
     await client.query("delete from spot_types where id = $1", [id]);
     await client.query("commit");
@@ -191,6 +192,6 @@ export async function DELETE(
     client.release();
   }
 
-  await deleteVisitPhotos(photoRows.flatMap((r) => r.photos));
+  await deleteVisitPhotos(photoPaths);
   return NextResponse.json({ data: { ok: true } });
 }
