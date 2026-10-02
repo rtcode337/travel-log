@@ -152,25 +152,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify(spot),
       }),
-    /**
-     * まとめて追加する。`registerSeries`/`registerCategories`を立てると、
-     * **一覧にまだ無い値をその種別のシリーズ設定・カテゴリ一覧へ足す**
-     * (spot_admin/adminのみ。周辺を探すからの追加で使う)
-     */
-    createMany: (
-      spots: unknown[],
-      type: string,
-      opts?: { registerSeries?: boolean; registerCategories?: boolean }
-    ) =>
-      request<Spot[]>(
-        `/api/spots?type=${encodeURIComponent(type)}${
-          opts?.registerSeries ? "&register_series=1" : ""
-        }${opts?.registerCategories ? "&register_categories=1" : ""}`,
-        {
-          method: "POST",
-          body: JSON.stringify(spots),
-        }
-      ),
+    /** まとめて追加する(CSVインポートが1,000件ずつ送る) */
+    createMany: (spots: unknown[], type: string) =>
+      request<Spot[]>(`/api/spots?type=${encodeURIComponent(type)}`, {
+        method: "POST",
+        body: JSON.stringify(spots),
+      }),
     update: (id: string, spot: unknown) =>
       request<Spot>(`/api/spots/${id}`, {
         method: "PATCH",
@@ -405,13 +392,9 @@ export const api = {
   /** 訪問記録への追記(訪問回数は増やさず、同じ記録にぶら下がる) */
   visitNotes: {
     // spot_id を渡すと、そのスポットの自分の訪問記録すべての追記が古い順で返る
-    list: (params: { spotId?: string; visitId?: string }) =>
+    list: (params: { spotId: string }) =>
       request<VisitNote[]>(
-        `/api/visit-notes?${
-          params.spotId
-            ? `spot_id=${encodeURIComponent(params.spotId)}`
-            : `visit_id=${encodeURIComponent(params.visitId ?? "")}`
-        }`
+        `/api/visit-notes?spot_id=${encodeURIComponent(params.spotId)}`
       ),
     create: (visitId: string, note: { body: string | null; photos: string[] }) =>
       request<VisitNote>("/api/visit-notes", {

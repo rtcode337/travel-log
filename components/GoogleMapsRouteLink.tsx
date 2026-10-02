@@ -24,11 +24,9 @@ export function DirectionsIcon({ className }: { className?: string }) {
  */
 export default function GoogleMapsRouteLink({
   points,
-  label = "Google マップで経路を表示",
 }: {
   /** 巡る順に並んだ地点(スポットの座標) */
   points: { lat: number; lng: number }[];
-  label?: string;
 }) {
   const origin = useRouteOrigin();
   const route = buildGoogleMapsRouteUrl(points, origin);
@@ -42,7 +40,7 @@ export default function GoogleMapsRouteLink({
         className="inline-flex items-center gap-1.5 text-sm text-blue-600 underline"
       >
         <DirectionsIcon className="size-4 shrink-0" />
-        {label}
+        Google マップで経路を表示
       </a>
       {route.omittedCount > 0 && (
         <p className="mt-1 text-xs text-gray-500">

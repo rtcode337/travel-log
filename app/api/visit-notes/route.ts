@@ -18,7 +18,7 @@ export const maxDuration = 60;
  * **訪問記録(`GET /api/visits`)に相乗りさせない**のは、あちらが地図・一覧のために
  * 全件を読む口だから —— 追記の本文と写真パスまで載せると、スポット詳細でしか
  * 使わないデータを毎回全件ぶん運ぶことになる。こちらは `spot_id`(そのスポットの
- * 訪問記録ぶん全部)か `visit_id`(1件ぶん)で引く。
+ * 訪問記録ぶん全部)で引く。
  */
 export async function GET(request: Request) {
   const userId = await getCurrentUserId();
@@ -28,12 +28,8 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const spotId = searchParams.get("spot_id");
-  const visitId = searchParams.get("visit_id");
-  if (!spotId && !visitId) {
-    return NextResponse.json(
-      { error: "spot_id または visit_id が必要です。" },
-      { status: 400 }
-    );
+  if (!spotId) {
+    return NextResponse.json({ error: "spot_id が必要です。" }, { status: 400 });
   }
 
   // 古い順(書いた順に読める)。表示もこの順で元の記録の下に積む
@@ -42,10 +38,9 @@ export async function GET(request: Request) {
        from visit_notes n
        join visits v on v.id = n.visit_id
       where v.user_id = $1
-        and ($2::uuid is null or v.spot_id = $2)
-        and ($3::uuid is null or n.visit_id = $3)
+        and v.spot_id = $2
       order by n.created_at asc`,
-    [userId, spotId, visitId]
+    [userId, spotId]
   );
 
   return NextResponse.json({ data: rows });
