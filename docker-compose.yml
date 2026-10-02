@@ -33,7 +33,7 @@ services:
       # 他のサービスと同じ /data にマウントするため、既定の位置からも移している
       PGDATA: /data/db/18/docker
     volumes:
-      # db/initはマウントしない。スキーマ本体(01_schema.sql)はinitサービスが流す
+      # db/initはマウントしない。スキーマ本体(01_schema.sql)はappが起動時に流す
       # (git管理下のdb/initをコンテナに触らせるとホスト側のパーミッションが変わり、
       #  スキーマを更新したときにgit pullが失敗するようになるため)
       # 所有者はpostgresのエントリポイント(rootで起動して自分で揃える)が調整する

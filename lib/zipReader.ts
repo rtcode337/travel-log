@@ -108,7 +108,7 @@ export function zipText(entries: ZipEntries, path: string): string | null {
 
 /** travel-log-data形式の1フォルダ(`<キー>/settings.json`がある場所) */
 export interface ZipTypeFolder {
-  /** 書庫の中での前置き(`"tazuna_meals/"`。書庫の直下なら空文字) */
+  /** 書庫の中での前置き(`"sample_type/"`。書庫の直下なら空文字) */
   prefix: string;
   key: string;
   label: string;
