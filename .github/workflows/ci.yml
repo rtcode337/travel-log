@@ -2,7 +2,7 @@
 # docker-publish はイメージを作るだけで、失敗しても PR の側には出ないため、
 # 依存更新(Dependabot)や手直しの PR はここが通ってからマージする。
 #
-# テストは無いので、通すのは next build まで —— 型エラーと依存の不整合はここで落ちる。
+# 通すのは next build(型エラーと依存の不整合はここで落ちる)と、スキーマの適用の検査。
 # 公開リポジトリなので標準ランナーの実行時間は無料枠の外。
 name: ci
 
@@ -37,13 +37,46 @@ jobs:
       # DB もクラウドの鍵も要らない(next build は静的解析とバンドルまで)
       - run: npm run build
 
+  # スキーマ本体+マイグレーションを空のDBに2回当て(2回目は何も当たらないこと)、
+  # Supabase 向けの一括SQL(scripts/bootstrap-sql.sh)と同じ状態になるかを突き合わせる。
+  # どちらも崩れても build では気づけず、本番の起動時や貼り付けたときに初めて出る
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # docker-compose.yml の db と合わせる
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: travel_log
+          POSTGRES_PASSWORD: travel_log
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U travel_log"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      - run: sh scripts/bootstrap-sql_test.sh
+        env:
+          PSQL: psql
+          PGHOST: localhost
+          PGPASSWORD: travel_log
+          MIGRATE_HOST: localhost
+
   # Dependabot の PR のうち、破壊的でない更新(patch / minor)を自動でマージする。
   #
   # needs が唯一のゲート —— ブランチ保護は掛けていない運用なので、
   # 「CI が通ってからマージする」をジョブの依存関係で表している。
   # major は自動で入れない(壊れ方が読めないので人が見る)。
   auto-merge:
-    needs: build
+    needs: [build, schema]
     if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:

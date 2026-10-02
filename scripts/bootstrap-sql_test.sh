@@ -8,11 +8,28 @@
 #
 #   docker compose -f docker-compose.dev.yml up -d db   # 先に起動しておく
 #   sh scripts/bootstrap-sql_test.sh
+#
+# CI(.github/workflows/ci.yml)のように、composeを使わず直接つながるPostgresで流すときは
+# PGHOST などの接続先を環境に入れたうえで `PSQL=psql MIGRATE_HOST=<ホスト> sh …` とする
+# (MIGRATE_HOST は scripts/migrate.mjs から見たDBのホスト。省略時は compose の db)。
+# マイグレーションを2回流し、2回目に何も当たらないこと(冪等であること)も確かめる。
 set -eu
 
 cd "$(dirname "$0")/.."
 DC="docker compose -f docker-compose.dev.yml"
-PSQL="$DC exec -T db psql -U travel_log"
+PSQL="${PSQL:-$DC exec -T db psql} -U travel_log"
+MIGRATE_HOST="${MIGRATE_HOST:-}"
+
+# アプリの起動時と同じ経路(scripts/migrate.mjs)で当てる。出力は適用の記録
+migrate() {
+  if [ -n "$MIGRATE_HOST" ]; then
+    DATABASE_URL="postgres://travel_log:travel_log@$MIGRATE_HOST:5432/$1" node scripts/migrate.mjs
+  else
+    $DC run --rm --no-deps \
+      -e DATABASE_URL="postgres://travel_log:travel_log@db:5432/$1" \
+      app node scripts/migrate.mjs
+  fi
+}
 TMP="${TMPDIR:-/tmp}/travel-log-bootstrap-check"
 mkdir -p "$TMP"
 
@@ -24,10 +41,12 @@ $PSQL -d postgres -q \
 echo "2. bootstrap-sql.sh の出力を当てる"
 sh scripts/bootstrap-sql.sh | $PSQL -d bootstrap_check -q -v ON_ERROR_STOP=1
 
-echo "3. アプリの起動時と同じ経路で当てる"
-$DC run --rm --no-deps \
-  -e DATABASE_URL=postgres://travel_log:travel_log@db:5432/init_check \
-  app node scripts/migrate.mjs >/dev/null
+echo "3. アプリの起動時と同じ経路で当てる(2回。2回目は何も当たらないはず)"
+migrate init_check >/dev/null
+if ! migrate init_check | grep -q "applied=0,"; then
+  echo "NG: 2回目のマイグレーションで適用されたものがある(冪等でない)" >&2
+  exit 1
+fi
 
 echo "4. 突き合わせ"
 dump() {
