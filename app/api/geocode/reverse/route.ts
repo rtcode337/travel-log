@@ -104,13 +104,20 @@ export async function GET(request: Request) {
       zoom: "14",
     });
 
-  const res = await fetch(url, {
-    headers: {
-      // Nominatimの利用ポリシー上、識別可能なUser-Agentが必要
-      "User-Agent": "travel-log-personal-app/1.0",
-      Accept: "application/json",
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        // Nominatimの利用ポリシー上、識別可能なUser-Agentが必要
+        "User-Agent": "travel-log-personal-app/1.0",
+        Accept: "application/json",
+      },
+      // 応答しないときに画面を待たせ続けない
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return NextResponse.json({ error: "逆ジオコーディングに失敗しました" }, { status: 504 });
+  }
   if (!res.ok) {
     return NextResponse.json({ error: "逆ジオコーディングに失敗しました" }, { status: 502 });
   }

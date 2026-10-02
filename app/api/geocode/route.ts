@@ -36,13 +36,20 @@ export async function GET(request: Request) {
 
   const url = "https://nominatim.openstreetmap.org/search?" + params;
 
-  const res = await fetch(url, {
-    headers: {
-      // Nominatimの利用ポリシー上、識別可能なUser-Agentが必要
-      "User-Agent": "travel-log-personal-app/1.0",
-      Accept: "application/json",
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        // Nominatimの利用ポリシー上、識別可能なUser-Agentが必要
+        "User-Agent": "travel-log-personal-app/1.0",
+        Accept: "application/json",
+      },
+      // 応答しないときに画面を待たせ続けない
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return NextResponse.json({ error: "検索に失敗しました" }, { status: 504 });
+  }
   if (!res.ok) {
     return NextResponse.json({ error: "検索に失敗しました" }, { status: 502 });
   }

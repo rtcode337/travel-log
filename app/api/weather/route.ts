@@ -43,6 +43,8 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX = 2000;
 /** 上流へ連続で投げない間隔。無料の公開APIなので自分で間隔を空ける */
 const MIN_UPSTREAM_INTERVAL_MS = 250;
+/** 上流の1回の問い合わせを待つ上限 */
+const UPSTREAM_TIMEOUT_MS = 10_000;
 
 const cache = new Map<string, { at: number; weather: DailyWeather | null }>();
 let lastUpstreamAt = 0;
@@ -136,6 +138,9 @@ async function fetchUpstream(
         "User-Agent": "travel-log-personal-app/1.0",
         Accept: "application/json",
       },
+      // 上流へは1本ずつ順番に投げているので、1本が応答しないと後ろに並んだ全員の
+      // 天気が止まる。待つのは一定時間まで(打ち切りは呼び出し側で「予報なし」になる)
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
     if (!res.ok) return empty();
     const body: unknown = await res.json();

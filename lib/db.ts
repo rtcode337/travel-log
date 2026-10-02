@@ -26,7 +26,19 @@ export const pool =
   new Pool({
     connectionString: process.env.DATABASE_URL,
     max: poolMax,
+    // 接続の空きを待つ上限。DBが落ちている・プールが尽きているときに、
+    // リクエストが応答の無いまま積み上がらないようにする
+    connectionTimeoutMillis: 10_000,
   });
+
+// 待機中の接続がDBの再起動・ネットワーク断で切れると、Poolが'error'を発行する。
+// 受け手が居ないとNodeのプロセスごと落ちる(走っていたエクスポートも巻き込む)ので、
+// ログに残すだけにする。切れた接続はPoolが捨て、次の問い合わせで張り直す
+if (!globalForPg.pgPool) {
+  pool.on("error", (err) => {
+    console.error("pg: 待機中の接続でエラーが起きました", err);
+  });
+}
 
 if (process.env.NODE_ENV !== "production") {
   globalForPg.pgPool = pool;
