@@ -55,7 +55,7 @@ x-run-as: &run-as "10001:10001"
 # すべて無効になる(再ログインすれば直る)。
 x-session-secret: &session-secret ""
 # Googleでログイン(任意)。空のままならメールログインのみ。
-# 取得方法・リダイレクトURIの設定はREADMEの「Googleログインの設定」参照
+# 取得方法・リダイレクトURIの設定はdocs/operations.md の「Googleログインの設定」参照
 x-google-client-id: &google-client-id ""
 x-google-client-secret: &google-client-secret ""
 # 公開URL(任意。例: "https://travel.example.com")。
