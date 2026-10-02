@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import { pool, query } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth/current-user";
 import { deleteVisitPhotos, saveVisitPhoto } from "@/lib/photos";
 import { MAX_PHOTOS_PER_VISIT } from "@/lib/visitPhoto";
+import { collectVisitPhotoPaths } from "@/lib/visitPhotoPaths";
 import { PHOTOS_DISABLED_MESSAGE, photosEnabled } from "@/lib/features";
 import type { Visit } from "@/lib/types";
 
@@ -119,10 +120,27 @@ export async function DELETE(
   }
 
   const { id } = await params;
-  const { rows } = await query<{ photos: string[] }>(
-    "delete from visits where id = $1 and user_id = $2 returning photos",
-    [id, userId]
-  );
-  await deleteVisitPhotos(rows.flatMap((r) => r.photos));
+  // 追記(visit_notes)はカスケードで消えるので、写真のパスは消す前に集める
+  const client = await pool.connect();
+  let photoPaths: string[] = [];
+  try {
+    await client.query("begin");
+    photoPaths = await collectVisitPhotoPaths(
+      client,
+      "select id from visits where id = $1 and user_id = $2",
+      [id, userId]
+    );
+    await client.query("delete from visits where id = $1 and user_id = $2", [
+      id,
+      userId,
+    ]);
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  await deleteVisitPhotos(photoPaths);
   return NextResponse.json({ ok: true });
 }

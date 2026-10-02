@@ -61,3 +61,15 @@ export async function deleteExportZip(relPath: string): Promise<void> {
     // 既に無い・権限が無い等は無視する(行を消せなくなるほうが困る)
   }
 }
+
+/**
+ * あるユーザーのZIPを置き場ごと消す(ZIPは`<ユーザーID>/<ジョブID>.zip`に置く)。
+ * 行の`file_path`から消すだけでは、保存の直後に落ちて行へ書き戻せなかったZIPが残るので、
+ * アカウントを消すときはディレクトリごと消す。存在しなくてもエラーにしない
+ */
+export async function deleteUserExportZips(userId: string): Promise<void> {
+  const absPath = resolveExportPath(userId);
+  // 置き場そのもの(空のID)は消さない
+  if (!absPath || absPath === path.resolve(EXPORTS_DIR)) return;
+  await fs.rm(absPath, { recursive: true, force: true }).catch(() => {});
+}

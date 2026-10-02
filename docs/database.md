@@ -133,11 +133,13 @@ erDiagram
 - 既定では自由サインアップは無く、管理者が作成する。**最初の1アカウントだけ**セットアップ
   画面から作成でき、自動的に admin になる(`GOOGLE_AUTO_SIGNUP=true` の環境では、
   Googleログインで一般ユーザーが自動作成される)
-- アカウント削除(`DELETE /api/account`)で行を消すと、`on delete cascade` の訪問記録・訪問予定・
+- アカウント削除(本人の`DELETE /api/account`・管理者の`DELETE /api/admin/users/[id]`。
+  どちらも`lib/deleteUserAccount.ts`)で行を消すと、`on delete cascade` の訪問記録・訪問予定・
   訪問予定リスト・口コミ・非表示設定・エクスポートジョブが一緒に消える
   (訪問記録にぶら下がる追記も `visits` 経由で消える)。
   スポットとルートは `created_by` が `on delete set null` なので**残る**
-  (非公開スポットだけはAPI側で明示的に削除する)
+  (非公開スポットだけはAPI側で明示的に削除する)。写真ファイル(追記の写真も)と
+  エクスポートZIPの実体も、行が消える前に集めて消す
 
 ### スポットとルート
 

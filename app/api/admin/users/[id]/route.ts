@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
+import { deleteUserAccount, LastAdminError } from "@/lib/deleteUserAccount";
 import type { AppUser, Role } from "@/lib/types";
+
+// 写真が多いユーザーではファイルの削除に時間がかかるため(/api/accountと同じ)
+export const maxDuration = 60;
 
 const ROLES: Role[] = ["admin", "spot_admin", "moderator", "user"];
 
@@ -109,23 +113,23 @@ export async function DELETE(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
+  // 写真・ZIP・非公開スポットの後始末まで本人の退会と同じ処理で消す。
   // 最後の管理者を削除するとadmin専用画面に誰も入れなくなるため防ぐ
   // (ロール変更時の同種のガードと揃えている)
-  if (target.role === "admin") {
-    const { rows } = await query<{ count: string }>(
-      "select count(*) from users where role = 'admin' and id != $1",
-      [id]
-    );
-    if (Number(rows[0].count) === 0) {
+  try {
+    await deleteUserAccount(id);
+  } catch (err) {
+    if (err instanceof LastAdminError) {
       return NextResponse.json(
         { error: "最後の管理者は削除できません。" },
         { status: 400 }
       );
     }
+    console.error("ユーザーの削除に失敗しました", err);
+    return NextResponse.json(
+      { error: "ユーザーの削除に失敗しました。" },
+      { status: 500 }
+    );
   }
-
-  // visits/visit_plans/reviewsはon delete cascadeで一緒に消え、
-  // spots.created_byはon delete set nullでスポット自体は残る(db/init/01_schema.sql参照)
-  await query("delete from users where id = $1", [id]);
   return NextResponse.json({ data: { ok: true } });
 }
