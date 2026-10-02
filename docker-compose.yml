@@ -71,8 +71,6 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # Googleでログインした人を一般ユーザーとして自動登録するか(既定は登録しない。.env.example参照)
       GOOGLE_AUTO_SIGNUP: ${GOOGLE_AUTO_SIGNUP:-}
-      # ユーザーごとの写真の容量の上限(MB。未設定は1024、0で上限なし。lib/photoQuota.ts)
-      PHOTO_QUOTA_MB: ${PHOTO_QUOTA_MB:-}
       NODE_ENV: production
       # 訪問記録の写真置き場(lib/photoStorage.ts)。DBには相対パスのみ保存される
       PHOTOS_DIR: /data/photos

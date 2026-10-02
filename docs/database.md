@@ -101,6 +101,7 @@ erDiagram
     app_settings {
         boolean singleton PK "check(singleton) で常に1行"
         uuid active_spot_type_id FK "ルート(/)のリダイレクト先"
+        integer photo_quota_mb "ユーザーごとの写真の容量の上限(MB。0は上限なし)"
     }
     spot_types ||--o{ spot_type_settings : ""
     app_settings }o--|| spot_types : ""
@@ -111,7 +112,8 @@ erDiagram
   管理者限定閲覧のような boolean のほか、`series_styles`・`categories`・
   `region_scope` など JSON・文字列値のキーもある)
 - 画面・API の対象種別は常に URL の `/[type]/...` で決まる。`app_settings` は
-  「ログイン後に自動で開く種別」を決めるためだけの 1 行
+  アプリ全体の設定の 1 行で、「ログイン後に自動で開く種別」と「ユーザーごとの写真の
+  容量の上限」(`photo_quota_mb`。既定 102400=100GB、0 は上限なし。管理画面で変える)を持つ
 - **種別の並びは `sort_order` → `created_at`**(`SPOT_TYPE_ORDER`)。管理画面の
   「別のスポット種別の管理」からドラッグで並び替えると、`POST /api/spot-types/order`
   が渡された順で 0 からの連番に振り直す(一覧に出ていない種別は末尾へ寄せる)

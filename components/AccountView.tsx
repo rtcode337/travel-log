@@ -109,7 +109,7 @@ export default function AccountView({ typeKey }: { typeKey: string }) {
         </div>
       </section>
 
-      {/* 写真の使用量。上限は環境ごと(PHOTO_QUOTA_MB)で、超える追加は保存のときに断られる。
+      {/* 写真の使用量。上限は管理画面で決め(app_settings.photo_quota_mb)、超える追加は保存のときに断られる。
           どれだけ使っているかが分からないと、断られて初めて上限を知ることになる */}
       {photoUsage && (
         <section className="mb-4 rounded-xl border border-gray-200 bg-white p-4">

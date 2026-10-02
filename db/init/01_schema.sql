@@ -81,6 +81,8 @@ create table spot_type_settings (
 create table app_settings (
   singleton           boolean primary key default true check (singleton),
   active_spot_type_id uuid not null references spot_types (id),
+  -- ユーザーごとの写真の容量の上限(MB。0は上限なし。管理画面で変える。lib/photoQuota.ts)
+  photo_quota_mb      integer not null default 102400 check (photo_quota_mb >= 0),
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );

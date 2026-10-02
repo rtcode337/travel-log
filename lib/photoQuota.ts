@@ -1,11 +1,13 @@
 import { formatBytes } from "@/lib/bytes";
+import { query } from "@/lib/db";
 import { photoStorage } from "@/lib/photoStorage";
 
 /**
  * ユーザーごとの写真の容量の上限と使用量(サーバー専用)。
  *
- * 上限は環境変数`PHOTO_QUOTA_MB`(MB、既定1024=1GB。**0で上限なし**)。保存先の容量は
- * 全員で分け合うもので、1人が際限なく足すと他の人の写真まで保存できなくなるため。
+ * 上限は**管理画面で変える**アプリ全体の設定(`app_settings.photo_quota_mb`。MB、既定102400=100GB。
+ * **0で上限なし**)。保存先の容量は全員で分け合うもので、1人が際限なく足すと他の人の
+ * 写真まで保存できなくなるため。環境変数にしないのは、変えるたびに再起動が要るから。
  *
  * **使用量はDBに数を持たず、保存先の実物を数える**(`photoStorage.usage`)。数を持つと
  * 保存・削除のたびに合わせ直す必要があり、ずれたら直す手段が無い。導入前に保存した
@@ -14,12 +16,22 @@ import { photoStorage } from "@/lib/photoStorage";
 
 const MB = 1024 * 1024;
 
+/** 列が読めないとき(行が無いなど)の上限。スキーマの既定と同じ */
+const DEFAULT_QUOTA_MB = 102400;
+
+/** 上限(MB)。0は上限なし */
+export async function getPhotoQuotaMb(): Promise<number> {
+  const { rows } = await query<{ photo_quota_mb: number }>(
+    "select photo_quota_mb from app_settings"
+  );
+  return rows[0]?.photo_quota_mb ?? DEFAULT_QUOTA_MB;
+}
+
 /** 上限(バイト)。nullは上限なし */
-export const PHOTO_QUOTA_BYTES: number | null = (() => {
-  const raw = process.env.PHOTO_QUOTA_MB;
-  const mb = raw === undefined || raw.trim() === "" ? 1024 : Number(raw);
-  return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * MB) : null;
-})();
+async function getPhotoQuotaBytes(): Promise<number | null> {
+  const mb = await getPhotoQuotaMb();
+  return mb > 0 ? mb * MB : null;
+}
 
 export interface PhotoUsageSummary {
   usedBytes: number;
@@ -29,8 +41,11 @@ export interface PhotoUsageSummary {
 }
 
 export async function getPhotoUsage(userId: string): Promise<PhotoUsageSummary> {
-  const { bytes, count } = await photoStorage.usage(`${userId}/`);
-  return { usedBytes: bytes, photoCount: count, quotaBytes: PHOTO_QUOTA_BYTES };
+  const [{ bytes, count }, quotaBytes] = await Promise.all([
+    photoStorage.usage(`${userId}/`),
+    getPhotoQuotaBytes(),
+  ]);
+  return { usedBytes: bytes, photoCount: count, quotaBytes };
 }
 
 /** data URL(base64)の中身のバイト数。保存前に足し込み後の使用量を見積もるため */
@@ -48,12 +63,13 @@ export async function photoQuotaError(
   userId: string,
   newDataUrls: string[]
 ): Promise<string | null> {
-  if (PHOTO_QUOTA_BYTES === null || newDataUrls.length === 0) return null;
+  if (newDataUrls.length === 0) return null;
+  const { usedBytes, quotaBytes } = await getPhotoUsage(userId);
+  if (quotaBytes === null) return null;
   const adding = newDataUrls.reduce((n, u) => n + dataUrlBytes(u), 0);
-  const { usedBytes } = await getPhotoUsage(userId);
-  if (usedBytes + adding <= PHOTO_QUOTA_BYTES) return null;
+  if (usedBytes + adding <= quotaBytes) return null;
   return (
-    `写真の容量の上限(${formatBytes(PHOTO_QUOTA_BYTES)})を超えます。` +
+    `写真の容量の上限(${formatBytes(quotaBytes)})を超えます。` +
     `いまの使用量は${formatBytes(usedBytes)}、追加しようとした写真は${formatBytes(adding)}です。` +
     "不要な写真を外してから保存してください。"
   );

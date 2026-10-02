@@ -134,8 +134,6 @@ services:
       # Googleでログインした人を一般ユーザーとして自動登録するなら "true"(既定は登録しない。
       # URLを知っていてGoogleアカウントを持つ人は誰でも入れるようになる)
       GOOGLE_AUTO_SIGNUP: ""
-      # ユーザーごとの写真の容量の上限(MB。空は1024、"0"で上限なし)
-      PHOTO_QUOTA_MB: ""
       NODE_ENV: production
       # 訪問記録の写真置き場(lib/photoStorage.ts)。DBには相対パスのみ保存される
       PHOTOS_DIR: /data/photos

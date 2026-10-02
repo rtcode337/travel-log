@@ -13,10 +13,12 @@ test("data URL から中身のバイト数を見積もる(base64の詰め物を�
   }
 });
 
-test("容量の表示はKB/MBで出す", () => {
+test("容量の表示はKB/MB/GBで出す", () => {
   assert.equal(formatBytes(512 * 1024), "512KB");
   assert.equal(formatBytes(1.5 * 1024 * 1024), "1.5MB");
   assert.equal(formatBytes(300 * 1024 * 1024), "300MB");
+  assert.equal(formatBytes(1.5 * 1024 * 1024 * 1024), "1.5GB");
+  assert.equal(formatBytes(102400 * 1024 * 1024), "100GB");
 });
 
 // 保存先の実物を数える(年/月の下まで降りる)。他人のぶんは数えない

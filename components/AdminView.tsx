@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import HelpTip from "@/components/HelpTip";
 import CopyTextButton from "@/components/CopyTextButton";
 import ExportJobsPanel from "@/components/ExportJobsPanel";
+import PhotoQuotaPanel from "@/components/PhotoQuotaPanel";
 import TabBar from "@/components/TabBar";
 import {
   findTypeFolders,
@@ -2462,7 +2463,7 @@ export default function AdminView({
           )}
           </div>
         </div>
-        {/* 右カラム: ユーザー管理と訪問記録のエクスポート(どちらもadmin専用。
+        {/* 右カラム: ユーザー管理・写真の容量の上限・訪問記録のエクスポート(どれもadmin専用。
             狭い画面ではタブ「ユーザー」) */}
         {isAdmin && (
           <div
@@ -2650,6 +2651,7 @@ export default function AdminView({
             </form>
           </section>
           </details>
+          <PhotoQuotaPanel />
           {/* 永続ディスクと常駐プロセスが要る機能なので、サーバーレスに載せた
               ときは節ごと出さない(lib/features.ts) */}
           {exportsEnabled && <ExportJobsPanel />}

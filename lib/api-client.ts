@@ -351,6 +351,15 @@ export const api = {
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/spot-types/${id}`, { method: "DELETE" }),
   },
+  photoQuota: {
+    /** ユーザーごとの写真の容量の上限(MB。0は上限なし)。admin専用 */
+    get: () => request<{ quotaMb: number }>("/api/admin/photo-quota", { fresh: true }),
+    set: (quotaMb: number) =>
+      request<{ quotaMb: number }>("/api/admin/photo-quota", {
+        method: "PATCH",
+        body: JSON.stringify({ quotaMb }),
+      }),
+  },
   appSettings: {
     get: () => request<SpotType>("/api/app-settings"),
     setActive: (spotTypeId: string) =>
