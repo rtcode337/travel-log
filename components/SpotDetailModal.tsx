@@ -162,6 +162,8 @@ export default function SpotDetailModal({
   const [flag, setFlag] = useState<SpotFlag | null>(null);
   const [flagFormOpen, setFlagFormOpen] = useState(false);
   const [flagReason, setFlagReason] = useState("");
+  // 「位置は正しい」(修正の依頼の一種。AI に座標を動かさせないよう固定してもらう)
+  const [flagLocationOk, setFlagLocationOk] = useState(false);
   const [flagSaving, setFlagSaving] = useState(false);
   // 編集対象の訪問記録(訪問履歴の「編集」から開く。VisitFormModalの編集モード)
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
@@ -330,7 +332,7 @@ export default function SpotDetailModal({
 
   const submitFlag = async () => {
     setFlagSaving(true);
-    const { data, error } = await api.spotFlags.create(spotId, flagReason);
+    const { data, error } = await api.spotFlags.create(spotId, flagReason, flagLocationOk);
     setFlagSaving(false);
     if (error) {
       setActionError("修正の依頼を送れませんでした: " + error.message);
@@ -668,6 +670,7 @@ export default function SpotDetailModal({
                         return;
                       }
                       setFlagReason("");
+                      setFlagLocationOk(false);
                       setFlagFormOpen((v) => !v);
                     }}
                     disabled={flagSaving}
@@ -704,6 +707,16 @@ export default function SpotDetailModal({
                 placeholder="例: 位置が実際の場所とずれている"
                 className="w-full rounded-lg border border-gray-300 p-2 text-sm"
               />
+              {/* 位置は正しい。正しい位置に直した店が、収集を回す側の AI に別の回で
+                  動かされることがあるので、固定してもらう(渡すテキストに [位置確認] で出る) */}
+              <label className="mt-1 flex items-center gap-1.5 text-xs text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={flagLocationOk}
+                  onChange={(e) => setFlagLocationOk(e.target.checked)}
+                />
+                位置は正しい(AI に位置を動かさせない)
+              </label>
               <div className="mt-1 flex gap-2">
                 <button
                   type="button"
@@ -726,7 +739,8 @@ export default function SpotDetailModal({
 
           {canFlag && flag && (
             <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
-              ⚠ 修正を依頼済み{flag.forwarded_at ? "(対応中)" : ""}
+              {flag.location_ok ? "✓ 位置確認を依頼済み" : "⚠ 修正を依頼済み"}
+              {flag.forwarded_at ? "(対応中)" : ""}
               {flag.reason ? `: ${flag.reason}` : ""}
             </p>
           )}

@@ -20,7 +20,8 @@ import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
  * スポットは left join で引き、座標は依頼そのもののものに落とす
  */
 const FLAG_SELECT = `select f.id, f.spot_id, f.reason, f.flagged_by, f.forwarded_at, f.created_at,
-       case when f.spot_id is null then 'add' else 'fix' end as kind,
+       f.location_ok,
+       case when f.spot_id is null then 'add' when f.location_ok then 'confirm' else 'fix' end as kind,
        coalesce(s.name, '') as name, s.key, coalesce(s.region, '') as region,
        coalesce(s.lat, f.lat) as lat, coalesce(s.lng, f.lng) as lng,
        coalesce(nullif(u.nickname, ''), u.email) as flagged_by_name
@@ -146,6 +147,8 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const spotId = body?.spot_id;
   const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
+  // 「位置は正しい」(修正の依頼のときだけ。追加の依頼には付かない)
+  const locationOk = body?.location_ok === true;
 
   if (spotId === undefined || spotId === null) {
     return requestAdd(body, reason, user.id);
@@ -170,13 +173,13 @@ export async function POST(request: Request) {
   }
 
   const { rows } = await query<SpotFlag>(
-    `insert into spot_flags (spot_id, reason, flagged_by)
-     values ($1, $2, $3)
+    `insert into spot_flags (spot_id, reason, flagged_by, location_ok)
+     values ($1, $2, $3, $4)
      on conflict (spot_id)
        do update set reason = excluded.reason, flagged_by = excluded.flagged_by,
-                     forwarded_at = null
-     returning id, spot_id, reason, flagged_by, forwarded_at, created_at`,
-    [spotId, reason, user.id]
+                     location_ok = excluded.location_ok, forwarded_at = null
+     returning id, spot_id, reason, flagged_by, forwarded_at, location_ok, created_at`,
+    [spotId, reason, user.id, locationOk]
   );
   return NextResponse.json({ data: rows[0] });
 }

@@ -2108,11 +2108,14 @@ export default function MapView({
     for (const f of myRequests) {
       const state = f.forwarded_at ? "対応中" : "未依頼";
       const border = f.forwarded_at ? "solid" : "dashed";
-      if (f.kind === "fix") {
+      // 修正の依頼と位置確認(位置は正しい)は、スポットのピンを輪で囲む。
+      // 位置確認は直してほしい依頼ではないので、色を分ける
+      if (f.kind === "fix" || f.kind === "confirm") {
+        const [fill, stroke] = f.kind === "confirm" ? ["#bae6fd66", "#0284c7"] : ["#fde68a66", "#d97706"];
         const ring = document.createElement("div");
         ring.style.cssText = `
           width: 30px; height: 30px; border-radius: 50%; pointer-events: none;
-          background: #fde68a66; border: 3px ${border} #d97706;
+          background: ${fill}; border: 3px ${border} ${stroke};
           box-shadow: 0 0 0 2px #ffffffcc;
         `;
         const marker = new maplibregl.Marker({ element: ring })

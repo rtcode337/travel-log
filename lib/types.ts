@@ -104,11 +104,19 @@ export interface SpotFlag {
    * 管理画面で渡したときに付け、修正の依頼を出し直すと(理由が変わるので)空に戻る
    */
   forwarded_at: string | null;
+  /**
+   * 「位置は正しい」(修正の依頼の一種)。渡すテキストに `[位置確認]` の行で出し、
+   * 受け取る側(tazuna)が AI に座標を動かさせないよう固定する
+   */
+  location_ok: boolean;
   created_at: string;
 }
 
-/** 依頼の種類。spot_idを持つかどうかで決まる(表には持たない) */
-export type SpotFlagKind = "fix" | "add";
+/**
+ * 依頼の種類(表には持たない)。spot_idが無ければ追加、あれば修正。
+ * 修正のうち「位置は正しい」を付けたものは位置確認
+ */
+export type SpotFlagKind = "fix" | "add" | "confirm";
 
 /**
  * 管理画面の修正・追加の依頼の一覧の1行(spot_flagsにスポットの表示用の項目を

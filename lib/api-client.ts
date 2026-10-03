@@ -229,11 +229,12 @@ export const api = {
     // 1スポットぶん(スポット詳細が依頼の有無を見る)。無ければ空配列
     forSpot: (spotId: string) =>
       request<FlaggedSpot[]>(`/api/spot-flags?spot_id=${encodeURIComponent(spotId)}`),
-    // 修正の依頼。同じスポットに2度依頼しても1件のまま(理由は上書き)
-    create: (spotId: string, reason: string) =>
+    // 修正の依頼。同じスポットに2度依頼しても1件のまま(理由は上書き)。
+    // locationOk は「位置は正しい」(受け取る側が AI に座標を動かさせないよう固定する)
+    create: (spotId: string, reason: string, locationOk = false) =>
       request<SpotFlag>("/api/spot-flags", {
         method: "POST",
-        body: JSON.stringify({ spot_id: spotId, reason }),
+        body: JSON.stringify({ spot_id: spotId, reason, location_ok: locationOk }),
       }),
     // 追加の依頼(スポットの無い場所に、種別と座標で付ける)
     requestAdd: (type: string, lat: number, lng: number, reason: string) =>
