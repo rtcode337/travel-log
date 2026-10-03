@@ -10,6 +10,7 @@ import {
   getSpotTypeSetting,
   REVIEWS_PAGE_SIZE,
   SPOT_ADMIN_ROLES,
+  type LocationCheck,
   type SpotFlag,
   visitPhotoSrc,
   type PublicReview,
@@ -38,7 +39,7 @@ import CopyTextButton from "@/components/CopyTextButton";
 import GoogleSpotLinks from "@/components/GoogleSpotLinks";
 import VisitPlanListDetailModal from "@/components/VisitPlanListDetailModal";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
-import { formatJstDateTime } from "@/lib/datetime";
+import { formatJstDate, formatJstDateTime } from "@/lib/datetime";
 import Modal from "@/components/Modal";
 
 /** 星アイコン(Google Material Symbols「star」/「star_border」、Apache License 2.0) */
@@ -160,6 +161,8 @@ export default function SpotDetailModal({
   // 中身がおかしいと気づいたときに付ける「修正の依頼」の印(spot_admin/adminのみ)。
   // nullなら未依頼。理由の入力欄はボタンを押したときだけ開く
   const [flag, setFlag] = useState<SpotFlag | null>(null);
+  // 位置を確かめ済みの記録(「位置は正しい」を渡したときに残る。依頼を消しても残る)
+  const [locationCheck, setLocationCheck] = useState<LocationCheck | null>(null);
   const [flagFormOpen, setFlagFormOpen] = useState(false);
   const [flagReason, setFlagReason] = useState("");
   const [flagSaving, setFlagSaving] = useState(false);
@@ -317,11 +320,15 @@ export default function SpotDetailModal({
   useEffect(() => {
     if (!canFlag) {
       setFlag(null);
+      setLocationCheck(null);
       return;
     }
     let alive = true;
     api.spotFlags.forSpot(spotId).then(({ data }) => {
       if (alive) setFlag(data?.[0] ?? null);
+    });
+    api.spotFlags.locationCheck(spotId).then(({ data }) => {
+      if (alive) setLocationCheck(data ?? null);
     });
     return () => {
       alive = false;
@@ -768,6 +775,14 @@ export default function SpotDetailModal({
             <p className="mt-2 rounded-lg bg-sky-50 p-2 text-xs text-sky-800">
               ✓ 位置は正しいと確認済み{flag.forwarded_at ? "(渡し済み)" : "(未依頼)"}
               —— 収集を回す側で、AI に位置を動かさせないよう固定してもらいます
+            </p>
+          )}
+          {/* 渡したあと依頼を消しても、確かめ済みであることは残す(spot_location_checks)。
+              いま「位置は正しい」の依頼が付いているときは上の一言で足りるので出さない */}
+          {canFlag && locationCheck && !flag?.location_ok && (
+            <p className="mt-2 rounded-lg bg-sky-50 p-2 text-xs text-sky-800">
+              ✓ 位置確認済み({formatJstDate(locationCheck.checked_at)}に渡し済み
+              {locationCheck.checked_by_name ? `・${locationCheck.checked_by_name}` : ""})
             </p>
           )}
 

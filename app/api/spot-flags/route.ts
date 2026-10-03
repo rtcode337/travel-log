@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/current-user";
-import { SPOT_ADMIN_ROLES, type FlaggedSpot, type SpotFlag, type SpotType } from "@/lib/types";
+import {
+  SPOT_ADMIN_ROLES,
+  type FlaggedSpot,
+  type LocationCheck,
+  type SpotFlag,
+  type SpotType,
+} from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 
 /**
@@ -55,6 +61,18 @@ export async function GET(request: Request) {
   // spot_id 指定は1件だけの問い合わせ(スポット詳細が依頼の有無を見るのに使う)
   const spotId = searchParams.get("spot_id");
   if (spotId) {
+    // **位置を確かめ済みか**(`location_check=1`)。依頼は渡したあと消えるので、
+    // 依頼とは別に持っている記録(spot_location_checks)を引く。無ければ null
+    if (searchParams.get("location_check") === "1") {
+      const { rows: checks } = await query<LocationCheck>(
+        `select c.checked_at, coalesce(nullif(u.nickname, ''), u.email) as checked_by_name
+           from spot_location_checks c
+           left join users u on u.id = c.checked_by
+          where c.spot_id = $1`,
+        [spotId]
+      );
+      return NextResponse.json({ data: checks[0] ?? null });
+    }
     const { rows } = await query<FlaggedSpot>(`${FLAG_SELECT} where f.spot_id = $1`, [
       spotId,
     ]);
@@ -123,6 +141,20 @@ export async function PATCH(request: Request) {
       : "update spot_flags set forwarded_at = null where id = any($1::uuid[])",
     [ids]
   );
+  // **「位置は正しい」を渡したら、スポットに確かめ済みの記録を残す**。依頼は渡したあと
+  // 一覧から消すので、依頼だけでは確かめ済みかが残らない。渡し直したら日時を新しくする。
+  // 未依頼に戻しても記録は消さない(前に確かめた事実までは取り消さない)
+  if (forwarded) {
+    await query(
+      `insert into spot_location_checks (spot_id, checked_by, checked_at)
+       select spot_id, flagged_by, now()
+         from spot_flags
+        where id = any($1::uuid[]) and location_ok and spot_id is not null
+       on conflict (spot_id) do update
+         set checked_by = excluded.checked_by, checked_at = excluded.checked_at`,
+      [ids]
+    );
+  }
   return NextResponse.json({ data: { updated: rowCount ?? 0 } });
 }
 

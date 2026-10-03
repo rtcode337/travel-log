@@ -320,6 +320,18 @@ create index spot_flags_spot_id_idx on spot_flags (spot_id);
 create index spot_flags_spot_type_id_idx on spot_flags (spot_type_id);
 
 -- =============================================================
+-- 位置を確かめ済みのスポット。「位置は正しい」(spot_flags.location_ok)を
+-- 受け取る側へ渡した(対応中にした)ときに 1 行残す。依頼は渡したあと一覧から
+-- 消すので、依頼だけでは「どのスポットの位置を確かめ済みか」が残らない
+-- (誰が確かめたかは checked_by、渡した日時は checked_at)
+-- =============================================================
+create table spot_location_checks (
+  spot_id     uuid primary key references spots (id) on delete cascade,
+  checked_by  uuid references users (id) on delete set null,
+  checked_at  timestamptz not null default now()
+);
+
+-- =============================================================
 -- spot_hides: 非表示スポット。公開スポットのうち「自分は興味がない」ものを
 -- ユーザーごとに地図・一覧から隠すための設定(スポット自体には一切影響しない)。
 -- 同一ユーザー×同一スポットは1件まで(トグル管理。visit_plansと同じ構造)
