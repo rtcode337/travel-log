@@ -24,6 +24,7 @@ import { formatPlanDateRange } from "@/lib/planListDraft";
 import SpotBadge from "@/components/SpotBadge";
 import MiniMap from "@/components/MiniMap";
 import PhotoLightbox from "@/components/PhotoLightbox";
+import Link from "next/link";
 import LinkedText from "@/components/LinkedText";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import { resolveCategories } from "@/lib/category";
@@ -51,6 +52,33 @@ function StarIcon({ filled, className }: { filled: boolean; className?: string }
       )}
     </svg>
   );
+}
+
+/** 地図の上のピンの絵(この地図アプリの地図で開く)。Google マップのアイコンと見分けるため、線で描く */
+function MapPinIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z" />
+      <path d="M9 4v13M15 6.5V10" />
+      <path d="M17.5 10.5a2.5 2.5 0 0 0-2.5 2.5c0 1.9 2.5 4.5 2.5 4.5s2.5-2.6 2.5-4.5a2.5 2.5 0 0 0-2.5-2.5z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** 地図で開くリンクの言い方。別種別のスポットなら、どの種別の地図へ移るかを言う */
+function mapLinkLabel(spotType: SpotType, viewing: SpotType | null): string {
+  return viewing && viewing.key !== spotType.key
+    ? `「${spotType.label}」の地図で開く`
+    : "地図で開く";
 }
 
 function formatReviewDatetime(iso: string): string {
@@ -704,6 +732,27 @@ export default function SpotDetailModal({
           )}
 
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {/* この地図アプリの地図で開く(そのスポットに寄った状態で開く)。**アイコンで出す**
+                —— 文字のリンクにしていた頃は、アイコンの並ぶ行が狭い画面で折り返して
+                2段に割れたので外した。一覧から開いたスポットを地図で見たいことはあるので、
+                アイコンだけで戻す。行の右側にある Google マップのアイコンと見分けるため、
+                左端に置き、絵も地図の上のピンにする。
+                重ね表示から開いた別種別のスポットは、その種別の地図へ移る(fromに今の
+                種別を渡すと、移った先の地図に「元の地図に戻る」リンクが出る) */}
+            {currentSpotType && (
+              <Link
+                href={`/${currentSpotType.key}/map?spot=${spot.id}${
+                  readOnly && typeKey && typeKey !== currentSpotType.key
+                    ? `&from=${encodeURIComponent(typeKey)}`
+                    : ""
+                }`}
+                aria-label={mapLinkLabel(currentSpotType, viewingSpotType)}
+                title={mapLinkLabel(currentSpotType, viewingSpotType)}
+                className="rounded p-1 text-blue-600 hover:bg-blue-50"
+              >
+                <MapPinIcon className="size-5" />
+              </Link>
+            )}
             <GoogleSpotLinks
               spot={spot}
               spotType={currentSpotType}
