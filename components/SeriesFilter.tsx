@@ -16,6 +16,14 @@ import ChoiceRow, { toggleChoice } from "@/components/ChoiceRow";
  */
 export const SERIES_FILTER_TILE_MAX = 20;
 
+/**
+ * 畳んでおく件数の境目(`collapsible`のとき)。**これより多いと、押すまで一覧を出さない。**
+ * 名前で並べる一覧は 1 件 1 行なので、数が多いと絞り込み画面の大半を一覧が占め、
+ * ほかの項目(カテゴリ・訪問状況)が画面の外へ押し出される。少ないうちは開いたままの
+ * ほうが 1 回押す手間が無い
+ */
+const COLLAPSE_OVER = 8;
+
 /** 詰めて並べられる中身の長さ(ラベルが1〜2文字ならアイコンと同じ扱い) */
 const TILEABLE_LABEL_MAX = 2;
 
@@ -55,6 +63,7 @@ export default function SeriesFilter({
   selected,
   onChange,
   seriesStyles,
+  collapsible = false,
 }: {
   /** 選択肢(このスポット種別のシリーズ設定の並び順に揃えて渡す) */
   series: Series[];
@@ -62,13 +71,45 @@ export default function SeriesFilter({
   selected: Series[];
   onChange: (series: Series[]) => void;
   seriesStyles: SeriesStyleDefinition[];
+  /**
+   * 名前で並べる一覧が長いときは、「シリーズで絞り込む」を押すまで畳んでおく
+   * (絞り込み画面で使う。「シリーズから探す」タブのように一覧が本題の画面では畳まない)
+   */
+  collapsible?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   if (series.length === 0) return null;
 
   // アイコンで見分けられない種別(放送回番号・作品名など)は、検索できる一覧にする。
   // かつては単一選択のプルダウンだったが、アニメ聖地のようにシリーズが数百ある
   // 種別では目当ての値を探せず、複数選択もできなかった
   if (!canTileSeries(series, seriesStyles)) {
+    // **長い一覧は押すまで畳む**(アイコンで並べられる種別・数の少ない種別は今までどおり)。
+    // 畳んでいても選んだものは見えるように、選択中のシリーズはチップで出す
+    if (collapsible && !open && series.length > COLLAPSE_OVER) {
+      return (
+        <div className="flex flex-wrap items-center gap-1">
+          {selected.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => onChange(selected.filter((v) => v !== r))}
+              className="max-w-full truncate rounded-full bg-blue-600 px-2 py-1 text-xs font-medium text-white"
+              title={`${r} を外す`}
+            >
+              {r} ✕
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            {selected.length > 0 ? "シリーズを選び直す" : "シリーズで絞り込む"}({series.length}件)
+          </button>
+        </div>
+      );
+    }
     return (
       <SearchableSeriesFilter
         series={series}

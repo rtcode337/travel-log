@@ -327,6 +327,7 @@ export default function FilterBar({
             selected={filters.series}
             onChange={(series) => onChange({ ...filters, series })}
             seriesStyles={seriesStyles}
+            collapsible
           />
         </div>
       )}
