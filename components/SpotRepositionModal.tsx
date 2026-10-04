@@ -7,6 +7,9 @@ import { api } from "@/lib/api-client";
 import type { Spot } from "@/lib/types";
 import Modal from "@/components/Modal";
 
+// 開いたときの拡大率(建物が見分けられる大きさ)
+const OPEN_ZOOM = 18;
+
 /**
  * スポットの位置(緯度経度)を、ドラッグできるマーカーで指すモーダル。2 つの使い方がある。
  *
@@ -42,7 +45,9 @@ export default function SpotRepositionModal({
       container: containerRef.current,
       style: osmStyle,
       center: [spot.lng, spot.lat],
-      zoom: 15,
+      // **建物が見分けられるところまで寄せて開く。** 直したいのは微妙なずれ(数十m)なので、
+      // 町内が見渡せる程度(15)だと、ピンを動かす前に毎回拡大し直すことになった
+      zoom: OPEN_ZOOM,
       attributionControl: { compact: true },
     });
     mapRef.current = map;
