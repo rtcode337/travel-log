@@ -7,7 +7,6 @@ import type {
   Role,
   Spot,
   FlaggedSpot,
-  LocationCheck,
   SpotDeletion,
   SpotFlag,
   SpotHide,
@@ -230,13 +229,6 @@ export const api = {
     // 1スポットぶん(スポット詳細が依頼の有無を見る)。無ければ空配列
     forSpot: (spotId: string) =>
       request<FlaggedSpot[]>(`/api/spot-flags?spot_id=${encodeURIComponent(spotId)}`),
-    // 位置を確かめ済みか(「位置は正しい」を渡したときの記録。依頼を消しても残る)。無ければ null。
-    // **キャッシュしない** —— 管理画面で渡した直後に開き直しても、古い答えが出ないように
-    locationCheck: (spotId: string) =>
-      request<LocationCheck | null>(
-        `/api/spot-flags?spot_id=${encodeURIComponent(spotId)}&location_check=1`,
-        { fresh: true }
-      ),
     // 修正の依頼。同じスポットに2度依頼しても1件のまま(理由は上書き)。
     // locationOk は「位置は正しい」(受け取る側が AI に座標を動かさせないよう固定する)
     create: (spotId: string, reason: string, locationOk = false) =>

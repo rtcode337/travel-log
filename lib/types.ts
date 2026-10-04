@@ -118,12 +118,6 @@ export interface SpotFlag {
  */
 export type SpotFlagKind = "fix" | "add" | "confirm";
 
-/** 位置を確かめ済みの記録(「位置は正しい」を受け取る側へ渡したとき残る) */
-export interface LocationCheck {
-  checked_at: string;
-  checked_by_name: string | null;
-}
-
 /**
  * 管理画面の修正・追加の依頼の一覧の1行(spot_flagsにスポットの表示用の項目を
  * JOINしたもの)。追加の依頼はスポットが無いので、nameは空・座標は依頼そのもののもの
