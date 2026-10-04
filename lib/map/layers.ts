@@ -82,6 +82,20 @@ export type OverlayKeysRef = { current: string[] };
  * ③重ね表示のルート ④本体のルート の順で、上位が吸ったタップは下位に渡さない
  * (重ね表示同士は、描画順で上にある種別が優先する)
  */
+/**
+ * 地図の上に DOM で載せた印(スポット追加の依頼の「+」など)のうち、**タップを自分で
+ * 受け取るもの**に付けるクラス。DOM の印へのクリックも地図のコンテナまで上がるので、
+ * MapLibre はその下にあるピンやルートのクリックとしても扱ってしまう(印のポップアップと
+ * 一緒に、後ろのスポットの詳細まで開く)。レイヤーのクリックは、この印の上なら譲る
+ */
+export const MARKER_TAP_CLASS = "map-marker-tap";
+
+/** クリックが {@link MARKER_TAP_CLASS} の印の上で起きたか */
+export function tappedMarker(e: maplibregl.MapMouseEvent): boolean {
+  const target = e.originalEvent?.target;
+  return target instanceof Element && target.closest(`.${MARKER_TAP_CLASS}`) !== null;
+}
+
 export function hasFeatureAt(
   map: maplibregl.Map,
   point: maplibregl.PointLike,
@@ -220,6 +234,7 @@ export function ensureRouteLayers(
   );
 
   map.on("click", ROUTE_HIT_LAYER_ID, (e) => {
+    if (tappedMarker(e)) return;
     // ピン・クラスタ(重ね表示・本体どちらも)と重なった位置のタップはピン側の操作
     // (スポット詳細・クラスタ展開)を優先し、重ね表示のルートと重なった位置は
     // 重ね表示側が吸う
@@ -420,6 +435,7 @@ export function ensureOverlayLayers(
   addOverlaySpotLayers(map, typeKey, clustered);
 
   map.on("click", ids.cluster, async (e) => {
+    if (tappedMarker(e)) return;
     // 同じ位置で自分より上に重なっている種別のピンがあれば、そちらに譲る
     if (
       hasFeatureAt(
@@ -450,6 +466,7 @@ export function ensureOverlayLayers(
   // 重なり数の文字はピンの右肩にずらして描くので、そこを押すとピンの当たり判定から外れる
   for (const layerId of [ids.unclustered, ids.stackBadge]) {
     map.on("click", layerId, (e) => {
+      if (tappedMarker(e)) return;
       if (
         hasFeatureAt(
           map,
@@ -467,6 +484,7 @@ export function ensureOverlayLayers(
   }
 
   map.on("click", ids.routeHit, (e) => {
+    if (tappedMarker(e)) return;
     // ピン(重ね表示・本体どちらも)と重なった位置のタップはピン側を優先し、
     // 自分より上に重なっている種別のルートがあればそちらに譲る
     if (
@@ -706,6 +724,7 @@ export function ensureClusterLayers(
   );
 
   map.on("click", CLUSTER_LAYER_ID, async (e) => {
+    if (tappedMarker(e)) return;
     // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
     if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
       return;
@@ -740,6 +759,7 @@ export function ensureClusterLayers(
     PATH_STACK_BADGE_LAYER_ID,
   ]) {
     map.on("click", layerId, (e) => {
+      if (tappedMarker(e)) return;
       // 重ね表示のピン・クラスタと重なった位置のタップは重ね表示側が吸う
       if (hasFeatureAt(map, e.point, overlayPinLayerIds(overlayKeysRef.current)))
         return;

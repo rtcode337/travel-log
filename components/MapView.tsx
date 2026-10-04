@@ -88,6 +88,7 @@ import {
   clearOverlayData,
   ensureClusterLayers,
   showClusterLayers,
+  MARKER_TAP_CLASS,
 } from "@/lib/map/layers";
 import {
   filterVisibleRoutes,
@@ -2098,6 +2099,8 @@ export default function MapView({
   // - 追加の依頼: 緑の「+」。タップで理由と状態を出し、その場で取り消せる。
   //   指す先のスポットが無いので、ここで取り消せないと管理画面の一覧まで
   //   探しに行くことになる(地図で「これは要らなかった」と気づくのはこの場面)
+  //   **タップは印が受け取る**(MARKER_TAP_CLASS)。後ろにスポットのピンがあっても
+  //   そちらの詳細は開かない
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -2127,6 +2130,7 @@ export default function MapView({
       const el = document.createElement("div");
       el.title = `スポット追加を依頼中(${state})`;
       el.textContent = "+";
+      el.className = MARKER_TAP_CLASS;
       el.style.cssText = `
         width: 20px; height: 20px; border-radius: 50%; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
