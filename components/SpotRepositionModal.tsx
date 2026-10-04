@@ -36,6 +36,9 @@ export default function SpotRepositionModal({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [pos, setPos] = useState({ lat: spot.lat, lng: spot.lng });
   const [saving, setSaving] = useState(false);
+  // 現在地(取れたときだけ)。**現地で見ながら直す**ことが多いので、自分がどこにいるかを
+  // 地図に出す —— 店の前に立っているなら、ピンを青丸に合わせれば済む
+  const [here, setHere] = useState<{ lat: number; lng: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: 初期スポットが変わる想定はないので、地図はマウント時に一度だけ作る
@@ -64,6 +67,35 @@ export default function SpotRepositionModal({
       mapRef.current = null;
     };
     // 初期スポットが変わる想定はないので、マウント時に一度だけ作る
+  }, []);
+
+  // **現在地の青丸**(地図アプリの現在地と同じ見た目。MapLibre の`maplibregl-user-location-dot`)。
+  // 地図は動かさない —— 開いたときはスポットに寄っていてほしい(現在地へは下のボタンで寄る)。
+  // 取れない・断られたときは何も出さない(位置を直す操作そのものは要らない)
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    let marker: maplibregl.Marker | null = null;
+    const watch = navigator.geolocation.watchPosition(
+      ({ coords }) => {
+        const map = mapRef.current;
+        if (!map) return;
+        const at: [number, number] = [coords.longitude, coords.latitude];
+        if (!marker) {
+          const dot = document.createElement("div");
+          dot.className = "maplibregl-user-location-dot";
+          marker = new maplibregl.Marker({ element: dot }).setLngLat(at).addTo(map);
+        } else {
+          marker.setLngLat(at);
+        }
+        setHere({ lat: coords.latitude, lng: coords.longitude });
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 10_000 }
+    );
+    return () => {
+      navigator.geolocation.clearWatch(watch);
+      marker?.remove();
+    };
   }, []);
 
   const handleSave = async () => {
@@ -121,9 +153,21 @@ export default function SpotRepositionModal({
         ref={containerRef}
         className="h-72 w-full overflow-hidden rounded-lg border border-gray-200"
       />
-      <p className="text-xs text-gray-500">
-        緯度 {pos.lat.toFixed(5)} ・ 経度 {pos.lng.toFixed(5)}
-      </p>
+      <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
+        <span>
+          緯度 {pos.lat.toFixed(5)} ・ 経度 {pos.lng.toFixed(5)}
+        </span>
+        {/* 青丸(現在地)へ寄る。ピンは動かさない(ずれを見比べたいことがあるため) */}
+        {here && (
+          <button
+            type="button"
+            onClick={() => mapRef.current?.easeTo({ center: [here.lng, here.lat] })}
+            className="shrink-0 text-blue-600 underline"
+          >
+            現在地へ寄る
+          </button>
+        )}
+      </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button
