@@ -20,8 +20,9 @@ import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
  * スポットは left join で引き、座標は依頼そのもののものに落とす
  */
 const FLAG_SELECT = `select f.id, f.spot_id, f.reason, f.flagged_by, f.forwarded_at, f.created_at,
-       f.location_ok,
-       case when f.spot_id is null then 'add' when f.location_ok then 'confirm' else 'fix' end as kind,
+       f.location_ok, f.move_lat, f.move_lng,
+       case when f.spot_id is null then 'add' when f.move_lat is not null then 'move'
+            when f.location_ok then 'confirm' else 'fix' end as kind,
        coalesce(s.name, '') as name, s.key, coalesce(s.region, '') as region,
        coalesce(s.lat, f.lat) as lat, coalesce(s.lng, f.lng) as lng,
        coalesce(nullif(u.nickname, ''), u.email) as flagged_by_name
@@ -147,8 +148,21 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const spotId = body?.spot_id;
   const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
-  // 「位置は正しい」(修正の依頼のときだけ。追加の依頼には付かない)
+  // 「位置OK」(修正の依頼のときだけ。追加の依頼には付かない)
   const locationOk = body?.location_ok === true;
+  // 「この位置へ直して」(修正の依頼のときだけ)。**両方そろって範囲内のときだけ**受ける
+  const moveLat = body?.move_lat;
+  const moveLng = body?.move_lng;
+  const move =
+    typeof moveLat === "number" &&
+    typeof moveLng === "number" &&
+    Math.abs(moveLat) <= 90 &&
+    Math.abs(moveLng) <= 180
+      ? { lat: moveLat, lng: moveLng }
+      : null;
+  if ((moveLat !== undefined || moveLng !== undefined) && !move) {
+    return NextResponse.json({ error: "直す先の座標が読めません。" }, { status: 400 });
+  }
 
   if (spotId === undefined || spotId === null) {
     return requestAdd(body, reason, user.id);
@@ -173,13 +187,17 @@ export async function POST(request: Request) {
   }
 
   const { rows } = await query<SpotFlag>(
-    `insert into spot_flags (spot_id, reason, flagged_by, location_ok)
-     values ($1, $2, $3, $4)
+    `insert into spot_flags (spot_id, reason, flagged_by, location_ok, move_lat, move_lng)
+     values ($1, $2, $3, $4, $5, $6)
      on conflict (spot_id)
        do update set reason = excluded.reason, flagged_by = excluded.flagged_by,
-                     location_ok = excluded.location_ok, forwarded_at = null
-     returning id, spot_id, reason, flagged_by, forwarded_at, location_ok, created_at`,
-    [spotId, reason, user.id, locationOk]
+                     location_ok = excluded.location_ok, move_lat = excluded.move_lat,
+                     move_lng = excluded.move_lng, forwarded_at = null
+     returning id, spot_id, reason, flagged_by, forwarded_at, location_ok, move_lat, move_lng,
+               created_at`,
+    // **位置を直したなら、位置は確かめてある**ので、位置OK も一緒に付ける
+    // (受け取る側は動かした先で固定し、取り込み直すと「位置確認済み」が付く)
+    [spotId, reason, user.id, move ? true : locationOk, move?.lat ?? null, move?.lng ?? null]
   );
   return NextResponse.json({ data: rows[0] });
 }

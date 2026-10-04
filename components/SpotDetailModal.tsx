@@ -157,6 +157,8 @@ export default function SpotDetailModal({
   const [showForm, setShowForm] = useState(false);
   // 非公開スポットの位置修正(ドラッグ)モーダルの表示
   const [showReposition, setShowReposition] = useState(false);
+  // 公開スポットの「この位置へ直して」の依頼(ドラッグで指す)モーダルの表示
+  const [showMovePick, setShowMovePick] = useState(false);
   // 中身がおかしいと気づいたときに付ける「修正の依頼」の印(spot_admin/adminのみ)。
   // nullなら未依頼。理由の入力欄はボタンを押したときだけ開く
   const [flag, setFlag] = useState<SpotFlag | null>(null);
@@ -342,7 +344,7 @@ export default function SpotDetailModal({
   };
 
   /**
-   * 位置は正しい。**押した時点で印を付ける**(理由は聞かない)。修正の依頼とは
+   * 位置OK。**押した時点で印を付ける**(理由は聞かない)。修正の依頼とは
    * 別のボタンにしてある —— 修正の依頼の欄にチェックで置いていた頃は、
    * 何かを直してほしい依頼に見えた。中身は修正の依頼と同じ表の 1 行
    * (location_ok)で、受け取る側が AI に座標を動かさせないよう固定する
@@ -358,6 +360,23 @@ export default function SpotDetailModal({
     setFlag(data ?? null);
     setFlagFormOpen(false);
     onFlagChange?.();
+  };
+
+  /**
+   * 位置の修正を依頼する(ピンを動かして指した座標)。**微妙にずれているだけの店**のため
+   * のもの —— 受け取る側は AI を通さずにこの座標で固定するので、理由を書いて AI に
+   * 調べさせるより確実で、AI の枠も使わない。失敗したら理由を返す(モーダルに出す)
+   */
+  const submitMove = async (lat: number, lng: number): Promise<string | null> => {
+    setFlagSaving(true);
+    const { data, error } = await api.spotFlags.create(spotId, "", false, { lat, lng });
+    setFlagSaving(false);
+    if (error) return "位置の修正を依頼できませんでした: " + error.message;
+    setFlag(data ?? null);
+    setFlagFormOpen(false);
+    setShowMovePick(false);
+    onFlagChange?.();
+    return null;
   };
 
   const removeFlag = async () => {
@@ -693,14 +712,27 @@ export default function SpotDetailModal({
                     className={`text-xs font-normal underline disabled:opacity-50 ${
                       flag ? "text-amber-700" : "text-gray-600"
                     }`}
-                    hidden={!!flag?.location_ok}
+                    hidden={!!flag?.location_ok || flag?.move_lat != null}
                   >
                     {flag ? "⚠ 依頼を取り消す" : "⚠ 修正を依頼"}
                   </button>
                 )}
-                {/* 位置は正しい(修正の依頼とは別のボタン)。1スポットに付く依頼は1つなので、
+                {/* 位置OK(修正の依頼とは別のボタン)。「位置は正しい」と書いていた頃は、
+                    位置以外は正しくないと言っているように読めた。1スポットに付く依頼は1つなので、
                     修正の依頼が付いている間は出さない */}
-                {canFlag && (!flag || flag.location_ok) && (
+                {/* 位置を直す(ピンを動かして正しい位置を指す)。微妙にずれているだけのときに使う */}
+                {canFlag && (!flag || flag.move_lat != null) && (
+                  <button
+                    type="button"
+                    onClick={() => (flag ? removeFlag() : setShowMovePick(true))}
+                    disabled={flagSaving}
+                    title="ピンを動かして正しい位置を指す(AI を使わずに直してもらう)"
+                    className="text-xs font-normal text-violet-700 underline disabled:opacity-50"
+                  >
+                    {flag ? "📍 位置の修正を取り消す" : "📍 位置を直す"}
+                  </button>
+                )}
+                {canFlag && (!flag || (flag.location_ok && flag.move_lat == null)) && (
                   <button
                     type="button"
                     onClick={() => (flag ? removeFlag() : submitLocationOk())}
@@ -708,7 +740,7 @@ export default function SpotDetailModal({
                     title="この位置が正しいことを伝え、AI に位置を動かさせないようにする"
                     className="text-xs font-normal text-sky-700 underline disabled:opacity-50"
                   >
-                    {flag ? "✓ 位置確認を取り消す" : "✓ 位置は正しい"}
+                    {flag ? "✓ 位置OKを取り消す" : "✓ 位置OK"}
                   </button>
                 )}
                 {canManage && (
@@ -758,15 +790,22 @@ export default function SpotDetailModal({
             </div>
           )}
 
-          {canFlag && flag && !flag.location_ok && (
+          {canFlag && flag && flag.move_lat != null && flag.move_lng != null && (
+            <p className="mt-2 rounded-lg bg-violet-50 p-2 text-xs text-violet-800">
+              📍 位置の修正を依頼済み{flag.forwarded_at ? "(対応中)" : "(未依頼)"}: 緯度{" "}
+              {flag.move_lat.toFixed(5)} ・ 経度 {flag.move_lng.toFixed(5)} へ
+              —— 位置OK も付いています。収集を回す側で、AI を使わずにこの位置で固定してもらいます
+            </p>
+          )}
+          {canFlag && flag && !flag.location_ok && flag.move_lat == null && (
             <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
               ⚠ 修正を依頼済み{flag.forwarded_at ? "(対応中)" : ""}
               {flag.reason ? `: ${flag.reason}` : ""}
             </p>
           )}
-          {canFlag && flag?.location_ok && (
+          {canFlag && flag?.location_ok && flag.move_lat == null && (
             <p className="mt-2 rounded-lg bg-sky-50 p-2 text-xs text-sky-800">
-              ✓ 位置は正しいと確認済み{flag.forwarded_at ? "(渡し済み)" : "(未依頼)"}
+              ✓ 位置OKと確認済み{flag.forwarded_at ? "(渡し済み)" : "(未依頼)"}
               —— 収集を回す側で、AI に位置を動かさせないよう固定してもらいます
             </p>
           )}
@@ -1231,6 +1270,13 @@ export default function SpotDetailModal({
             setSpot(updated);
             onSpotChange?.(updated);
           }}
+        />
+      )}
+      {showMovePick && spot && (
+        <SpotRepositionModal
+          spot={spot}
+          onClose={() => setShowMovePick(false)}
+          onPick={submitMove}
         />
       )}
       {showAddToList && typeKey && (

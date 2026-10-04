@@ -780,8 +780,10 @@ export default function AdminView({
    * 未依頼の修正・追加の依頼を、そのまま渡せる1つのテキストにまとめる
    * (AIに相談する・情報収集の依頼に貼って回す)。
    * 1行は `- [修正] 名前 (緯度,経度): 理由` / `- [追加] (緯度,経度): 理由` /
-   * `- [位置確認] 名前 (緯度,経度)`(位置は正しい。受け取る側が AI に座標を
-   * 動かさせないよう固定する。座標はいまの地図の位置そのもの)。
+   * `- [位置確認] 名前 (緯度,経度)`(位置OK。受け取る側が AI に座標を
+   * 動かさせないよう固定する。座標はいまの地図の位置そのもの) /
+   * `- [位置修正] 名前 (緯度,経度) → (緯度,経度)`(この位置へ直して。いまの座標と
+   * ピンを動かした先。受け取る側は AI を通さずに、いまの座標で店を探して動かした先で固定する)。
    * **座標を入れる** —— 追加の依頼は名前を持たないので、場所は座標でしか言えない。
    * 受け取る側は名前ではなく場所で判断できる(名前だけだと同名の店を取り違える)。
    * **理由が無い行は理由を書かない**(「(理由なし)」と書くと、AIがその文字列を
@@ -800,7 +802,9 @@ export default function AdminView({
               ? `- [追加] ${where}`
               : f.kind === "confirm"
                 ? `- [位置確認] ${f.name} ${where}`
-                : `- [修正] ${f.name} ${where}`;
+                : f.kind === "move" && f.move_lat != null && f.move_lng != null
+                  ? `- [位置修正] ${f.name} ${where} → (${f.move_lat.toFixed(5)},${f.move_lng.toFixed(5)})`
+                  : `- [修正] ${f.name} ${where}`;
           return f.reason ? `${head}: ${f.reason}` : head;
         }),
         ``,
@@ -1711,10 +1715,18 @@ export default function AdminView({
                                 ? "bg-green-50 text-green-700"
                                 : f.kind === "confirm"
                                   ? "bg-sky-50 text-sky-700"
-                                  : "bg-amber-50 text-amber-700"
+                                  : f.kind === "move"
+                                    ? "bg-violet-50 text-violet-700"
+                                    : "bg-amber-50 text-amber-700"
                             }`}
                           >
-                            {f.kind === "add" ? "追加" : f.kind === "confirm" ? "位置確認" : "修正"}
+                            {f.kind === "add"
+                              ? "追加"
+                              : f.kind === "confirm"
+                                ? "位置OK"
+                                : f.kind === "move"
+                                  ? "位置修正"
+                                  : "修正"}
                           </span>
                           {f.forwarded_at && (
                             <span className="shrink-0 rounded bg-blue-50 px-1.5 text-xs font-bold text-blue-700">

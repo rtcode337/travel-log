@@ -295,6 +295,8 @@ create index visit_notes_visit_id_idx on visit_notes (visit_id);
 -- 受け取る側へ渡したら forwarded_at に日時を入れる(空=未依頼、入っていれば対応中)。
 -- location_ok は「位置は正しい」(修正の依頼の一種。渡すテキストに [位置確認] の行で出し、
 -- 受け取る側が AI に座標を動かさせないよう固定する)。
+-- move_lat / move_lng は「この位置へ直して」(修正の依頼の一種。スポット詳細でピンを動かして
+-- 指す。渡すテキストに [位置修正] の行で出し、受け取る側が AI を通さずにその座標で固定する)。
 -- スポット自体には触らないので、依頼が付いていても地図の見え方は変わらない
 -- =============================================================
 create table spot_flags (
@@ -307,6 +309,8 @@ create table spot_flags (
   spot_type_id uuid references spot_types (id) on delete cascade,
   forwarded_at timestamptz,
   location_ok  boolean not null default false,
+  move_lat     double precision,
+  move_lng     double precision,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   unique (spot_id),
