@@ -821,23 +821,30 @@ export default function AdminView({
     if (ids.length === 0) return;
     setFlagForwarding(true);
     setFlagMessage(null);
-    const { data, error } = await api.spotFlags.setForwarded(ids, forwarded);
+    const { error } = await api.spotFlags.setForwarded(ids, forwarded);
     setFlagForwarding(false);
     if (error) {
       setFlagMessage("依頼の状態を変えられませんでした: " + error.message);
       return;
     }
-    // 位置の報告は渡した時点で済むので、対応中にせずに消している(API)
-    if (data?.removed) {
-      setFlagMessage(
-        `位置の報告${data.removed}件は渡した時点で済むので、一覧から消しました。`
-      );
-    }
     loadFlags();
   };
 
   /**
-   * 未依頼/対応中の依頼をまとめて削除する。**いま一覧に出ているidで指す** ——
+   * 対応中の位置の報告。受け取る側は AI を通さずにその場で座標を固定するので、
+   * 渡したあとは確かめるものが無く、まとめて片付けてよい。修正・追加は AI が直すので、
+   * 正しく直ったかを確かめてから行ごとに消す
+   */
+  const forwardedLocationFlags = useMemo(
+    () =>
+      flaggedSpots.filter(
+        (f) => f.forwarded_at && (f.kind === "confirm" || f.kind === "move")
+      ),
+    [flaggedSpots]
+  );
+
+  /**
+   * 依頼をまとめて削除する。**いま一覧に出ているidで指す** ——
    * 表示してから押すまでに増えた依頼まで、見ないまま消さないため
    */
   const handleDeleteFlags = async (targets: FlaggedSpot[], stateLabel: string) => {
@@ -1690,9 +1697,9 @@ export default function AdminView({
                   回したりするための形(理由の無いものは理由を書かない)。
                   渡したら「対応中にする」で印を付けると、まだ渡していないものと
                   見分けられる(対応中のものはテキストに入らない)。位置の報告は
-                  受け取る側がその場で座標を固定するので、対応中にせずに一覧から消える。
-                  片付いたら「対応中を一括で削除」で消す(スポット自体は消えない)。
-                  要らなくなった未依頼のものは「未依頼を一括で削除」で消せる。
+                  受け取る側がその場で座標を固定するので、渡したら「対応中の位置報告を
+                  削除」でまとめて片付けられる。押し間違えたら「一括で未依頼に戻す」で戻せる。修正・追加は正しく直ったか確かめてから
+                  行ごとの「削除」で消す(スポット自体は消えない)。
                 </HelpTip>
               </h3>
 
@@ -1795,30 +1802,33 @@ export default function AdminView({
                   </ul>
 
                   <div className="flex flex-wrap items-center justify-end gap-2">
+                    {/* 「対応中にする」を押し間違えたときに、まとめて戻せるように */}
                     <button
                       type="button"
-                      onClick={() => handleDeleteFlags(unforwardedFlags, "未依頼")}
-                      disabled={flagClearing || unforwardedFlags.length === 0}
-                      className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-50"
+                      onClick={() =>
+                        handleForwardFlags(
+                          flaggedSpots.filter((f) => f.forwarded_at).map((f) => f.id),
+                          false
+                        )
+                      }
+                      disabled={
+                        flagForwarding ||
+                        flaggedSpots.length === unforwardedFlags.length
+                      }
+                      className="rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-600 disabled:opacity-50"
                     >
-                      未依頼を一括で削除({unforwardedFlags.length}件)
+                      一括で未依頼に戻す(
+                      {flaggedSpots.length - unforwardedFlags.length}件)
                     </button>
                     <button
                       type="button"
                       onClick={() =>
-                        handleDeleteFlags(
-                          flaggedSpots.filter((f) => f.forwarded_at),
-                          "対応中"
-                        )
+                        handleDeleteFlags(forwardedLocationFlags, "対応中の位置報告")
                       }
-                      disabled={
-                        flagClearing ||
-                        flaggedSpots.length === unforwardedFlags.length
-                      }
+                      disabled={flagClearing || forwardedLocationFlags.length === 0}
                       className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 disabled:opacity-50"
                     >
-                      対応中を一括で削除(
-                      {flaggedSpots.length - unforwardedFlags.length}件)
+                      対応中の位置報告を削除({forwardedLocationFlags.length}件)
                     </button>
                   </div>
 

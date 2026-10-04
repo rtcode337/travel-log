@@ -255,15 +255,14 @@ export const api = {
       }),
     // 渡した(対応中)にする・未依頼に戻す。依頼のidで指す
     setForwarded: (ids: string[], forwarded: boolean) =>
-      // removed は渡した時点で済んで消した数(位置OK・位置修正)
-      request<{ updated: number; removed: number }>("/api/spot-flags", {
+      request<{ updated: number }>("/api/spot-flags", {
         method: "PATCH",
         body: JSON.stringify({ ids, forwarded }),
       }),
     // 1件削除する。修正の依頼はスポットのid、追加の依頼は依頼そのもののidで指す
     delete: (id: string) =>
       request<{ ok: true }>(`/api/spot-flags/${id}`, { method: "DELETE" }),
-    // まとめて削除する(管理画面の一括削除)。依頼のidで指し、種別に属するものだけを消す
+    // まとめて削除する(管理画面の「対応中の位置報告を削除」)。依頼のidで指し、種別に属するものだけを消す
     deleteMany: (type: string, ids: string[]) =>
       request<{ deleted: number }>(
         `/api/spot-flags?type=${encodeURIComponent(type)}`,
