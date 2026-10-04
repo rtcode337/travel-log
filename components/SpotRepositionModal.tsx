@@ -15,7 +15,7 @@ const OPEN_ZOOM = 18;
  *
  * - **非公開スポットの位置を直す**(`onSaved`)。スポット詳細の「位置を修正」から開き、
  *   保存でPATCHする(座標以外は既存の値をそのまま送って消えないようにする)
- * - **公開スポットの位置の修正を依頼する**(`onPick`)。スポット詳細の「位置を直す」から
+ * - **公開スポットの位置を報告する**(`onPick`)。スポット詳細の「位置を報告」から
  *   開き、スポットそのものには触らずに、指した座標を呼び出し側へ渡す(依頼にする)。
  *   公開スポットは収集から取り込み直されるので、ここで直しても次の取り込みで戻る ——
  *   直すのは収集を回す側で、こちらは正しい位置を伝えるだけ
@@ -102,7 +102,7 @@ export default function SpotRepositionModal({
       panelClassName="w-full max-w-md space-y-3 rounded-2xl bg-white p-4"
     >
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-bold">{onPick ? "正しい位置を依頼" : "位置を修正"}</h2>
+        <h2 className="font-bold">{onPick ? "位置を報告" : "位置を修正"}</h2>
         <button
           type="button"
           onClick={onClose}
@@ -114,7 +114,8 @@ export default function SpotRepositionModal({
       </div>
       <p className="text-xs text-gray-500">
         赤いピンをドラッグして正しい位置に合わせてください。
-        {onPick && "スポットはすぐには動きません(収集を回す側が直したあと、取り込み直すと反映されます)。"}
+        {onPick &&
+          "いまの位置で合っていれば、動かさずにそのまま報告してください。スポットはすぐには動きません(収集を回す側が直したあと、取り込み直すと反映されます)。"}
       </p>
       <div
         ref={containerRef}
@@ -143,7 +144,7 @@ export default function SpotRepositionModal({
               ? "依頼しています…"
               : "保存中…"
             : onPick
-              ? "この位置で依頼"
+              ? "この位置で報告"
               : "この位置で保存"}
         </button>
       </div>
