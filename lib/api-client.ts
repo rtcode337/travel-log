@@ -255,7 +255,8 @@ export const api = {
       }),
     // 渡した(対応中)にする・未依頼に戻す。依頼のidで指す
     setForwarded: (ids: string[], forwarded: boolean) =>
-      request<{ updated: number }>("/api/spot-flags", {
+      // removed は渡した時点で済んで消した数(位置OK・位置修正)
+      request<{ updated: number; removed: number }>("/api/spot-flags", {
         method: "PATCH",
         body: JSON.stringify({ ids, forwarded }),
       }),

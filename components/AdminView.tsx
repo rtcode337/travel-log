@@ -821,11 +821,17 @@ export default function AdminView({
     if (ids.length === 0) return;
     setFlagForwarding(true);
     setFlagMessage(null);
-    const { error } = await api.spotFlags.setForwarded(ids, forwarded);
+    const { data, error } = await api.spotFlags.setForwarded(ids, forwarded);
     setFlagForwarding(false);
     if (error) {
       setFlagMessage("依頼の状態を変えられませんでした: " + error.message);
       return;
+    }
+    // 位置OK・位置修正は渡した時点で済むので、対応中にせずに消している(API)
+    if (data?.removed) {
+      setFlagMessage(
+        `位置OK・位置修正の${data.removed}件は渡した時点で済むので、一覧から消しました。`
+      );
     }
     loadFlags();
   };
@@ -1683,7 +1689,8 @@ export default function AdminView({
                   そのままAIに渡して直し方を相談したり、情報収集の依頼に貼って
                   回したりするための形(理由の無いものは理由を書かない)。
                   渡したら「対応中にする」で印を付けると、まだ渡していないものと
-                  見分けられる(対応中のものはテキストに入らない)。
+                  見分けられる(対応中のものはテキストに入らない)。位置OK・位置修正は
+                  受け取る側がその場で座標を固定するので、対応中にせずに一覧から消える。
                   片付いたら「対応中を一括で削除」で消す(スポット自体は消えない)。
                   要らなくなった未依頼のものは「未依頼を一括で削除」で消せる。
                 </HelpTip>

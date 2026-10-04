@@ -95,7 +95,8 @@ export async function GET(request: Request) {
  * `{ ids: string[], forwarded: boolean }` を受け取る。**idで指す** —— 一覧を
  * テキストにしてから印を付けるまでの間に増えた依頼まで、渡したことにしないため。
  * 既に渡した日時が入っているものは上書きしない(最初に渡した日時を残す)。
- * 更新した件数を返す
+ * **渡した位置OK・位置修正は対応中にせずに消す**(渡した時点で済むため)。
+ * 更新した件数と消した件数を返す
  */
 export async function PATCH(request: Request) {
   const user = await getCurrentUser();
@@ -118,13 +119,27 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
 
+  // **位置OK・位置修正は、渡した時点で済む**ので対応中にせずに消す。受け取る側は
+  // AI を通さずにその場で座標を固定するので、待つものが無い(固定されたことは、
+  // 取り込み直すとカテゴリ「位置確認済み」で分かる)。修正・追加は AI が直すので、
+  // 正しく直ったかを確かめるまで対応中で残す
+  let removed = 0;
+  if (forwarded) {
+    const { rowCount } = await query(
+      `delete from spot_flags
+        where id = any($1::uuid[]) and spot_id is not null
+          and (location_ok or move_lat is not null)`,
+      [ids]
+    );
+    removed = rowCount ?? 0;
+  }
   const { rowCount } = await query(
     forwarded
       ? "update spot_flags set forwarded_at = now() where id = any($1::uuid[]) and forwarded_at is null"
       : "update spot_flags set forwarded_at = null where id = any($1::uuid[])",
     [ids]
   );
-  return NextResponse.json({ data: { updated: rowCount ?? 0 } });
+  return NextResponse.json({ data: { updated: rowCount ?? 0, removed } });
 }
 
 /**
