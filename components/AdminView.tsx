@@ -18,7 +18,7 @@ import {
 import { api } from "@/lib/api-client";
 import { buildCsv } from "@/lib/csv";
 import { exportsEnabled } from "@/lib/features";
-import { SERIES_STYLES_SETTING_KEY } from "@/lib/seriesStyle";
+import { SERIES_STYLES_SETTING_KEY, seriesForExisting } from "@/lib/seriesStyle";
 import { useDragReorder, REORDER_HANDLE_CLASS } from "@/lib/useDragReorder";
 import {
   CATEGORIES_SETTING_KEY,
@@ -707,8 +707,8 @@ export default function AdminView({
         setTypeSettingsMessage("JSONの内容が不正です: " + parsed.error);
         return;
       }
-      const { key, label, settings, series, categories } =
-        parsed.data;
+      const { key, label, settings, categories } = parsed.data;
+      const series = seriesForExisting(parsed.data, currentType);
       // キーが変わると種別を差し替えたのと同じ扱いになり影響が大きいため、
       // 一致しない場合は何も反映せずエラーにする(labelは反映してよい)
       if (key !== currentType.key) {
@@ -1047,8 +1047,8 @@ export default function AdminView({
     if ("error" in parsed) {
       throw new Error("settings.json の内容が不正です: " + parsed.error);
     }
-    const { key, label, settings, series, categories } =
-      parsed.data;
+    const { key, label, settings, categories } = parsed.data;
+    let series = parsed.data.series;
     // フォルダ名と食い違うJSONを黙って適用すると別の種別を上書きしてしまうため中止する
     if (key !== folderKey) {
       throw new Error(
@@ -1076,6 +1076,12 @@ export default function AdminView({
     }
     const existing = (types ?? []).find((t) => t.key === folderKey);
     if (existing) {
+      // **見た目を残すよう頼まれていれば、今のシリーズに重ねる**(範囲ごとのZIPを
+      // 読み込むたびに、画面で付けたアイコンや色が消えないように)
+      series = seriesForExisting(parsed.data, existing);
+      if (series) {
+        settingsToApply[SERIES_STYLES_SETTING_KEY] = JSON.stringify(series);
+      }
       const { error } = await withRetry(() =>
         api.spotTypes.applySettings(existing.id, settingsToApply, label)
       );
@@ -2205,7 +2211,7 @@ export default function AdminView({
                     JSONファイルから設定を反映
                     <HelpTip>
                       種別追加時と同じ形式(
-                      <code>{"{ key, label, settings?, series?, categories? }"}</code>
+                      <code>{"{ key, label, settings?, series?, keep_series_styles?, categories? }"}</code>
                       )のJSONファイルをアップロードすると、label・settings・series・
                       categoriesをまとめてこの種別に反映できる(JSON側で省略した
                       JSONキーの内容は変更しない)。ただしkeyの変更は影響が大きいため、
@@ -2359,7 +2365,7 @@ export default function AdminView({
                     <HelpTip>
                       設定情報込みのJSONファイルからも追加できる
                       (
-                      <code>{"{ key, label, settings?, series?, categories? }"}</code>
+                      <code>{"{ key, label, settings?, series?, keep_series_styles?, categories? }"}</code>
                       形式。<code>series</code>はそのスポット種別で使えるシリーズの一覧と
                       表示スタイル(色・縁取り線の色・アイコン・ラベル・形)の配列で、
                       省略するとシリーズ定義なしになる。<code>categories</code>は

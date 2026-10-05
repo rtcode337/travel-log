@@ -129,6 +129,41 @@ export function parseSeriesStyles(json: string): SeriesStyleDefinition[] | null 
 }
 
 /**
+ * 取り込む定義のシリーズに、**種別がいま持っている見た目を残して**重ねる
+ * (定義ファイルの`keep_series_styles`)。並びは取り込むほうに従い、
+ * **既にあるシリーズは今の定義をそのまま使う**。取り込むほうに無いシリーズは
+ * 後ろに残す(別の範囲にしか無いシリーズを落とさない)。
+ *
+ * 範囲ごとに書き出したZIPを同じ種別へ読み込む使い方のためのもの —— 書き出す側は
+ * 機械で決めた見た目(2文字のラベルと色)しか持たないので、上書きすると、
+ * 画面で付けたアイコンや色が読み込むたびに消える。
+ */
+export function mergeSeriesStyles(
+  current: SeriesStyleDefinition[],
+  incoming: SeriesStyleDefinition[]
+): SeriesStyleDefinition[] {
+  const byName = new Map(current.map((s) => [s.series, s]));
+  const named = new Set(incoming.map((s) => s.series));
+  return [
+    ...incoming.map((s) => byName.get(s.series) ?? s),
+    ...current.filter((s) => !named.has(s.series)),
+  ];
+}
+
+/**
+ * 既にある種別へ定義ファイルを適用するときに書き込むシリーズ。定義にシリーズが
+ * 無ければ undefined(触らない)。`keep_series_styles` なら今の見た目に重ねる
+ */
+export function seriesForExisting(
+  def: { series?: SeriesStyleDefinition[]; keep_series_styles?: boolean },
+  type: Pick<SpotType, "settings">
+): SeriesStyleDefinition[] | undefined {
+  if (!def.series) return undefined;
+  if (!def.keep_series_styles) return def.series;
+  return mergeSeriesStyles(resolveSeriesStyles(type), def.series);
+}
+
+/**
  * スポット種別のsettingsから、そのシリーズ設定(見た目+並び順)を解決する。
  * 未設定・不正な値の場合は空配列(=シリーズ定義なし)。
  */

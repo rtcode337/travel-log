@@ -260,6 +260,13 @@ export interface SpotTypeDefinitionFile {
   label: string;
   settings?: Partial<Record<string, boolean | string>>;
   series?: SeriesStyleDefinition[];
+  /**
+   * trueなら、既にある種別へ適用するときに**シリーズの見た目を今のまま残す**
+   * (`mergeSeriesStyles`)。足されるのは無かったシリーズだけで、並びは定義に従う。
+   * 機械で書き出した定義(範囲ごとのZIP)を、画面で見た目を整えた種別へ
+   * 何度も読み込むためのもの。省略時は今までどおり定義で上書きする
+   */
+  keep_series_styles?: boolean;
   categories?: Category[];
 }
 
@@ -297,6 +304,9 @@ export function parseSpotTypeDefinition(
       };
     }
   }
+  if (obj.keep_series_styles !== undefined && typeof obj.keep_series_styles !== "boolean") {
+    return { error: "keep_series_stylesはtrue/falseである必要があります。" };
+  }
   if (obj.categories !== undefined && !isValidCategoryList(obj.categories)) {
     return {
       error: "categoriesは空でない文字列の配列である必要があります。",
@@ -310,6 +320,7 @@ export function parseSpotTypeDefinition(
         | Partial<Record<string, boolean | string>>
         | undefined,
       series: obj.series as SeriesStyleDefinition[] | undefined,
+      keep_series_styles: obj.keep_series_styles as boolean | undefined,
       categories: obj.categories as Category[] | undefined,
     },
   };
