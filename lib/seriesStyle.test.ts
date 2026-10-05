@@ -26,6 +26,26 @@ test("見た目を残すときは、既にあるシリーズの定義を今の�
   ]);
 });
 
+test("足すシリーズの色は、残したシリーズと重ならないものに振り直す", () => {
+  const kept = [
+    { series: "和食", color: "#111111" },
+    { series: "カレー", color: "#222222" },
+  ];
+  const fresh = [
+    { series: "和食", color: "#111111" },
+    { series: "カレー", color: "#222222" },
+    // 取り込むほうは和食と同じ色を振ってきた
+    { series: "ラーメン", label: "ラー", color: "#111111" },
+    { series: "中華", color: "#333333" },
+  ];
+  const merged = mergeSeriesStyles(kept, fresh);
+  assert.equal(merged.find((s) => s.series === "ラーメン")?.color, "#333333");
+  // どの色も同じだけ使われているなら、取り込むほうの色のまま
+  assert.equal(merged.find((s) => s.series === "中華")?.color, "#333333");
+  // 残したシリーズの色は動かさない
+  assert.equal(merged.find((s) => s.series === "和食")?.color, "#111111");
+});
+
 test("見た目を残すと書いていなければ、今までどおり定義で上書きする", () => {
   const type = { settings: { [SERIES_STYLES_SETTING_KEY]: JSON.stringify(current) } };
   assert.deepEqual(seriesForExisting({ series: incoming }, type), incoming);

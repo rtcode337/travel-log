@@ -144,8 +144,32 @@ export function mergeSeriesStyles(
 ): SeriesStyleDefinition[] {
   const byName = new Map(current.map((s) => [s.series, s]));
   const named = new Set(incoming.map((s) => s.series));
+  const kept = current.filter((s) => named.has(s.series));
+  // **足すシリーズの色は、残したシリーズと重ならないものに振り直す**。取り込むほうは
+  // 自分の並びで色を振っているので、残した見た目(画面で付けた色)と同じ色が付きうる。
+  // 選ぶのは両方に出てくる色の中で、いちばん使われていないもの(同じなら定義の順)
+  const palette = [
+    ...new Set(
+      [...incoming, ...current]
+        .map((s) => s.color?.toLowerCase())
+        .filter((c): c is string => !!c)
+    ),
+  ];
+  const uses = new Map(palette.map((c) => [c, 0]));
+  for (const s of [...kept, ...current.filter((c) => !named.has(c.series))]) {
+    const c = s.color?.toLowerCase();
+    if (c) uses.set(c, (uses.get(c) ?? 0) + 1);
+  }
+  const recolored = (s: SeriesStyleDefinition): SeriesStyleDefinition => {
+    const own = s.color?.toLowerCase();
+    if (!own) return s;
+    const least = palette.reduce((a, b) => ((uses.get(b) ?? 0) < (uses.get(a) ?? 0) ? b : a));
+    const pick = (uses.get(own) ?? 0) > (uses.get(least) ?? 0) ? least : own;
+    uses.set(pick, (uses.get(pick) ?? 0) + 1);
+    return pick === own ? s : { ...s, color: pick };
+  };
   return [
-    ...incoming.map((s) => byName.get(s.series) ?? s),
+    ...incoming.map((s) => byName.get(s.series) ?? recolored(s)),
     ...current.filter((s) => !named.has(s.series)),
   ];
 }
