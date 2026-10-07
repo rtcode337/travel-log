@@ -110,3 +110,13 @@ export function sameCategories(a: Category[], b: Category[]): boolean {
   const sortedB = [...b].sort();
   return sortedA.every((v, i) => v === sortedB[i]);
 }
+
+/**
+ * カテゴリの絞り込みを通るか。**選んだカテゴリを全部持っているスポットだけ通す(AND条件)**。
+ * カテゴリは「駅近・ランチ・個室」のように1件に重ねて付ける軸なので、選ぶほど
+ * 絞り込まれるほうが自然 —— OR だと選ぶほど件数が増え、条件を足して探せなかった。
+ * 何も選んでいなければ通す。地図・リスト・ルートの判定で共通に使う。
+ */
+export function hasAllCategories(values: Category[], selected: Category[]): boolean {
+  return selected.every((c) => values.includes(c));
+}

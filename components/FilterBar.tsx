@@ -7,7 +7,7 @@ import {
   UNSET_SERIES,
   type SeriesStyleDefinition,
 } from "@/lib/seriesStyle";
-import { getCategoryOrder } from "@/lib/category";
+import { getCategoryOrder, hasAllCategories } from "@/lib/category";
 import { NO_RANK, type Rank, type RankFilterValue } from "@/lib/rank";
 import SeriesFilter from "@/components/SeriesFilter";
 import RankFilter from "@/components/RankFilter";
@@ -145,10 +145,8 @@ export function passesFilters(
     const effective = series && series.length > 0 ? series : UNSET_SERIES;
     if (!filters.series.includes(effective)) return false;
   }
-  // スポットは複数のカテゴリを持てるため、選択中のいずれかを持っていれば通す(OR条件)
-  if (filters.categories.length > 0) {
-    if (!categories.some((c) => filters.categories.includes(c))) return false;
-  }
+  // スポットは複数のカテゴリを持てる。選択中のカテゴリを全部持っていれば通す(AND条件)
+  if (!hasAllCategories(categories, filters.categories)) return false;
   if (filters.visited.length > 0) {
     const value: VisitedValue = isVisited ? "visited" : "unvisited";
     if (!filters.visited.includes(value)) return false;

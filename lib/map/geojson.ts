@@ -9,6 +9,7 @@ import { resolveSpotFace, resolveSpotMark, resolveSpotShape } from "@/lib/spotSt
 import { pinIconId } from "@/lib/pinIcon";
 import { toVisitDateKey, type SpotFilters } from "@/components/FilterBar";
 import { DEFAULT_ROUTE_COLOR, ensureRouteArrowImage } from "@/lib/map/layers";
+import { hasAllCategories } from "@/lib/category";
 
 /**
  * シリーズ・カテゴリの絞り込みを適用した表示対象のルート(経由地2点以上)を返す。
@@ -21,7 +22,7 @@ import { DEFAULT_ROUTE_COLOR, ensureRouteArrowImage } from "@/lib/map/layers";
  * あるものだけ絞り込みに連動して出し分け、シリーズ未指定・一覧に無いシリーズの
  * ルートは対象外として表示する。カテゴリで絞り込んでいるときは、ルート自体は
  * カテゴリを持たない(`spot_routes`にcategories相当の列は無い)ため、経由地の
- * カテゴリで代用して「選択中のカテゴリを持つ経由地が1つでもあるルート」を表示する。
+ * カテゴリで代用して「選択中のカテゴリを全部持つ経由地が1つでもあるルート」を表示する。
  * ただしこの判定に使う経由地は、**そのルートのシリーズに属するスポットがあれば
  * それだけ**に絞る(`routeOwnPoints`) — 乗り換え駅・空港のように複数のルートで
  * 共有している経由地に引きずられて、無関係なルートまで表示されるのを防ぐため
@@ -52,7 +53,7 @@ export function filterVisibleRoutes(
     if (
       filters.categories.length > 0 &&
       !routeOwnPoints(route, spotById).some((s) =>
-        s.categories.some((c) => filters.categories.includes(c))
+        hasAllCategories(s.categories, filters.categories)
       )
     ) {
       return false;
