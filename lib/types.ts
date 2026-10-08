@@ -470,7 +470,7 @@ export interface VisitPlan {
 
 /**
  * 訪問予定リスト(旅程)。複数スポットを順序付きでまとめたもの。種別ごとに紐づき、
- * 1スポットごとの visit_plans とは独立(詳細はmigrations/006)。
+ * 1スポットごとの visit_plans とは独立(経緯はタグv1.0.0のdb/migrations/006)。
  * `spot_ids`はseq順の経由スポットのUUID(スポット詳細は呼び出し側が保持済みの一覧から解決)。
  */
 export interface VisitPlanList {

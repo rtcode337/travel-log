@@ -5,8 +5,18 @@
 移行するためのスクリプト**を置く。
 
 `01_schema.sql`自身も`schema_migrations`上では`000_init_schema`という名前の「一番先頭の
-マイグレーション」として扱われる。空のDBには実行され、既にテーブルがあるDBには実行されず
-適用済みとして記録されるだけなので、既存DBをそのまま引き継げる。
+マイグレーション」として扱われ、空のDBにだけ流れる。
+
+## v1.0.0 より前の移行は持っていない
+
+`001`〜`024`(v1.0.0 までの移行)は**タグ`v1.0.0`にだけ残してあり、このフォルダには無い**。
+空のDBに`01_schema.sql`を流すとき、最後の`024_spot_flags_move`も適用済みとして記録する
+(`01_schema.sql`はその時点の形を含むため)。
+
+**v1.0.0 より前の形のDB(`024`が未適用、または`schema_migrations`が無い)は起動時に止める**
+(`scripts/migrate.mjs`の`BASELINE_VERSION`)。黙って進むと、足りない列のままアプリが動く。
+そうしたDBは、先にv1.0.0のイメージ(`ghcr.io/rtcode337/travel-log:sha-1eec4ae`)で一度
+起動して移行を当ててから新しい版へ上げる(手順は`docs/operations.md`)。
 
 ## 適用は自動
 
@@ -30,7 +40,7 @@ docker compose logs app
 ## 書き方のルール
 
 - `db/init/01_schema.sql`のテーブル定義を変更したら、必ず同じコミットでここにスクリプトを追加する
-- ファイル名は`<連番>_<内容>.sql`(例: `001_series_categories.sql`)。連番の小さい順に適用され、
+- ファイル名は`<連番>_<内容>.sql`(例: `025_spot_tags.sql`。**連番は`025`から**)。連番の小さい順に適用され、
   ファイル名(拡張子を除く)がそのまま`schema_migrations.version`になる
 - **`begin`/`commit`は書かない**。トランザクションは`scripts/migrate.mjs`が1本ずつ
   張る(スクリプト内で`commit`すると外側のトランザクションが切れてしまう)
@@ -45,7 +55,7 @@ docker compose logs app
 一度は当たる。** だから冪等なだけでは足りず、**現在のスキーマに対して無害である**ことまで
 要る。実際に踏んだ例:
 
-- `001` の `alter table spots rename column rank to series` は「rank 列がある」ことだけを
+- (v1.0.0 までの移行での例)`001` の `alter table spots rename column rank to series` は「rank 列がある」ことだけを
   条件にしていた。`010` でランク機能を入れ直して `spots.rank` が復活したため、新規DBでも
   改名しようとして `series already exists` で落ち、**新規セットアップが一切通らなくなっていた**
   (`docker compose up` も `scripts/migrate-remote.sh` も)。「series がまだ無い」ことまで

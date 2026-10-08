@@ -27,6 +27,12 @@ Docker で本番運用するときの詳細と、任意の設定(Google ログ�
 - **PostgreSQL 16 時代のデータを持つ既存環境は、更新前に1回だけデータ移行が必要**
   ([postgres-18-upgrade.md](postgres-18-upgrade.md))。移行せずに起動すると
   dbコンテナが起動に失敗する(データは壊れない)
+- **v1.0.0 より前から動かしているホストは、先に v1.0.0 のイメージで一度起動すること。**
+  v1.0.0 より後の版は過去の移行SQLを持たないので、それより前の形のDBでは起動時に
+  `migrate: failed: このDBは v1.0.0 より前の形です…`で止まる(データは壊れない)。
+  `docker-compose.yml`のイメージを一時的に`ghcr.io/rtcode337/travel-log:sha-1eec4ae`
+  (v1.0.0)にして`up -d`し、`docker compose logs app`で`migrate: migrations done`を
+  確かめてから`latest`に戻す
 - **DBスキーマの更新は自動**。`docker compose up`すると`app`が待ち受けを始める前に未適用の
   マイグレーションを順に当てる(失敗した場合は待ち受けに進まないので、古いスキーマのまま
   動くことはない)。適用状況は

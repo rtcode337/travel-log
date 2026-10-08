@@ -17,6 +17,11 @@ const MIGRATIONS_DIR = path.join(ROOT, "db/migrations");
 const SCHEMA_FILE = path.join(ROOT, "db/init/01_schema.sql");
 // スキーマ本体を schema_migrations に記録するときのバージョン名(常に連番の先頭)
 const SCHEMA_VERSION = "000_init_schema";
+// v1.0.0 までの移行の最後の1本。v1.0.0 より後の版は 001〜024 の移行SQLを持たない
+// (タグ v1.0.0 に残してある)ので、ここまで当たっていないDBは移行できない ——
+// 黙って先へ進むと、足りない列のままアプリが動く。01_schema.sql で作った新規DBは
+// v1.0.0 の時点で既にこの形なので、作ったときに一緒に記録する
+const BASELINE_VERSION = "024_spot_flags_move";
 // マイグレーションの同時実行を防ぐための advisory lock のキー(任意の定数)。
 // 値を変えると、旧版と新版が同時に走ったときに互いを排除できなくなる
 const LOCK_KEY = 8241973;
@@ -101,18 +106,29 @@ async function migrate() {
         applied_at timestamptz not null default now()
       )`);
 
-    // スキーマ本体。既にテーブルがあるDB(旧方式でinitdbが作ったもの)には流さず、
-    // 「適用済み」として記録するだけにする —— 既存の本番DBをそのまま引き継ぐため
+    // スキーマ本体は空のDBにだけ流す。テーブルがあるのに記録が無いDBは、記録を持たない
+    // 古い方式で作ったもの —— v1.0.0 が引き継げるので、そちらで先に移行させる
     if (!(await isApplied(client, SCHEMA_VERSION))) {
       const { rows } = await client.query("select to_regclass('public.spot_types') as reg");
       if (rows[0].reg !== null) {
-        console.log(`migrate: schema already exists, marking ${SCHEMA_VERSION} as applied`);
-        await applyInTransaction(client, SCHEMA_VERSION, null);
+        throw new Error(
+          "このDBには適用の記録がありません。先に v1.0.0 のイメージで一度起動して移行を当ててください",
+        );
       }
-      else {
-        console.log(`migrate: applying ${SCHEMA_VERSION}`);
-        await applyInTransaction(client, SCHEMA_VERSION, await readFile(SCHEMA_FILE, "utf8"));
-      }
+      console.log(`migrate: applying ${SCHEMA_VERSION}`);
+      // 基準の記録もスキーマと同じトランザクションで入れる(間で落ちると、次の起動で
+      // 「v1.0.0 より前の形」と誤って止まる)
+      await applyInTransaction(
+        client,
+        SCHEMA_VERSION,
+        `${await readFile(SCHEMA_FILE, "utf8")}
+insert into schema_migrations (version) values ('${BASELINE_VERSION}') on conflict (version) do nothing;`,
+      );
+    }
+    else if (!(await isApplied(client, BASELINE_VERSION))) {
+      throw new Error(
+        `このDBは v1.0.0 より前の形です(${BASELINE_VERSION} が未適用)。先に v1.0.0 のイメージで一度起動して移行を当ててください`,
+      );
     }
 
     let applied = 0;

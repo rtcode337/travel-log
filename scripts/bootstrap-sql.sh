@@ -35,9 +35,11 @@ echo "-- ===== 000_init_schema (db/init/01_schema.sql) ====="
 cat db/init/01_schema.sql
 echo
 echo "insert into schema_migrations (version) values ('000_init_schema') on conflict (version) do nothing;"
+# v1.0.0 までの移行は 01_schema.sql に含まれている(scripts/migrate.mjs の BASELINE_VERSION と同じ記録)
+echo "insert into schema_migrations (version) values ('024_spot_flags_move') on conflict (version) do nothing;"
 echo
 
-for file in db/migrations/*.sql; do
+for file in $(ls db/migrations/*.sql 2>/dev/null | sort); do
     version=$(basename "$file" .sql)
     echo "-- ===== $version ====="
     cat "$file"

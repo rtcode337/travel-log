@@ -18,8 +18,8 @@
 --
 -- このファイルは postgres の docker-entrypoint-initdb.d には置かず(dbコンテナに
 -- マウントもしない)、アプリが起動時に '000_init_schema' という名前の
--- 「先頭のマイグレーション」として流す。空のDBには実行され、既にテーブルがある
--- DBには実行されず適用済みとして記録されるだけになる(scripts/migrate.mjs 参照)。
+-- 「先頭のマイグレーション」として空のDBにだけ流す。v1.0.0 より前の形のDBは
+-- 起動時に止める(scripts/migrate.mjs 参照)。
 
 create extension if not exists pgcrypto;
 
@@ -358,7 +358,7 @@ create index visit_plans_user_id_idx on visit_plans (user_id);
 create index visit_plans_spot_id_idx on visit_plans (spot_id);
 
 -- 訪問予定リスト(旅程)。複数スポットを順序付きでまとめる。種別ごとに紐づき、
--- 1スポットごとの visit_plans とは独立(詳細は migrations/006)。
+-- 1スポットごとの visit_plans とは独立(経緯はタグ v1.0.0 の db/migrations/006)。
 create table visit_plan_lists (
   id            uuid primary key default gen_random_uuid(),
   user_id       uuid not null references users (id) on delete cascade,
