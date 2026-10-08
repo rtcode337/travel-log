@@ -66,7 +66,7 @@ export interface Spot {
   updated_at: string;
 }
 
-export type SpotOrigin = "csv" | "manual";
+type SpotOrigin = "csv" | "manual";
 
 /**
  * 画面から個別削除されたCSV由来の公開スポットの記録(削除の墓標)。
@@ -124,7 +124,7 @@ export interface SpotFlag {
  * 依頼の種類(表には持たない)。spot_idが無ければ追加、あれば修正。
  * 修正のうち「位置OK」を付けたものは位置確認、動かした先を持つものは位置修正
  */
-export type SpotFlagKind = "fix" | "add" | "confirm" | "move";
+type SpotFlagKind = "fix" | "add" | "confirm" | "move";
 
 /**
  * 管理画面の修正・追加の依頼の一覧の1行(spot_flagsにスポットの表示用の項目を
@@ -142,7 +142,7 @@ export interface FlaggedSpot extends SpotFlag {
 }
 
 /** ルートの経由地1点。seqの昇順が巡った順(lat/lng/spot_nameは表示用にJOINで付与) */
-export interface SpotRoutePoint {
+interface SpotRoutePoint {
   spot_id: string;
   seq: number;
   lat: number;
@@ -175,8 +175,7 @@ export interface SpotRoute {
   created_at: string;
   /**
    * 経由地の入れ替え(upsert)でも進む。公開スポットキャッシュの鮮度判定
-   * (lib/useSpotCache.ts)に使う。旧バージョンで保存したキャッシュ内の
-   * ルートには入っていないことがある
+   * (lib/useSpotCache.ts)に使う
    */
   updated_at: string;
   points: SpotRoutePoint[];
@@ -255,7 +254,7 @@ export function getSpotTypeSetting(
  * (lib/seriesStyle.ts)、categoriesを省略した場合はカテゴリ定義なし
  * (lib/category.ts参照)になる。
  */
-export interface SpotTypeDefinitionFile {
+interface SpotTypeDefinitionFile {
   key: string;
   label: string;
   settings?: Partial<Record<string, boolean | string>>;

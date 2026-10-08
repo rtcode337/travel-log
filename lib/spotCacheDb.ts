@@ -30,8 +30,7 @@ export interface StoredSpotCache {
    * ダウンロードしたデータ(公開スポット・公開ルート)の中で最も新しいupdated_at。
    * 鮮度チェック(/api/spots/last-updated との比較)は端末の時計に依らないよう
    * downloadedAt(端末時刻)ではなくこちら(サーバー時刻)で行う。
-   * この項目を持たない旧エントリはdownloadedAtへフォールバックする(任意項目のため
-   * DB_VERSIONは上げない)
+   * 公開スポットもルートも1件も無かったときはnull(downloadedAtで近似する)
    */
   latestUpdatedAt?: string | null;
   spots: CachedSpot[];
@@ -95,8 +94,6 @@ const DB_NAME = "travel-log";
 // (旧エントリのままだと、ランクを使う種別のピンが全部「ランクなし」の白になる)。
 const DB_VERSION = 7;
 const STORE = "public-spots"; // 値のキーはtypeKey
-const TEMP_V2_STORE = "public-spots-v2"; // 上記の一時版が作ったストア(残っていれば削除)
-const LEGACY_PREFIX = "travel-log:public-spots:"; // 旧localStorage方式のキー接頭辞
 
 function idbAvailable(): boolean {
   return typeof indexedDB !== "undefined";
@@ -107,9 +104,6 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (db.objectStoreNames.contains(TEMP_V2_STORE)) {
-        db.deleteObjectStore(TEMP_V2_STORE);
-      }
       // 旧バージョンのエントリはCachedSpotの形が違うので中身ごと捨てる
       // (次回アクセス時に /api/spots から取り直される)
       if (db.objectStoreNames.contains(STORE)) {
@@ -127,7 +121,6 @@ export async function readSpotCacheDb(
   typeKey: string
 ): Promise<StoredSpotCache | null> {
   if (!idbAvailable()) return null;
-  clearLegacyCache(typeKey);
   try {
     const db = await openDb();
     return await new Promise<StoredSpotCache | null>((resolve, reject) => {
@@ -174,19 +167,5 @@ export async function deleteSpotCacheDb(typeKey: string): Promise<void> {
     });
   } finally {
     db.close();
-  }
-}
-
-/**
- * 旧localStorage方式(種別ごとに1つのJSON文字列)のキャッシュを掃除する。
- * 中身はprefecture/municipality時代の形なので引き継がず、キーを消すだけにして
- * /api/spots から取り直させる。
- */
-function clearLegacyCache(typeKey: string): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.removeItem(LEGACY_PREFIX + typeKey);
-  } catch {
-    // 掃除に失敗しても実害はないので無視する
   }
 }

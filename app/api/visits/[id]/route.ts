@@ -43,6 +43,13 @@ export async function PATCH(
     );
   }
 
+  // unvisited(未訪問記録かどうか)は毎回送らせる(省略を既存の値で埋めると、
+  // 送り忘れが黙って通る)
+  if (typeof body.unvisited !== "boolean") {
+    return NextResponse.json({ error: "invalid unvisited" }, { status: 400 });
+  }
+  const unvisited: boolean = body.unvisited;
+
   // 写真は「既存の相対パス(残す写真)」と「data URL(追加する写真)」の混在で届く。
   // 相対パスはこの訪問記録が現在持っているものに限定する(他人の写真パスや
   // 別の訪問記録のパスを直接差し込ませない)
@@ -107,9 +114,6 @@ export async function PATCH(
     );
   }
 
-  // unvisited(未訪問記録かどうか)は指定されたときだけ更新する(旧クライアント互換)
-  const unvisited =
-    typeof body.unvisited === "boolean" ? body.unvisited : existing.unvisited;
 
   let rows: Visit[];
   try {

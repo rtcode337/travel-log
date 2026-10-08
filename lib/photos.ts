@@ -39,7 +39,7 @@ const PHOTO_PATH_RE = new RegExp(
   `^(${UUID_RE})/\\d{4}/\\d{2}/${UUID_RE}\\.(jpg|png|webp)$`
 );
 
-export interface ParsedPhotoPath {
+interface ParsedPhotoPath {
   /** パスの所有者(先頭セグメントのユーザーID) */
   userId: string;
   /** 検証済みの相対パス(そのまま`photoStorage`に渡せる) */

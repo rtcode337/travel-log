@@ -16,7 +16,7 @@ import { formatJstDateTime } from "@/lib/datetime";
 /** アプリ内で扱う公開スポットキャッシュ(spotsは表示用にSpotへ復元済み) */
 export interface SpotCacheEntry {
   downloadedAt: string; // ISO
-  /** ダウンロードしたデータの中で最も新しいupdated_at(鮮度チェック用。旧エントリはnull) */
+  /** ダウンロードしたデータの中で最も新しいupdated_at(鮮度チェック用。データが無ければnull) */
   latestUpdatedAt: string | null;
   spots: Spot[];
   /** 公開ルート(公開スポットと同時にダウンロードして保存される) */
@@ -24,7 +24,7 @@ export interface SpotCacheEntry {
 }
 
 /** ダウンロード確認ダイアログを出す理由(未ダウンロード / キャッシュより新しい更新がある) */
-export type SpotDownloadPromptReason = "missing" | "stale";
+type SpotDownloadPromptReason = "missing" | "stale";
 
 /**
  * 公開スポットのダウンロードを何件ずつに分けて取るか。
@@ -65,7 +65,6 @@ function laterOf(a: string | null, b: string | null | undefined): string | null 
 
 /**
  * ダウンロードしたデータの中で最も新しいupdated_atを求める(鮮度チェック用に保存する)。
- * 旧バージョンのキャッシュから来たルートはupdated_atを持たないことがあるため無視する
  */
 function latestUpdatedAtOf(spots: Spot[], routes: SpotRoute[]): string | null {
   let latest: string | null = null;
@@ -269,7 +268,7 @@ export function useSpotCache(
         if (!remote || cancelled) return;
         // 件数の違いは削除(max(updated_at)が進まない)を拾うため。日時の比較は
         // 端末の時計とずれないよう、原則ダウンロード時に保存したサーバー日時
-        // (latestUpdatedAt)と比べる(持たない旧エントリのみdownloadedAtで近似)
+        // (latestUpdatedAt)と比べる(データが無くて持たないときだけdownloadedAtで近似)
         const cachedLatest = entry.latestUpdatedAt ?? entry.downloadedAt;
         const stale =
           remote.spotCount !== entry.spots.length ||

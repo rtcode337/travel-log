@@ -83,7 +83,7 @@ export function formatCategoryList(values: Category[]): string {
 }
 
 /** スポットが持つカテゴリを、種別のカテゴリ設定の並び順に整列して返す(表示用) */
-export function sortCategories(
+function sortCategories(
   values: Category[],
   categories: Category[]
 ): Category[] {

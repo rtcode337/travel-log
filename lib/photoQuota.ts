@@ -33,7 +33,7 @@ async function getPhotoQuotaBytes(): Promise<number | null> {
   return mb > 0 ? mb * MB : null;
 }
 
-export interface PhotoUsageSummary {
+interface PhotoUsageSummary {
   usedBytes: number;
   photoCount: number;
   /** null は上限なし */

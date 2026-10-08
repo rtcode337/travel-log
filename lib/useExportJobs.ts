@@ -6,7 +6,7 @@ import { exportsEnabled } from "@/lib/features";
 import type { ExportJob } from "@/lib/types";
 
 /** 生成が長引いている実行中ジョブを失敗扱いにする閾値(コンテナが落ちるとrunningのまま残る) */
-export const STALE_RUNNING_MS = 60 * 60 * 1000;
+const STALE_RUNNING_MS = 60 * 60 * 1000;
 
 /** 実行中のまま長時間止まっているか(コンテナ再起動でrunningが残った場合) */
 export function isStaleRunning(job: ExportJob): boolean {

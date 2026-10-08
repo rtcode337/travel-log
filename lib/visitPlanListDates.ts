@@ -8,7 +8,7 @@
  */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-export type PlanDatesResult =
+type PlanDatesResult =
   | { ok: true; start: string | null; end: string | null }
   | { ok: false; error: string };
 

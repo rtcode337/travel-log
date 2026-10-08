@@ -27,7 +27,7 @@ import type { Spot, SpotType } from "@/lib/types";
  */
 
 /** 質問文。AIのページのテキストボックスにこの文字列が入る */
-export function buildSpotQuestion(
+function buildSpotQuestion(
   spot: Spot,
   spotType?: SpotType | null
 ): string {

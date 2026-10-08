@@ -20,7 +20,7 @@ export const STACK_BADGE_LAYER_ID = "spots-stack-badge";
 // **クラスタ化しない自前のソース**にするので、拡大率が低くてピンがクラスタへ
 // 吸われているときでも「どこを見ているか」が出る
 export const FOCUS_SOURCE_ID = "spot-focus";
-export const FOCUS_LAYER_ID = "spot-focus-halo";
+const FOCUS_LAYER_ID = "spot-focus-halo";
 
 
 export const PATH_PIN_SOURCE_ID = "spots-path";
@@ -28,8 +28,8 @@ export const PATH_PIN_LAYER_ID = "spots-path-point";
 export const PATH_STACK_BADGE_LAYER_ID = "spots-path-stack-badge";
 
 export const ROUTES_SOURCE_ID = "spot-routes";
-export const ROUTE_LINE_LAYER_ID = "spot-routes-line";
-export const ROUTE_ARROW_LAYER_ID = "spot-routes-arrow";
+const ROUTE_LINE_LAYER_ID = "spot-routes-line";
+const ROUTE_ARROW_LAYER_ID = "spot-routes-arrow";
 export const ROUTE_HIT_LAYER_ID = "spot-routes-hit";
 
 /**
@@ -52,7 +52,7 @@ export function overlayIds(typeKey: string) {
 
 /** 重ね表示の不透明度(本体のスポットと見分けるための半透明) */
 export const OVERLAY_OPACITY = 0.55;
-export const OVERLAY_LINE_OPACITY = 0.45;
+const OVERLAY_LINE_OPACITY = 0.45;
 
 export const MAIN_PIN_LAYERS = [CLUSTER_LAYER_ID, UNCLUSTERED_LAYER_ID, PATH_PIN_LAYER_ID];
 
@@ -350,7 +350,7 @@ export function addOverlaySpotLayers(
 }
 
 /** 重ね表示のスポット用のlayer/sourceを消す(クラスタの切り替えで作り直すため) */
-export function removeOverlaySpotLayers(map: maplibregl.Map, typeKey: string) {
+function removeOverlaySpotLayers(map: maplibregl.Map, typeKey: string) {
   const ids = overlayIds(typeKey);
   // sourceを消す前に、それを参照しているlayerを全部消す
   for (const id of [ids.cluster, ids.clusterCount, ids.unclustered, ids.stackBadge]) {

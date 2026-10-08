@@ -14,7 +14,7 @@ import ChoiceRow, { toggleChoice } from "@/components/ChoiceRow";
  * アイコンがあっても数十個になれば探せないので、上限自体は残す
  * (それを超える種別は検索できる一覧に回す)。
  */
-export const SERIES_FILTER_TILE_MAX = 20;
+const SERIES_FILTER_TILE_MAX = 20;
 
 /**
  * 畳んでおく件数の境目(`collapsible`のとき)。**これより多いと、押すまで一覧を出さない。**

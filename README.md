@@ -55,7 +55,7 @@ docker compose pull && docker compose up -d
 - **データの置き場は`data/`の1つだけ**。バックアップは停止してから`data/`をコピーする
 - スポットデータは同梱していないので、ログイン後に[外部データ](#外部データtravel-log-data)を取り込む
 
-旧構成からの移行・バックアップと復元・リポジトリを置けない環境(YAMLを貼り付けて起動するタイプ)・
+バックアップと復元・リポジトリを置けない環境(YAMLを貼り付けて起動するタイプ)・
 Googleログインの設定は [docs/operations.md](docs/operations.md)、
 サーバーを持たずに公開する場合は [docs/hosting-vercel-supabase.md](docs/hosting-vercel-supabase.md) を参照。
 

@@ -28,10 +28,8 @@ export interface SpotFilters {
   /** 空配列 = カテゴリによる絞り込みなし(「すべて」選択中、全件表示) */
   categories: Category[];
   /**
-   * 訪問状況の絞り込み。既定は`["unvisited"]`(未訪問のみ)で、「すべて」チップは
-   * 無い(両方選択=全件表示)。UI上は空選択を作れない(見た目が「何も表示しない」に
-   * 見えるのに全件表示になるため)が、判定(`passesFilters`)は旧保存データ互換の
-   * ため空配列=絞り込みなし(全件)としても動く
+   * 訪問状況の絞り込み。既定は`["unvisited"]`(未訪問のみ)。空配列 = 絞り込みなし
+   * (「すべて」選択中、全件表示)で、シリーズ・カテゴリと同じ扱い
    */
   visited: VisitedValue[];
   /**
@@ -99,7 +97,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
 };
 
 /** 訪問状況が既定(未訪問のみ)のままか(絞り込み中とみなさない条件) */
-export function isDefaultVisited(visited: VisitedValue[]): boolean {
+function isDefaultVisited(visited: VisitedValue[]): boolean {
   return visited.length === 1 && visited[0] === "unvisited";
 }
 

@@ -13,8 +13,8 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const MIGRATIONS_DIR = process.env.MIGRATIONS_DIR ?? path.join(ROOT, "db/migrations");
-const SCHEMA_FILE = process.env.SCHEMA_FILE ?? path.join(ROOT, "db/init/01_schema.sql");
+const MIGRATIONS_DIR = path.join(ROOT, "db/migrations");
+const SCHEMA_FILE = path.join(ROOT, "db/init/01_schema.sql");
 // スキーマ本体を schema_migrations に記録するときのバージョン名(常に連番の先頭)
 const SCHEMA_VERSION = "000_init_schema";
 // マイグレーションの同時実行を防ぐための advisory lock のキー(任意の定数)。

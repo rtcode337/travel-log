@@ -61,7 +61,7 @@ const CSV_HEADER = [
   "未訪問記録",
 ];
 
-export interface VisitExportResult {
+interface VisitExportResult {
   visitCount: number;
   photoCount: number;
 }

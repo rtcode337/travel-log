@@ -10,18 +10,9 @@ Docker で本番運用するときの詳細と、任意の設定(Google ログ�
 本番ホストでは本リポジトリのクローン(`docker-compose.yml`を使う)を置き、
 イメージはビルドせずpullして使う。
 
-- Composeのプロジェクト名は本番・開発・standaloneとも`travel-log`。以前は
-  `travel-log-prod`/`travel-log-dev`に分けていたため、**それ以前から動かしている
-  ホストでは初回だけ旧スタックを止めてから起動すること**(止めずに`up`すると、
-  同じ`data`を奪い合う新旧2つのスタックが並ぶ)
-
-  ```bash
-  docker compose -p travel-log-prod down          # 開発機では -p travel-log-dev -f docker-compose.dev.yml
-  docker compose pull && docker compose up -d
-  ```
+- Composeのプロジェクト名は本番・開発・standaloneとも`travel-log`
 - 公開されるイメージは`ghcr.io/rtcode337/travel-log`の1つ。スキーマとマイグレーションSQLも
-  これに焼き込まれ、アプリが起動時に当てる(かつては`travel-log-db-init`という専用イメージが
-  あったが、同じDBへ繋いでいるアプリに寄せた)
+  これに焼き込まれ、アプリが起動時に当てる
 - **データの置き場は`data/`の1つだけ**(リポジトリ直下)。この下に`db/`(Postgresの実データ)・
   `photos/`(添付写真)・`exports/`(エクスポートのZIP)を`init`サービスが起動時に作る。
   **バックアップは`data/`をコピーすればよい**(停止してからコピーすること)。
@@ -33,20 +24,6 @@ Docker で本番運用するときの詳細と、任意の設定(Google ログ�
   `TRAVEL_LOG_UID`/`TRAVEL_LOG_GID`で`id -u`/`id -g`を設定する
   (standaloneはYAML冒頭の`x-run-as`)。所有者合わせは起動前に`init`が
   自動でやるので、`chown`を手で打つ必要はない
-- **置き場を`data/`にまとめる前から動かしているホストは、更新時に1回だけ移すこと。**
-  `docker compose down`のあと:
-
-  ```bash
-  mkdir -p data/db
-  sudo mv data/18 data/db/          # Postgresの実データ
-  sudo mv photos/* data/photos/     # data/photos・data/exports が無ければ先に mkdir
-  sudo mv exports/* data/exports/
-  ```
-
-  standaloneは冒頭の`x-db-data-dir`/`x-photos-dir`/`x-exports-dir`が`x-data-dir`1つに
-  変わっているので、コピー側のYAMLも差し替える。移さずに起動すると空のDBが作られ、
-  初期状態のアプリが立ち上がる(旧データは消えない)。
-  さらに古い`db/data/`のままのホストは、先に`mv db/data data`を済ませてから上を実行する
 - **PostgreSQL 16 時代のデータを持つ既存環境は、更新前に1回だけデータ移行が必要**
   ([postgres-18-upgrade.md](postgres-18-upgrade.md))。移行せずに起動すると
   dbコンテナが起動に失敗する(データは壊れない)

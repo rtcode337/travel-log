@@ -83,7 +83,7 @@ export async function fetchGoogleProfile(
  * **有効にすると、URLを知っていてGoogleアカウントを持つ人は誰でも入れる。**
  * 自分だけ・身内だけで使うつもりのインスタンスで有効にしないこと。
  */
-export function isGoogleAutoSignupEnabled(): boolean {
+function isGoogleAutoSignupEnabled(): boolean {
   return process.env.GOOGLE_AUTO_SIGNUP === "true";
 }
 

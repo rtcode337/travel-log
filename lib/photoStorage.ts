@@ -83,33 +83,22 @@ const fsStorage: PhotoStorage = {
 /**
  * Supabase Storageの接続情報。未設定のまま使おうとした場合は起動時ではなく利用時に落とす。
  *
- * **キーの渡し方が世代で違う**ので、ここで一度だけ組み立てて使い回す。
- *
- * - **新しいキー(`sb_secret_...`)は`apikey`ヘッダだけ**に載せる。公式の移行ガイドいわく
- *   「If you also pass the key on the `Authorization: Bearer` header, which many Supabase
- *   clients do by default, the platform tries to parse it as a JWT and rejects the request
- *   with `Invalid JWT`」——**JWTではないので、Bearerに載せると弾かれる**
- * - **レガシーの`service_role`はJWT**なので、従来どおり`Authorization: Bearer`にも載せる
- *   (supabase-jsが送っているのと同じ形)
- *
- * 2026年末にレガシーキーは廃止予定で、**新規プロジェクトには`service_role`自体が無い**。
- * 環境変数は`SUPABASE_SECRET_KEY`を正とし、`SUPABASE_SERVICE_ROLE_KEY`は
- * 既存のデプロイが壊れないよう読むだけにしてある。
+ * **キー(`sb_secret_...`)は`apikey`ヘッダだけ**に載せる。公式の移行ガイドいわく
+ * 「If you also pass the key on the `Authorization: Bearer` header, which many Supabase
+ * clients do by default, the platform tries to parse it as a JWT and rejects the request
+ * with `Invalid JWT`」——**JWTではないので、Bearerに載せると弾かれる**。
+ * 旧世代の`service_role`キー(JWT)は2026年末に廃止されるので受け付けない。
  */
 function supabaseConfig() {
   const url = process.env.SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SECRET_KEY;
   const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? "visit-photos";
   if (!url || !key) {
     throw new Error(
       "PHOTO_STORAGE=supabase には SUPABASE_URL と SUPABASE_SECRET_KEY が必要です。"
     );
   }
-  // 新しいキーはapikeyのみ、レガシーのJWTは両方に載せる(上のコメント参照)
-  const headers: Record<string, string> = key.startsWith("sb_")
-    ? { apikey: key }
-    : { apikey: key, Authorization: `Bearer ${key}` };
+  const headers: Record<string, string> = { apikey: key };
   return {
     objectUrl: (relPath: string) =>
       `${url.replace(/\/$/, "")}/storage/v1/object/${bucket}/${relPath}`,

@@ -155,8 +155,6 @@ jobs:
       - name: 古いイメージを削除して直近 10 世代だけ残す
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          # travel-log-db-init は廃止(スキーマ適用をアプリへ寄せた)。GHCR に残っている
-          # 古いパッケージは手で削除する —— ここに残すと存在しない扱いでジョブが落ちる
           packages: travel-log
           keep-n-tagged: 10
           delete-untagged: true

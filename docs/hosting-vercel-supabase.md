@@ -106,7 +106,7 @@ B ならそのまま再実行すればよい。A は初回投入用なので、�
 | `PUBLIC_BASE_URL` | `https://<プロジェクト名>.vercel.app` | 外向きURL。初回デプロイでURLが決まってから設定する |
 | `PHOTO_STORAGE` | `supabase` | 写真の保存先。永続ディスクが無いのでローカルFSは使えない |
 | `SUPABASE_URL` | `https://<project-ref>.supabase.co`(`project-ref` は `DATABASE_URL` のユーザー名 `postgres.` の後ろと同じ) | |
-| `SUPABASE_SECRET_KEY` | `sb_secret_...` | **サーバー専用**。`NEXT_PUBLIC_` を付けない(レガシーの `service_role` しか無い既存プロジェクトは `SUPABASE_SERVICE_ROLE_KEY` でも可) |
+| `SUPABASE_SECRET_KEY` | `sb_secret_...` | **サーバー専用**。`NEXT_PUBLIC_` を付けない(旧世代の `service_role` キーは使えない) |
 | `SUPABASE_STORAGE_BUCKET` | `visit-photos` | 1で作ったバケット名 |
 | `NEXT_PUBLIC_EXPORTS_ENABLED` | `false` | 訪問記録エクスポートを畳む(サーバーレスでは成立しないため) |
 | `NEXT_PUBLIC_MAX_UPLOAD_BYTES` | `4500000` | 写真を含む POST の本文上限。この範囲に収まる画質で書き出す |
@@ -151,6 +151,6 @@ Docker 運用側には影響しない。
 - **突然 DB に繋がらなくなった** … Supabase の無料プロジェクトが7日間の無アクセスで
   停止している。ダッシュボードから再開する
 - **写真の保存で `Invalid JWT`** … 新しい Secret key を `Authorization: Bearer` に
-  載せると出る(JWTではないため)。`lib/photoStorage.ts` はキーの接頭辞
-  (`sb_`)を見て `apikey` ヘッダだけに載せ分けているので、環境変数の入れ間違い
-  (Secret key を `SUPABASE_SERVICE_ROLE_KEY` ではなく別の変数に入れた等)を疑う
+  載せると出る(JWTではないため)。`lib/photoStorage.ts` は `apikey` ヘッダだけに
+  載せているので、`SUPABASE_SECRET_KEY` に旧世代の `service_role` キー(JWT)を
+  入れていないかを疑う

@@ -15,7 +15,7 @@ export const PHOTO_BODY_MAX_BYTES =
   MAX_PHOTOS_PER_VISIT * MAX_PHOTO_BASE64_LENGTH + 1_000_000;
 
 /** メモ・追記・口コミの本文の上限(文字数)。読み物としては十分で、DBを膨らませない程度 */
-export const MAX_TEXT_LENGTH = 10_000;
+const MAX_TEXT_LENGTH = 10_000;
 
 /**
  * 本文を上限つきで読み、JSONとして返す。超えたら413、壊れていたら400の応答を`response`で返す

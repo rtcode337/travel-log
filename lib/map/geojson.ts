@@ -67,7 +67,7 @@ export function filterVisibleRoutes(
  * ルートのシリーズと同じシリーズのスポットがあればそれだけ、無ければ全経由地。
  * (取得できないスポット=他人の非公開等は除く)
  */
-export function routeOwnPoints(route: SpotRoute, spotById: Map<string, Spot>): Spot[] {
+function routeOwnPoints(route: SpotRoute, spotById: Map<string, Spot>): Spot[] {
   const spots = route.points
     .map((p) => spotById.get(p.spot_id))
     .filter((s): s is Spot => s !== undefined);
@@ -266,7 +266,7 @@ export function buildRouteGeoJSON(
   };
 }
 
-export type ClusterFeatureProps = {
+type ClusterFeatureProps = {
   id: string;
   series: string | null;
   visited: boolean;

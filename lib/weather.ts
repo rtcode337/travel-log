@@ -17,7 +17,7 @@ import type { Spot } from "@/lib/types";
  * **予報が出ていない先の日付でも空振りにしない** —— その場合は平年の傾向を答えるよう
  * 頼んでおく。10日先より後の予定でも、服装や雨具の見当を付ける役には立つため。
  */
-export function buildSpotWeatherQuestion(spot: Spot, date: string): string {
+function buildSpotWeatherQuestion(spot: Spot, date: string): string {
   const where = [spot.region, `${spot.lat.toFixed(5)},${spot.lng.toFixed(5)}`]
     .filter(Boolean)
     .join(" / ");
@@ -49,7 +49,7 @@ export function planWeatherDate(list: {
 }
 
 /** 「8/20」。リンクの説明に添える短い表記 */
-export function formatWeatherDate(date: string): string {
+function formatWeatherDate(date: string): string {
   const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return date;
   return `${Number(m[2])}/${Number(m[3])}`;
@@ -119,7 +119,7 @@ export function weatherLook(code: number): { icon: string; text: string } {
 const POP_MID = 40;
 const POP_HIGH = 70;
 
-export type PrecipChance = "low" | "mid" | "high";
+type PrecipChance = "low" | "mid" | "high";
 
 export function precipChance(pop: number): PrecipChance {
   if (pop >= POP_HIGH) return "high";
@@ -146,12 +146,12 @@ export const FAR_FORECAST_DAYS = 5;
  * 今日(JST)の日付キー。**実行環境のTZに依らせない** ——
  * サーバーとブラウザでTZが違うと、同じ予報が別の「何日先」になる。
  */
-export function todayKeyJst(): string {
+function todayKeyJst(): string {
   return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 }
 
 /** 今日(JST)から何日先か。過去はマイナス */
-export function forecastLeadDays(date: string): number {
+function forecastLeadDays(date: string): number {
   return diffDays(todayKeyJst(), date);
 }
 
@@ -164,9 +164,9 @@ export function isFarForecast(date: string): boolean {
  * 天気の良し悪しを3段階にする。**旅程で知りたいのは「傘が要るか」**なので、
  * 降るかどうかを境目に置き、くもりは晴れと雨の間に独立して置く。
  */
-export type WeatherGrade = "good" | "fair" | "bad";
+type WeatherGrade = "good" | "fair" | "bad";
 
-export function weatherGrade(weather: DailyWeather): WeatherGrade {
+function weatherGrade(weather: DailyWeather): WeatherGrade {
   // 45/48=霧も含めて、降らないが視界・見晴らしが良くないものは fair に寄せる
   if (weather.code >= 51) return "bad";
   if (weather.code === 3 || weather.code === 45 || weather.code === 48) return "fair";
