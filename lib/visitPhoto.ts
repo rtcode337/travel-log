@@ -66,18 +66,56 @@ export function resizeImageToDataUrl(file: File): Promise<string> {
           return;
         }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        // 上限のあるホストでは目安に収まる品質を探す(未設定なら従来どおり0.8で1回)
-        let dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITIES[0]);
-        if (PHOTO_BUDGET_BYTES) {
-          for (const quality of JPEG_QUALITIES.slice(1)) {
-            if (dataUrlBytes(dataUrl) <= PHOTO_BUDGET_BYTES) break;
-            dataUrl = canvas.toDataURL("image/jpeg", quality);
-          }
-        }
-        resolve(dataUrl);
+        resolve(encodeJpeg(canvas));
       };
       img.src = reader.result as string;
     };
     reader.readAsDataURL(file);
+  });
+}
+
+/** canvasをJPEGのdata URLにする。上限のあるホストでは目安に収まる品質を探す(未設定なら従来どおり0.8で1回) */
+function encodeJpeg(canvas: HTMLCanvasElement): string {
+  let dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITIES[0]);
+  if (PHOTO_BUDGET_BYTES) {
+    for (const quality of JPEG_QUALITIES.slice(1)) {
+      if (dataUrlBytes(dataUrl) <= PHOTO_BUDGET_BYTES) break;
+      dataUrl = canvas.toDataURL("image/jpeg", quality);
+    }
+  }
+  return dataUrl;
+}
+
+/**
+ * 写真を時計回りに90度回したJPEGのdata URLにする。`src`は追加前のdata URLでも、
+ * 保存済みの写真のURL(同じオリジンの`/api/photos/...`)でもよい。
+ *
+ * 保存済みの写真は**回したものを新しい1枚として保存し直す**(保存時に元のファイルは
+ * 消える)。配信は内容が変わらない前提で長期キャッシュさせているため、同じパスの
+ * 中身を書き換えると、回す前の絵が見え続ける。長辺は保存時と同じ上限に収める。
+ */
+export function rotateImageToDataUrl(src: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = () => reject(new Error("画像を読み込めませんでした"));
+    img.onload = () => {
+      const scale = Math.min(1, MAX_PHOTO_SIZE / Math.max(img.width, img.height));
+      const width = Math.round(img.width * scale);
+      const height = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      // 縦横が入れ替わる
+      canvas.width = height;
+      canvas.height = width;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("canvas is not supported"));
+        return;
+      }
+      ctx.translate(height, 0);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(encodeJpeg(canvas));
+    };
+    img.src = src;
   });
 }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { readPhotoTakenAt } from "@/lib/exif";
 import { visitPhotoSrc } from "@/lib/types";
-import { resizeImageToDataUrl } from "@/lib/visitPhoto";
+import { resizeImageToDataUrl, rotateImageToDataUrl } from "@/lib/visitPhoto";
 import { photosEnabled } from "@/lib/features";
 
 /**
@@ -73,6 +73,26 @@ export default function VisitPhotoFields({
     }
   };
 
+  // 横向きに撮れてしまった写真を時計回りに90度回す。保存済みの写真も、回した
+  // ものを追加写真と同じdata URLで差し替える(保存時に新しい1枚になり、元は消える)
+  const rotatePhoto = async (index: number) => {
+    const photo = photos[index];
+    setProcessing(true);
+    onProcessingChange?.(true);
+    setError(null);
+    try {
+      const rotated = await rotateImageToDataUrl(
+        photo.startsWith("data:") ? photo : visitPhotoSrc(photo)
+      );
+      onPhotosChange(photos.map((p, i) => (i === index ? rotated : p)));
+    } catch {
+      setError("写真を回せませんでした。");
+    } finally {
+      setProcessing(false);
+      onProcessingChange?.(false);
+    }
+  };
+
   const removePhoto = (index: number) => {
     onPhotosChange(photos.filter((_, i) => i !== index));
     applyTakenAts(photoTakenAts.filter((_, i) => i !== index));
@@ -113,6 +133,19 @@ export default function VisitPhotoFields({
               >
                 ×
               </button>
+              {/* 回すと新しい写真として保存し直すので、写真を畳んだ環境では出さない */}
+              {photosEnabled && (
+                <button
+                  type="button"
+                  onClick={() => rotatePhoto(i)}
+                  disabled={processing}
+                  className="absolute -bottom-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-700 text-xs text-white disabled:opacity-50"
+                  aria-label="写真を右に90度回す"
+                  title="右に90度回す"
+                >
+                  ↻
+                </button>
+              )}
             </div>
           ))}
         </div>
