@@ -32,16 +32,17 @@ export interface RankStyle {
 }
 
 /**
- * A〜Eの見た目。**色は旧シリーズ設定(観光地のA〜E)から引き継ぎ、大きさだけ底上げした**
- * —— 旧: 26 / 22 / 18 / 15 / 12。Eの12pxは地図上で点にしか見えず、
+ * A〜Eの見た目。**色は上から淡い赤・オレンジ・青・緑・黄**で、暖色ほど上のランクになるよう並べる
+ * (旧シリーズ設定から引き継いだ並びは琥珀・緑・青・黄・灰で、どれが上のランクか色から読み取れなかった)。
+ * 大きさは旧設定(26 / 22 / 18 / 15 / 12)から底上げしてある —— Eの12pxは地図上で点にしか見えず、
  * ピンの中のアイコンも潰れていた。段の差は詰めて全体を上げてある。
  */
 export const RANK_STYLES: Record<Rank, RankStyle> = {
-  A: { color: "#f59e0b", borderColor: "#b45309", size: 30, textColor: "#451a03" },
-  B: { color: "#a7f3d0", borderColor: "#34d399", size: 26, textColor: "#065f46" },
+  A: { color: "#fca5a5", borderColor: "#ef4444", size: 30, textColor: "#7f1d1d" },
+  B: { color: "#fdba74", borderColor: "#f97316", size: 26, textColor: "#7c2d12" },
   C: { color: "#93c5fd", borderColor: "#60a5fa", size: 23, textColor: "#1e3a8a" },
-  D: { color: "#fef3c7", borderColor: "#fbbf24", size: 20, textColor: "#78350f" },
-  E: { color: "#e5e7eb", borderColor: "#9ca3af", size: 18, textColor: "#374151" },
+  D: { color: "#a7f3d0", borderColor: "#34d399", size: 20, textColor: "#065f46" },
+  E: { color: "#fef3c7", borderColor: "#fbbf24", size: 18, textColor: "#78350f" },
 };
 
 /**
