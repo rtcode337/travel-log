@@ -3600,7 +3600,7 @@ export default function MapView({
           (ピン側には重なり数のバッジを出して重なりの存在を知らせている) */}
       {stack &&
         (() => {
-          // 重ね表示のピンから開いたときは、名前もランク・カテゴリの表記も
+          // 重ね表示のピンから開いたときは、名前もランクの表記も
           // **そのスポットが属する種別**の設定で解決する(本体の設定で描くと
           // 名前が出ない・ランクのラベルがずれる)
           const overlayTypeKey = stack.overlayTypeKey;
@@ -3608,9 +3608,6 @@ export default function MapView({
           const stackRankEnabled = overlayTypeKey
             ? overlayRankEnabledOf(overlayTypeKey)
             : rankEnabled;
-          const stackCategories = overlayTypeKey
-            ? overlayCategoriesOf(overlayTypeKey)
-            : categories;
           const stackSeriesStyles = overlayTypeKey
             ? overlaySeriesStylesOf(overlayTypeKey)
             : seriesStyles;
@@ -3682,8 +3679,8 @@ export default function MapView({
                           <span className="block truncate text-xs text-slate-500">
                             {formatSpotMeta(spot, {
                               rankEnabled: stackRankEnabled,
-                              categories: stackCategories,
                               includeRegion: false,
+                              includeCategories: false,
                             })}
                           </span>
                         </span>

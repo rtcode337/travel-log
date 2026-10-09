@@ -630,7 +630,7 @@ export default function SpotsView({
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
                           <p className="text-xs text-gray-500">
-                            {formatSpotMeta(spot, { rankEnabled, categories })}
+                            {formatSpotMeta(spot, { rankEnabled, includeCategories: false })}
                           </p>
                         </div>
                         <span className="shrink-0 text-xs text-gray-400">
@@ -747,7 +747,7 @@ export default function SpotsView({
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-medium">{spot.name}</p>
                               <p className="text-xs text-gray-500">
-                            {formatSpotMeta(spot, { rankEnabled, categories })}
+                            {formatSpotMeta(spot, { rankEnabled, includeCategories: false })}
                           </p>
                               {/* メモは1行に収まる分だけ出し、はみ出した分は末尾を「…」で省く(改行は空白に畳む) */}
                               {visit.memo?.trim() && (
@@ -862,7 +862,7 @@ export default function SpotsView({
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
                           <p className="text-xs text-gray-500">
-                            {formatSpotMeta(spot, { rankEnabled, categories })}
+                            {formatSpotMeta(spot, { rankEnabled, includeCategories: false })}
                           </p>
                         </div>
                         <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
@@ -911,7 +911,7 @@ export default function SpotsView({
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{spot.name}</p>
                           <p className="text-xs text-gray-500">
-                            {formatSpotMeta(spot, { rankEnabled, categories })}
+                            {formatSpotMeta(spot, { rankEnabled, includeCategories: false })}
                           </p>
                         </div>
                         <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
@@ -1063,7 +1063,7 @@ export default function SpotsView({
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{spot.name}</p>
                             <p className="text-xs text-gray-500">
-                              {formatSpotMeta(spot, { rankEnabled, categories })}
+                              {formatSpotMeta(spot, { rankEnabled, includeCategories: false })}
                             </p>
                           </div>
                           {spot.status !== "published" && (
@@ -1227,8 +1227,8 @@ export default function SpotsView({
                   {/* 都道府県の中の一覧なので地域は出さない(見出しに出ている) */}
                   {formatSpotMeta(spot, {
                     rankEnabled,
-                    categories,
                     includeRegion: false,
+                    includeCategories: false,
                   })}
                 </p>
               </div>

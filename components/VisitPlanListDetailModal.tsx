@@ -320,7 +320,7 @@ export default function VisitPlanListDetailModal({
                           {spot.name}
                         </p>
                         <p className="text-xs text-gray-500">
-                          {formatSpotMeta(spot, { rankEnabled })}
+                          {formatSpotMeta(spot, { rankEnabled, includeCategories: false })}
                         </p>
                       </div>
                       <span className="shrink-0 text-gray-400">›</span>
