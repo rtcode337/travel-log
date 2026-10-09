@@ -34,12 +34,11 @@ export interface RankStyle {
 /**
  * A〜Eの見た目。**色は上から赤・オレンジ・青・緑・黄**で、暖色ほど上のランクになるよう並べる
  * (旧シリーズ設定から引き継いだ並びは琥珀・緑・青・黄・灰で、どれが上のランクか色から読み取れなかった)。
- * 中身の文字はAだけ白にして、最高ランクを他と見分けやすくしている。
  * 大きさは旧設定(26 / 22 / 18 / 15 / 12)から底上げしてある —— Eの12pxは地図上で点にしか見えず、
  * ピンの中のアイコンも潰れていた。段の差は詰めて全体を上げてある。
  */
 export const RANK_STYLES: Record<Rank, RankStyle> = {
-  A: { color: "#f87171", borderColor: "#dc2626", size: 30, textColor: "#ffffff" },
+  A: { color: "#f87171", borderColor: "#dc2626", size: 30, textColor: "#450a0a" },
   B: { color: "#fdba74", borderColor: "#f97316", size: 26, textColor: "#7c2d12" },
   C: { color: "#93c5fd", borderColor: "#60a5fa", size: 23, textColor: "#1e3a8a" },
   D: { color: "#a7f3d0", borderColor: "#34d399", size: 20, textColor: "#065f46" },
