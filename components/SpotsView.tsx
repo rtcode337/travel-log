@@ -749,6 +749,12 @@ export default function SpotsView({
                               <p className="text-xs text-gray-500">
                             {formatSpotMeta(spot, { rankEnabled, categories })}
                           </p>
+                              {/* メモは1行に収まる分だけ出し、はみ出した分は末尾を「…」で省く(改行は空白に畳む) */}
+                              {visit.memo?.trim() && (
+                                <p className="truncate text-xs text-gray-600">
+                                  {visit.memo.trim()}
+                                </p>
+                              )}
                             </div>
                             {/* 未訪問記録(訪問済みに数えない記録)はバッジで見分ける */}
                             {visit.unvisited && (

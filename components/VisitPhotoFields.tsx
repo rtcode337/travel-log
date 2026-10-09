@@ -140,10 +140,10 @@ export default function VisitPhotoFields({
                   onClick={() => rotatePhoto(i)}
                   disabled={processing}
                   className="absolute -bottom-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-700 text-xs text-white disabled:opacity-50"
-                  aria-label="写真を右に90度回す"
-                  title="右に90度回す"
+                  aria-label="写真を左に90度回す"
+                  title="左に90度回す"
                 >
-                  ↻
+                  ↺
                 </button>
               )}
             </div>

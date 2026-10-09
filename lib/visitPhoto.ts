@@ -87,7 +87,7 @@ function encodeJpeg(canvas: HTMLCanvasElement): string {
 }
 
 /**
- * 写真を時計回りに90度回したJPEGのdata URLにする。`src`は追加前のdata URLでも、
+ * 写真を反時計回りに90度回したJPEGのdata URLにする。`src`は追加前のdata URLでも、
  * 保存済みの写真のURL(同じオリジンの`/api/photos/...`)でもよい。
  *
  * 保存済みの写真は**回したものを新しい1枚として保存し直す**(保存時に元のファイルは
@@ -111,8 +111,8 @@ export function rotateImageToDataUrl(src: string): Promise<string> {
         reject(new Error("canvas is not supported"));
         return;
       }
-      ctx.translate(height, 0);
-      ctx.rotate(Math.PI / 2);
+      ctx.translate(0, width);
+      ctx.rotate(-Math.PI / 2);
       ctx.drawImage(img, 0, 0, width, height);
       resolve(encodeJpeg(canvas));
     };
