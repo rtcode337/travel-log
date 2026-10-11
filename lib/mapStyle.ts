@@ -32,5 +32,9 @@ export const JAPAN_ZOOM = 4.5;
 export const WORLD_CENTER: [number, number] = [20.0, 20.0];
 export const WORLD_ZOOM = 1.3;
 
-/** 現在地取得後にズームインする際のズームレベル */
-export const CURRENT_LOCATION_ZOOM = 14;
+/**
+ * 現在地取得後にズームインする際のズームレベル(現在地ボタンと、日本の種別を開いたときの自動取得)。
+ * 14では町全体が入る広さで、周りのどの道・どの店かまで読み取れなかったので、街区が分かる16にしてある。
+ * GeolocateControlは位置の誤差の円が収まる範囲へ寄せる(これは上限)ので、誤差が大きいときはもっと引いた表示になる
+ */
+export const CURRENT_LOCATION_ZOOM = 16;
