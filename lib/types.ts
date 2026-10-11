@@ -137,7 +137,7 @@ export interface FlaggedSpot extends SpotFlag {
   region: string;
   lat: number;
   lng: number;
-  /** 依頼した人のニックネーム(未設定ならメールアドレス。消えたユーザーはnull) */
+  /** 依頼した人のニックネーム(未設定なら「ニックネーム未設定」。メールアドレスは出さない。消えたユーザーはnull) */
   flagged_by_name: string | null;
 }
 

@@ -25,7 +25,11 @@ const FLAG_SELECT = `select f.id, f.spot_id, f.reason, f.flagged_by, f.forwarded
             when f.location_ok then 'confirm' else 'fix' end as kind,
        coalesce(s.name, '') as name, s.key, coalesce(s.region, '') as region,
        coalesce(s.lat, f.lat) as lat, coalesce(s.lng, f.lng) as lng,
-       coalesce(nullif(u.nickname, ''), u.email) as flagged_by_name
+       -- 依頼者はニックネームで出す。メールアドレスはログインに使う秘匿情報なので、
+       -- ニックネームが未設定でも代わりに出さない(この一覧はspot_adminにも見える)。
+       -- 依頼者のアカウントが消えていればnull(画面は「不明」)
+       case when u.id is null then null
+            else coalesce(nullif(u.nickname, ''), 'ニックネーム未設定') end as flagged_by_name
   from spot_flags f
   left join spots s on s.id = f.spot_id
   left join users u on u.id = f.flagged_by`;
