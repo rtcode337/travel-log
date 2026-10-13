@@ -623,7 +623,24 @@ export default function SpotDetailModal({
                 )}
                 {/* 地域・ランク・シリーズ・カテゴリの1行(一覧と共通。lib/spotMeta.ts) */}
                 <p className="text-xs text-gray-500">
-                  {formatSpotMeta(spot, { rankEnabled, categories })}
+                  {/* 地域は、その種別のその地域の一覧へのリンクにする。重ね表示で別の種別の
+                      ピン(ご当地グルメなど)を開いたとき、「この県のほかのもの」を見るのに
+                      一覧の画面へ移って地域を選び直す遠回りが要っていた */}
+                  {currentSpotType && spot.region ? (
+                    <>
+                      <Link
+                        href={`/${currentSpotType.key}/spots?region=${encodeURIComponent(spot.region)}`}
+                        title={`${spot.region}の「${currentSpotType.label}」を一覧で見る`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {spot.region} ›
+                      </Link>
+                      {formatSpotMeta(spot, { rankEnabled, categories, includeRegion: false }) &&
+                        ` ・ ${formatSpotMeta(spot, { rankEnabled, categories, includeRegion: false })}`}
+                    </>
+                  ) : (
+                    formatSpotMeta(spot, { rankEnabled, categories })
+                  )}
                   {reviewsEnabled && reviewsTotal > 0 && (
                     <span className="ml-2 text-gray-400">
                       口コミ{reviewsTotal}件

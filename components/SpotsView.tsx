@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
 import {
   countedVisits,
@@ -13,6 +14,7 @@ import {
   type Visit,
   type VisitPlan,
   type VisitPlanList,
+  PREFECTURES,
 } from "@/lib/types";
 import {
   compareRegions,
@@ -45,8 +47,15 @@ import { formatSpotMeta } from "@/lib/spotMeta";
 import { useSpotCache } from "@/lib/useSpotCache";
 import { formatJstDate } from "@/lib/datetime";
 import LoadErrorBanner from "@/components/LoadErrorBanner";
+import PrefectureTileMap from "@/components/PrefectureTileMap";
 
 type SortKey = "series" | "name" | "visited";
+
+const prefectureSet = new Set<string>(PREFECTURES);
+/** 47都道府県のどれかか(マス目に載るか。載らない値はマス目の下にリストで出す) */
+function isPrefecture(region: string): boolean {
+  return prefectureSet.has(region);
+}
 type BrowseMode = "region" | "series";
 
 const STATUS_LABELS: Partial<Record<Spot["status"], string>> = {
@@ -242,6 +251,23 @@ export default function SpotsView({
   const [showArchive, setShowArchive] = useState(false);
 
   const [browseMode, setBrowseMode] = useState<BrowseMode>("region");
+
+  // ?region=<地域> で開かれたら、その地域の一覧から始める(スポット詳細の地域のリンク。
+  // 重ね表示で地図に出ている別の種別でも、その種別の一覧へ1回で行けるように)。
+  // この一覧の上の詳細から押されたときも動くよう、URLの変化を見る。
+  // 処理したらURLから消す(戻る・再読み込みでその地域に引き戻さないように)
+  const searchParams = useSearchParams();
+  const regionParam = searchParams.get("region");
+  useEffect(() => {
+    if (!regionParam) return;
+    setSelectedRegion(regionParam);
+    setSpotsTab("browse");
+    setBrowseMode("region");
+    setDetailSpotId(null);
+    setDetailListId(null);
+    setShowArchive(false);
+    window.history.replaceState(null, "", `/${spotTypeKey}/spots`);
+  }, [regionParam, spotTypeKey]);
   const [managementItems, setManagementItems] = useState<Spot[]>([]);
   const [managementTotal, setManagementTotal] = useState(0);
   const [managementAvailableSeries, setManagementAvailableSeries] = useState<Series[]>([]);
@@ -964,7 +990,35 @@ export default function SpotsView({
               </div>
             </div>
 
-            {browseMode === "region" ? (
+            {browseMode === "region" && regionScope === "jp" ? (
+              <>
+                {/* 日本が対象の種別は、日本の形に並べたマス目で出す。47行のリストより
+                    「どこに行ったか」が一目で分かる(PrefectureTileMap) */}
+                <PrefectureTileMap rows={regionRows} onSelect={setSelectedRegion} />
+                {/* 都道府県に当てはまらない値(海外の座標の混入など)は、消さずに下に並べる */}
+                {regionRows.some((row) => !isPrefecture(row.region)) && (
+                  <ul className="mt-3 divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                    {regionRows
+                      .filter((row) => !isPrefecture(row.region))
+                      .map((row) => (
+                        <li key={row.region}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedRegion(row.region)}
+                            className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+                          >
+                            <span className="font-medium">{row.region}</span>
+                            <span className="text-sm text-gray-500">
+                              <span className="mr-2 text-green-600">✓ {row.visited}</span>/{" "}
+                              {row.total} 件
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </>
+            ) : browseMode === "region" ? (
               <>
                 <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
                   {regionRows.map((row) => (
@@ -1175,6 +1229,15 @@ export default function SpotsView({
           ← {regionLabel}
         </button>
         <h1 className="text-lg font-bold">{selectedRegion}</h1>
+        {/* 行った数。都道府県のマス目には件数を書いていないので、ここで出す */}
+        {(() => {
+          const row = regionRows.find((r) => r.region === selectedRegion);
+          return row ? (
+            <span className="ml-auto text-sm text-gray-500">
+              <span className="mr-1 text-green-600">✓ {row.visited}</span>/ {row.total} 件
+            </span>
+          ) : null;
+        })()}
       </div>
 
       <div className="mb-3 space-y-2">
