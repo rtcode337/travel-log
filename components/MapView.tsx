@@ -2447,11 +2447,9 @@ export default function MapView({
   }, [stack, spotById, overlaySpotById, regionScope]);
 
   return (
-    <div
-      className={`relative ${
-        buildDraft ? "h-dvh" : "h-[calc(100dvh-4rem)]"
-      }`}
-    >
+    // 中身の領域(AppFrame)の残りの高さをそのまま埋める。下タブは縦並びの別の要素なので、
+    // その高さを引く計算は要らない(作成モードで下タブを隠したときも、そのぶん伸びるだけ)
+    <div className="relative h-full">
       <div ref={containerRef} className="h-full w-full" />
 
       {/* 今表示中のスポット種別と「元の地図に戻る」リンク(左下に小さく表示。

@@ -62,7 +62,7 @@ function LoginForm() {
   if (checkingStatus) return null;
 
   return (
-    <main className="flex min-h-dvh items-center justify-center p-4">
+    <main className="flex min-h-full items-center justify-center p-4">
       <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <h1 className="mb-1 text-xl font-bold">Travel Log</h1>
         <p className="mb-6 text-sm text-gray-500">観光地訪問記録アプリ</p>

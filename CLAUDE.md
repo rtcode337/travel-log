@@ -117,7 +117,7 @@ NextAuthではなく自前実装。`lib/auth/session.ts`がHMAC-SHA256で署名�
 
 ### PWA(インストール可能化)
 
-manifest(`app/manifest.ts`、Next.jsのMetadata Files規約で`/manifest.webmanifest`として配信)+アイコン(`public/icons/`のmanifest用3枚と、`app/icon.png`・`app/apple-icon.png`のファビコン/apple-touch-icon)による最小構成のPWA対応で、Service Worker・オフライン対応は意図的に持たない(「デプロイしたのに古い画面が出る」系の問題を避けるため、必要になるまで導入しない方針)。インストール後も中身は同じWebアプリで、認証Cookieもそのまま使われる。iOSはmanifestの`display`/`icons`を見ないため、`app/layout.tsx`の`metadata.appleWebApp`と`app/apple-icon.png`で別途同等の設定をしている。ページ自体のズームは`app/layout.tsx`の`viewport`(`maximumScale: 1`+`userScalable: false`)で無効化してある — 検索窓等への入力フォーカス時の自動ズームで下のタブバーが隠れ、地図表示中はピンチが地図操作に取られてページのズームを戻せなくなるため(地図の拡大縮小はMapLibreのジェスチャなので影響しない)。`/manifest.webmanifest`は`proxy.ts`のガード対象から除外が必要(上記「認証」参照)。アイコンPNGは`scripts/generate-icons.mjs`(sharp使用、依存には含めない)で生成したものをコミットしてあり、デザイン変更時のみ再生成する。なお、iOSのスタンドアロン起動では`target="_blank"`の外部リンクがアプリ内ブラウザ(オーバーレイ)で開かれる。かつて記事の概要を出すモーダルでだけ`x-safari-https://`スキーム(未文書化だがiOSが解釈する)で本物のSafariへ切り替えていたが、そのモーダルごと廃したので今はどこでも使っていない。
+manifest(`app/manifest.ts`、Next.jsのMetadata Files規約で`/manifest.webmanifest`として配信)+アイコン(`public/icons/`のmanifest用3枚と、`app/icon.png`・`app/apple-icon.png`のファビコン/apple-touch-icon)による最小構成のPWA対応で、Service Worker・オフライン対応は意図的に持たない(「デプロイしたのに古い画面が出る」系の問題を避けるため、必要になるまで導入しない方針)。インストール後も中身は同じWebアプリで、認証Cookieもそのまま使われる。iOSはmanifestの`display`/`icons`を見ないため、`app/layout.tsx`の`metadata.appleWebApp`と`app/apple-icon.png`で別途同等の設定をしている。ページ自体のズームは`app/layout.tsx`の`viewport`(`maximumScale: 1`+`userScalable: false`)で無効化してある — 検索窓等への入力フォーカス時の自動ズームで下のタブバーが隠れ、地図表示中はピンチが地図操作に取られてページのズームを戻せなくなるため(地図の拡大縮小はMapLibreのジェスチャなので影響しない)。**下タブ(`components/NavBar.tsx`)は`fixed`にしない** —— `body`を画面の高さちょうど(`h-dvh`)の縦並びにし、中身の領域(`components/AppFrame.tsx`)だけをスクロールさせて、下タブを縦並びの最後に置いている。ホーム画面から開いたiPhoneでは`fixed`の帯がキーボードを閉じたあとなどに画面の途中へ取り残されたため(経緯と、ページのスクロールが`window`で起きないことの注意点は`docs/design/map.md`「画面の骨組み」)。`/manifest.webmanifest`は`proxy.ts`のガード対象から除外が必要(上記「認証」参照)。アイコンPNGは`scripts/generate-icons.mjs`(sharp使用、依存には含めない)で生成したものをコミットしてあり、デザイン変更時のみ再生成する。なお、iOSのスタンドアロン起動では`target="_blank"`の外部リンクがアプリ内ブラウザ(オーバーレイ)で開かれる。かつて記事の概要を出すモーダルでだけ`x-safari-https://`スキーム(未文書化だがiOSが解釈する)で本物のSafariへ切り替えていたが、そのモーダルごと廃したので今はどこでも使っていない。
 
 ### MapLibreのワーカースクリプト(`public/maplibre-gl/`)
 
@@ -145,7 +145,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 | ファイル | 中身 |
 |---|---|
 | [docs/design/spot-types.md](docs/design/spot-types.md) | スポット種別(`spot_types`)と種別ごとの設定、ランク・シリーズ・カテゴリ、ピンの見た目を決める仕組み。 |
-| [docs/design/map.md](docs/design/map.md) | 経路と訪問順・訪問予定リストの線、Google マップ・生成AIへの導線、ピンと線の出し分け、重なったピン、別種別の重ね表示、共通の UI 部品。 |
+| [docs/design/map.md](docs/design/map.md) | 画面の骨組み(下タブとスクロールする領域)、経路と訪問順・訪問予定リストの線、Google マップ・生成AIへの導線、ピンと線の出し分け、重なったピン、別種別の重ね表示、共通の UI 部品。 |
 | [docs/design/admin.md](docs/design/admin.md) | キー一覧での削除、GitHub・ZIP からの取り込み、修正・追加の依頼、還元用エクスポート、全削除、スポットの新規登録と CSV の差分更新。 |
 | [docs/design/visits.md](docs/design/visits.md) | 訪問記録と口コミ、写真と追記、エクスポート、未訪問記録と非表示、訪問予定リスト(旅程)と天気。 |
 

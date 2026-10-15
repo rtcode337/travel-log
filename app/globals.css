@@ -1,7 +1,8 @@
 @import "tailwindcss";
 
-html,
-body {
+/* bodyの高さはapp/layout.tsxの`h-dvh`に任せる。ここでbodyに`height`を書くと、
+   レイヤー外の指定がTailwindのユーティリティ(@layer utilities)より強く、`h-dvh`が効かなくなる */
+html {
   height: 100%;
 }
 

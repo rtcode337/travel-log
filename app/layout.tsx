@@ -23,6 +23,13 @@ export const viewport: Viewport = {
   // (地図自体の拡大縮小はMapLibreのジェスチャなので影響しない)
   maximumScale: 1,
   userScalable: false,
+  // キーボードが出ても画面の枠(layout viewport)を縮めず、見えている範囲だけを狭める。
+  // 枠が縮むと`h-dvh`の縦並びも縮み、最後に置いた下タブがキーボードのすぐ上に乗って
+  // 書く場所を狭める。枠を縮めなければ下タブは枠の下端=キーボードの裏に隠れるので、
+  // かつてJSで「入力中は帯を隠す」としていたのと同じ見え方をCSSだけで得られる。
+  // iOSのSafariとAndroidのChrome(108以降)はもともとこの挙動だが、既定が
+  // `resizes-content`のブラウザもあるので明示しておく
+  interactiveWidget: "resizes-visual",
   themeColor: "#f9fafb",
 };
 
@@ -33,7 +40,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body className="flex min-h-dvh flex-col">
+      {/* 画面の高さちょうどの縦並び。ページ全体はスクロールさせず、中身の領域だけを
+          スクロールさせて下タブを最後に置く(fixedを使わない。理由はcomponents/AppFrame.tsx) */}
+      <body className="flex h-dvh flex-col">
         <AppFrame>{children}</AppFrame>
       </body>
     </html>

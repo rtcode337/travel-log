@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { SPOT_ADMIN_ROLES } from "@/lib/types";
-import { useStickToVisibleBottom } from "@/lib/useStickToVisibleBottom";
 
 const items = [
   { path: "map", label: "地図", icon: "🗺️" },
@@ -20,10 +19,6 @@ export default function NavBar() {
   const router = useRouter();
   const typeKey = useCurrentSpotTypeKey();
   const [isAdmin, setIsAdmin] = useState(false);
-  // キーボードを閉じたあとに帯が画面の途中へ浮くのを防ぐ(iPhoneのホーム画面から開いたとき)
-  const navRef = useRef<HTMLElement>(null);
-  const shown = !pathname.startsWith("/login") && !!typeKey;
-  useStickToVisibleBottom(navRef, shown);
 
   useEffect(() => {
     if (pathname.startsWith("/login")) return;
@@ -49,10 +44,11 @@ export default function NavBar() {
   if (!typeKey) return null;
 
   return (
-    <nav
-      ref={navRef}
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white"
-    >
+    // fixedにせず、画面の縦並び(AppFrame)の最後の要素として下端に置く(理由はAppFrame)。
+    // 中身の領域が縮んで場所を譲るので、帯の高さぶんの余白を中身の側で空ける必要も無い。
+    // relative z-40 は、地図のメニューを閉じるための透明な重ね(fixed inset-0 z-0/z-30)より
+    // 帯を上に保つため(fixedだったころと同じ重なり順。モーダル(z-50以上)は帯の上に出る)
+    <nav className="relative z-40 shrink-0 border-t border-gray-200 bg-white">
       <div className="mx-auto flex max-w-lg items-stretch">
         {items.map((item) => {
           if (item.adminOnly && !isAdmin) return null;
