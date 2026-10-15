@@ -520,6 +520,8 @@ export default function SpotDetailModal({
     <>
     <Modal
       onClose={onClose}
+      // 詳細は見るための画面なので、ふだんは背景で閉じる。修正の依頼を書いている間だけ閉じない
+      closeOnBackdrop={!(canFlag && flagFormOpen && !flag)}
       panelClassName="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4"
     >
       {loading ? (

@@ -10,6 +10,9 @@ import { useCallback, useEffect, useRef, type ReactNode, type Ref } from "react"
  * - **背景は別の`<button>`で、本体の後ろに敷く**(押すと閉じる)。かつては背景の`div`に
  *   `onClick`を付け、本体で`stopPropagation`していたが、クリックできる`div`はキーボードからも
  *   支援技術からも触れない。背景と本体が兄弟なので、本体のクリックが背景に届くことも無い
+ * - **文章を書き込むモーダルは、背景を押しても閉じない**(`closeOnBackdrop={false}`)。
+ *   入力の途中で枠の外に指が触れただけで、書いていた文章ごと消えていた。閉じるのは
+ *   ✕・キャンセル・Escだけにする(どれも閉じるつもりでしか押さない)
  * - **Escで閉じるのはいちばん上のモーダルだけ**(入れ子で開いたとき、下のまで一度に閉じない)
  * - **開いたらフォーカスを本体へ移し、閉じたら開く前の要素へ戻す**。中の入力欄が
  *   自分でフォーカスを取ったとき(`initialFocusRef`)はそれを優先する
@@ -54,6 +57,7 @@ export default function Modal({
   panelRef,
   initialFocusRef,
   label,
+  closeOnBackdrop = true,
 }: {
   onClose: () => void;
   children: ReactNode;
@@ -68,6 +72,8 @@ export default function Modal({
   initialFocusRef?: React.RefObject<HTMLElement | null>;
   /** 支援技術に読ませる名前(見出しが無いときなど) */
   label?: string;
+  /** 背景を押したら閉じるか。文章を書き込むモーダルは`false`(押し間違いで入力が消えるため) */
+  closeOnBackdrop?: boolean;
 }) {
   const ownRef = useRef<HTMLDivElement | null>(null);
   useModalLayer(onClose);
@@ -91,7 +97,7 @@ export default function Modal({
         tabIndex={-1}
         aria-label="閉じる"
         className="absolute inset-0 cursor-default bg-black/40"
-        onClick={onClose}
+        onClick={closeOnBackdrop ? onClose : undefined}
       />
       <div
         ref={(el) => {

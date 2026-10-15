@@ -137,7 +137,7 @@ export default function VisitPlanListFormModal({
   };
 
   return (
-    <Modal onClose={onClose} panelClassName="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white">
+    <Modal onClose={onClose} closeOnBackdrop={false} panelClassName="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white">
       <form
         onSubmit={handleSubmit}
         className="space-y-3 p-4"

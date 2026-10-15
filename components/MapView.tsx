@@ -3292,6 +3292,7 @@ export default function MapView({
       {addRequestAt && (
         <Modal
           onClose={() => !addRequestSaving && setAddRequestAt(null)}
+          closeOnBackdrop={false}
           panelClassName="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl"
         >
           <h2 className="mb-1 font-bold">ここにスポット追加を依頼</h2>

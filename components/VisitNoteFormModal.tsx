@@ -62,6 +62,7 @@ export default function VisitNoteFormModal({
     <Modal
       initialFocusRef={bodyRef}
       onClose={onClose}
+      closeOnBackdrop={false}
       panelClassName="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4"
     >
       <h2 className="mb-1 font-bold">
