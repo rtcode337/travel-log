@@ -252,6 +252,14 @@ export default function SpotsView({
 
   const [browseMode, setBrowseMode] = useState<BrowseMode>("region");
 
+  // 「探す」の地域の一覧から地域を選んだら、訪問状況を「訪問済み」に絞った状態で開く。
+  // マス目・一覧で行った割合を見てから押すので、まず見たいのはそこで行った先のほう。
+  // 訪問状況のほかの絞り込み(シリーズ・ランクなど)は選び直しても持ち越す
+  const selectRegionFromBrowse = useCallback((region: string) => {
+    setSelectedRegion(region);
+    setFilters((prev) => ({ ...prev, visited: ["visited"] }));
+  }, []);
+
   // ?region=<地域> で開かれたら、その地域の一覧から始める(スポット詳細の地域のリンク。
   // 重ね表示で地図に出ている別の種別でも、その種別の一覧へ1回で行けるように)。
   // この一覧の上の詳細から押されたときも動くよう、URLの変化を見る。
@@ -994,7 +1002,7 @@ export default function SpotsView({
               <>
                 {/* 日本が対象の種別は、日本の形に並べたマス目で出す。47行のリストより
                     「どこに行ったか」が一目で分かる(PrefectureTileMap) */}
-                <PrefectureTileMap rows={regionRows} onSelect={setSelectedRegion} />
+                <PrefectureTileMap rows={regionRows} onSelect={selectRegionFromBrowse} />
                 {/* 都道府県に当てはまらない値(海外の座標の混入など)は、消さずに下に並べる */}
                 {regionRows.some((row) => !isPrefecture(row.region)) && (
                   <ul className="mt-3 divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -1004,7 +1012,7 @@ export default function SpotsView({
                         <li key={row.region}>
                           <button
                             type="button"
-                            onClick={() => setSelectedRegion(row.region)}
+                            onClick={() => selectRegionFromBrowse(row.region)}
                             className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
                           >
                             <span className="font-medium">{row.region}</span>
@@ -1025,7 +1033,7 @@ export default function SpotsView({
                     <li key={row.region}>
                       <button
                         type="button"
-                        onClick={() => setSelectedRegion(row.region)}
+                        onClick={() => selectRegionFromBrowse(row.region)}
                         className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
                       >
                         <span className="font-medium">{row.region}</span>
