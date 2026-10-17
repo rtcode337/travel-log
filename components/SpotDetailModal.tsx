@@ -12,6 +12,7 @@ import {
   SPOT_ADMIN_ROLES,
   type SpotFlag,
   visitPhotoSrc,
+  visitPlace,
   type PublicReview,
   type Role,
   type Spot,
@@ -30,6 +31,7 @@ import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import { resolveCategories } from "@/lib/category";
 import { formatSpotMeta } from "@/lib/spotMeta";
 import VisitFormModal from "@/components/VisitFormModal";
+import { distanceMeters, formatDistance } from "@/lib/coords";
 import VisitNoteFormModal from "@/components/VisitNoteFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
@@ -881,6 +883,26 @@ export default function SpotDetailModal({
                             </span>
                           )}
                         </p>
+                        {/* 「行った場所」を指してある記録は、そうと分かるように距離だけ添える
+                            (位置はGoogle マップで開ける。座標の数字は並べない) */}
+                        {(() => {
+                          const place = visitPlace(visit);
+                          if (!place || !spot) return null;
+                          return (
+                            <p className="mt-0.5 text-xs text-gray-500">
+                              <span aria-hidden="true">📍</span> 行った場所: スポットから
+                              {formatDistance(distanceMeters(spot, place))}
+                              <a
+                                href={`https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lng}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-1.5 text-blue-600 underline"
+                              >
+                                地図
+                              </a>
+                            </p>
+                          );
+                        })()}
                         {visit.memo && (
                           <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
                             {visit.memo}
@@ -1159,6 +1181,7 @@ export default function SpotDetailModal({
         <VisitFormModal
           spotId={spot.id}
           spotName={spot.name}
+          spotPosition={{ lat: spot.lat, lng: spot.lng }}
           reviewsEnabled={!readOnly && reviewsEnabled}
           onClose={() => setShowForm(false)}
           onSaved={(saved) => {
@@ -1187,6 +1210,7 @@ export default function SpotDetailModal({
         <VisitFormModal
           spotId={spot.id}
           spotName={spot.name}
+          spotPosition={{ lat: spot.lat, lng: spot.lng }}
           reviewsEnabled={!readOnly && reviewsEnabled}
           visit={editingVisit}
           onClose={() => setEditingVisit(null)}

@@ -2,6 +2,7 @@ import type {
   AppUser,
   ExportJob,
   MyReview,
+  NearbySpot,
   PublicReview,
   Review,
   Role,
@@ -155,6 +156,13 @@ export const api = {
       );
     },
     get: (id: string) => request<Spot>(`/api/spots/${id}`),
+    /** 座標の近くのスポット(種別をまたぐ。近い順)。座標を指す地図の吸着と一覧に使う */
+    nearby: (lat: number, lng: number, opts?: { exclude?: string; radius?: number }) => {
+      const qs = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+      if (opts?.exclude) qs.set("exclude", opts.exclude);
+      if (opts?.radius) qs.set("radius", String(opts.radius));
+      return request<NearbySpot[]>(`/api/spots/nearby?${qs}`);
+    },
     create: (spot: unknown, type: string) =>
       request<Spot>(`/api/spots?type=${encodeURIComponent(type)}`, {
         method: "POST",

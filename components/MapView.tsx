@@ -111,6 +111,8 @@ import {
   saveOverlayTypeKeys,
 } from "@/lib/map/filterStorage";
 import Modal from "@/components/Modal";
+import PhotoLocationButton from "@/components/PhotoLocationButton";
+import PickLocationModal from "@/components/PickLocationModal";
 
 /**
  * 直前に表示していた地図の中心・ズームをスポット種別ごとに覚えておく
@@ -1078,6 +1080,11 @@ export default function MapView({
   const [addRequestSaving, setAddRequestSaving] = useState(false);
   const [addRequestError, setAddRequestError] = useState<string | null>(null);
   const [addRequestNotice, setAddRequestNotice] = useState<string | null>(null);
+  // 追加の依頼の場所を地図で確かめているとき、その開始位置(写真の位置・いまの場所)
+  const [addRequestPickFrom, setAddRequestPickFrom] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   // 自分が出した修正・追加の依頼。片付くまで地図に印を出す —— 追加の依頼は
   // スポットが無い場所なので地図に何も残らず、修正の依頼もピンの見た目は変わらない
   // ので、どこに頼んだか・もう頼んだかが地図から分からなくなる
@@ -3298,6 +3305,17 @@ export default function MapView({
             {addRequestAt.lat.toFixed(5)}, {addRequestAt.lng.toFixed(5)}
             。管理画面の「修正・追加の依頼」に残ります(スポットは作られません)。
           </p>
+          {/* 場所を写真の撮影地へ動かす・地図で直す。すぐには決めず、地図で確かめてから */}
+          <div className="mb-2 flex flex-wrap items-start gap-1.5">
+            <PhotoLocationButton onLocated={setAddRequestPickFrom} />
+            <button
+              type="button"
+              onClick={() => setAddRequestPickFrom(addRequestAt)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700"
+            >
+              地図で直す
+            </button>
+          </div>
           <label htmlFor={`${fid}-add-request-reason`} className="mb-1 block text-xs font-bold text-gray-700">
             何が足りないか(空でもよい)
           </label>
@@ -3349,6 +3367,19 @@ export default function MapView({
             </button>
           </div>
         </Modal>
+      )}
+      {addRequestPickFrom && (
+        <PickLocationModal
+          title="依頼する場所を確かめる"
+          description="赤いピンをドラッグして、スポットが足りない場所に合わせてください。"
+          initial={addRequestPickFrom}
+          confirmLabel="この場所にする"
+          onConfirm={(pos) => {
+            setAddRequestAt(pos);
+            setAddRequestPickFrom(null);
+          }}
+          onClose={() => setAddRequestPickFrom(null)}
+        />
       )}
       {addRequestNotice && (
         <div className="pointer-events-none fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-800 px-3 py-2 text-sm text-white shadow-lg">

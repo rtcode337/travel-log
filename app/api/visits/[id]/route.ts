@@ -7,6 +7,7 @@ import { photoQuotaError } from "@/lib/photoQuota";
 import { MAX_PHOTOS_PER_VISIT } from "@/lib/visitPhoto";
 import { collectVisitPhotoPaths } from "@/lib/visitPhotoPaths";
 import { PHOTOS_DISABLED_MESSAGE, photosEnabled } from "@/lib/features";
+import { parseOptionalLatLng } from "@/lib/coords";
 import type { Visit } from "@/lib/types";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
@@ -49,6 +50,23 @@ export async function PATCH(
     return NextResponse.json({ error: "invalid unvisited" }, { status: 400 });
   }
   const unvisited: boolean = body.unvisited;
+
+  // 「行った場所」。**キーごと無いときは今の値を残す**(この欄を知らない古い画面が
+  // 開いたままのタブから保存しても、指した場所が消えないように)。nullを送れば消える
+  // (=スポットの位置に戻す)
+  const hasPlace = "place_lat" in body || "place_lng" in body;
+  const place = hasPlace
+    ? parseOptionalLatLng(body.place_lat, body.place_lng)
+    : ({
+        ok: true,
+        value:
+          existing.place_lat != null && existing.place_lng != null
+            ? { lat: existing.place_lat, lng: existing.place_lng }
+            : null,
+      } as const);
+  if (!place.ok) {
+    return NextResponse.json({ error: place.error }, { status: 400 });
+  }
 
   // 写真は「既存の相対パス(残す写真)」と「data URL(追加する写真)」の混在で届く。
   // 相対パスはこの訪問記録が現在持っているものに限定する(他人の写真パスや
@@ -118,10 +136,20 @@ export async function PATCH(
   let rows: Visit[];
   try {
     ({ rows } = await query<Visit>(
-      `update visits set visited_on = $1, memo = $2, photos = $3, unvisited = $4
-       where id = $5 and user_id = $6
+      `update visits set visited_on = $1, memo = $2, photos = $3, unvisited = $4,
+                         place_lat = $5, place_lng = $6
+       where id = $7 and user_id = $8
        returning *`,
-      [body.visited_on, body.memo, photoPaths, unvisited, id, userId]
+      [
+        body.visited_on,
+        body.memo,
+        photoPaths,
+        unvisited,
+        place.value?.lat ?? null,
+        place.value?.lng ?? null,
+        id,
+        userId,
+      ]
     ));
   } catch (e) {
     // DBに記録できなかった新規写真ファイルを残さない

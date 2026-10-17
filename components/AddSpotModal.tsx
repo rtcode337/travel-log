@@ -24,6 +24,9 @@ import { useCurrentSpotTypeKey } from "@/lib/useSpotTypeKey";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitFields from "@/components/VisitFields";
 import Modal from "@/components/Modal";
+import PhotoLocationButton from "@/components/PhotoLocationButton";
+import PickLocationModal from "@/components/PickLocationModal";
+import { isValidLatLng, type LatLng } from "@/lib/coords";
 
 export default function AddSpotModal({
   lat,
@@ -85,6 +88,13 @@ export default function AddSpotModal({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
+  // 座標を地図で確かめているとき、その開始位置(写真の位置・いまの座標)
+  const [pickingFrom, setPickingFrom] = useState<LatLng | null>(null);
+  // いまの座標(入力欄の文字列から。数として読めなければnull)
+  const currentPos: LatLng | null = isValidLatLng(Number(spotLat), Number(spotLng))
+    && spotLat.trim() !== "" && spotLng.trim() !== ""
+    ? { lat: Number(spotLat), lng: Number(spotLng) }
+    : null;
 
   // 追加と同時に付ける訪問記録。既定は畳んであり、**開いたまま送信したときだけ**
   // 記録する(開く操作自体が「ここへ行った」の意思表示。畳んだまま送れば
@@ -114,12 +124,14 @@ export default function AddSpotModal({
       : configured;
   }, [seriesStyles, series]);
 
-  // 新規追加時のみ、置いた座標から地域(都道府県/州・県/国)を自動入力する
-  // (手で上書き可能)。地域の解決方法がスコープに依存するため、スコープの取得完了を待つ
-  useEffect(() => {
-    if (isEdit || lat == null || lng == null || regionScope === null) return;
+  /**
+   * 座標から地域(都道府県/州・県/国)を引いて入れる。`overwrite`が偽なら空のときだけ入れる
+   * (置いた座標からの自動入力は、手で選んだ値を上書きしない)
+   */
+  const resolveRegionAt = (at: LatLng, overwrite: boolean) => {
+    if (regionScope === null) return;
     setLocating(true);
-    api.geocode.reverse(lat, lng, regionScope).then(({ data }) => {
+    api.geocode.reverse(at.lat, at.lng, regionScope).then(({ data }) => {
       setLocating(false);
       if (!data) return;
       const resolved = data.region;
@@ -129,10 +141,30 @@ export default function AddSpotModal({
         (regionScope !== "jp" ||
           PREFECTURES.includes(resolved as (typeof PREFECTURES)[number]))
       ) {
-        setRegion((prev) => prev || resolved);
+        setRegion((prev) => (overwrite ? resolved : prev || resolved));
       }
     });
+  };
+
+  // 新規追加時のみ、置いた座標から地域を自動入力する(手で上書き可能)。
+  // 地域の解決方法がスコープに依存するため、スコープの取得完了を待つ
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 引き直すのは置いた座標とスコープが決まったときだけ(関数は描画ごとに作り直されるので依存に入れない)
+  useEffect(() => {
+    if (isEdit || lat == null || lng == null || regionScope === null) return;
+    resolveRegionAt({ lat, lng }, false);
   }, [isEdit, lat, lng, regionScope]);
+
+  /**
+   * 地図で確かめた座標に決める。新規追加では**地域も引き直して上書きする**
+   * (写真の位置へ動かすと、置いた場所と別の県になることがある)。
+   * 編集では地域に触らない(既存のスポットの地域は手で決めたものなので)
+   */
+  const applyPickedPos = (pos: LatLng) => {
+    setSpotLat(String(pos.lat));
+    setSpotLng(String(pos.lng));
+    setPickingFrom(null);
+    if (!isEdit) resolveRegionAt(pos, true);
+  };
 
   // 'jp'以外のスコープでは地域は自由入力のため、既存スポットの地域をサジェストする
   const availableRegions = useMemo(
@@ -232,6 +264,7 @@ export default function AddSpotModal({
   };
 
   return (
+    <>
     <Modal onClose={onClose} closeOnBackdrop={false} panelClassName="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-white">
       <form
         onSubmit={handleSubmit}
@@ -240,11 +273,25 @@ export default function AddSpotModal({
         <h2 className="font-bold">
           {isEdit ? "スポットを編集" : "この場所にスポットを追加"}
         </h2>
-        {!isEdit && lat != null && lng != null && (
+        {!isEdit && lat != null && lng != null && currentPos && (
           <p className="text-xs text-gray-500">
-            緯度 {lat.toFixed(5)} ・ 経度 {lng.toFixed(5)}
+            緯度 {currentPos.lat.toFixed(5)} ・ 経度 {currentPos.lng.toFixed(5)}
           </p>
         )}
+        {/* 座標を写真の撮影地へ動かす・地図で直す。どちらも**すぐには決めず**、
+            地図(近くのスポットへの吸着つき)で確かめてから決めてもらう */}
+        <div className="flex flex-wrap items-start gap-1.5">
+          <PhotoLocationButton onLocated={setPickingFrom} />
+          {currentPos && (
+            <button
+              type="button"
+              onClick={() => setPickingFrom(currentPos)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700"
+            >
+              地図で直す
+            </button>
+          )}
+        </div>
         {isEdit ? (
           <p className="rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
             {spot?.status === "private" &&
@@ -555,5 +602,17 @@ export default function AddSpotModal({
         )}
       </form>
     </Modal>
+    {pickingFrom && (
+      <PickLocationModal
+        title="位置を確かめる"
+        description="赤いピンをドラッグして、スポットの位置に合わせてください。"
+        initial={pickingFrom}
+        excludeSpotId={spot?.id}
+        confirmLabel="この位置にする"
+        onConfirm={applyPickedPos}
+        onClose={() => setPickingFrom(null)}
+      />
+    )}
+    </>
   );
 }

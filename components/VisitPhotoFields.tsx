@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { readPhotoTakenAt } from "@/lib/exif";
+import { readPhotoGps, readPhotoTakenAt } from "@/lib/exif";
+import type { LatLng } from "@/lib/coords";
 import { visitPhotoSrc } from "@/lib/types";
 import { resizeImageToDataUrl, rotateImageToDataUrl } from "@/lib/visitPhoto";
 import { photosEnabled } from "@/lib/features";
@@ -14,13 +15,15 @@ import { photosEnabled } from "@/lib/features";
  * 写真は「既存の相対パス(残す)」または「追加写真のdata URL」の混在で親が保持し、
  * この形のまま保存に渡す。撮影日時(Exif)は**縮小前の元ファイル**から読む
  * (canvasで描き直すと失われる)。使うのは訪問日時を埋める側だけなので、
- * ここでは読んで親へ渡すところまでを受け持つ。
+ * ここでは読んで親へ渡すところまでを受け持つ。撮影地(GPS)も同じ理由で元ファイルから
+ * 読んで渡す(訪問記録の「行った場所」を添えた写真の位置で指せるように)。
  */
 export default function VisitPhotoFields({
   photos,
   onPhotosChange,
   onProcessingChange,
   onEarliestTakenAtChange,
+  onFirstGpsChange,
   hint,
 }: {
   photos: string[];
@@ -29,12 +32,18 @@ export default function VisitPhotoFields({
   onProcessingChange?: (processing: boolean) => void;
   /** 選択中の写真のうち最も古い撮影日時(=その場所に着いた時刻)。無ければnull */
   onEarliestTakenAtChange?: (takenAt: Date | null) => void;
+  /** 添えた写真のうち、撮影地(GPS)の読めた最初の1枚の位置。無ければnull */
+  onFirstGpsChange?: (pos: LatLng | null) => void;
   /** 説明文の差し替え(既定は訪問記録向けの文面) */
   hint?: React.ReactNode;
 }) {
   // photosと同じ並びの各写真のExif撮影日時(取得できなければnull)。既存写真は
   // 元ファイルが手元に無くExifを読めないためnull
   const [photoTakenAts, setPhotoTakenAts] = useState<(Date | null)[]>(() =>
+    photos.map(() => null)
+  );
+  // photosと同じ並びの各写真の撮影地(読めなければnull。既存写真は日時と同じく読めない)
+  const [photoGps, setPhotoGps] = useState<(LatLng | null)[]>(() =>
     photos.map(() => null)
   );
   const [processing, setProcessing] = useState(false);
@@ -52,6 +61,11 @@ export default function VisitPhotoFields({
     );
   };
 
+  const applyGps = (gps: (LatLng | null)[]) => {
+    setPhotoGps(gps);
+    onFirstGpsChange?.(gps.find((g) => g !== null) ?? null);
+  };
+
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
@@ -62,9 +76,16 @@ export default function VisitPhotoFields({
     try {
       // 撮影日時は縮小前の元ファイルから読む(canvasで描き直すとExifは失われる)
       const takenAts = await Promise.all(files.map(readPhotoTakenAt));
+      const gps = await Promise.all(
+        files.map(async (file) => {
+          const result = await readPhotoGps(file);
+          return result.ok ? { lat: result.lat, lng: result.lng } : null;
+        })
+      );
       const dataUrls = await Promise.all(files.map(resizeImageToDataUrl));
       onPhotosChange([...photos, ...dataUrls]);
       applyTakenAts([...photoTakenAts, ...takenAts]);
+      applyGps([...photoGps, ...gps]);
     } catch {
       setError("写真の読み込みに失敗しました。");
     } finally {
@@ -96,6 +117,7 @@ export default function VisitPhotoFields({
   const removePhoto = (index: number) => {
     onPhotosChange(photos.filter((_, i) => i !== index));
     applyTakenAts(photoTakenAts.filter((_, i) => i !== index));
+    applyGps(photoGps.filter((_, i) => i !== index));
   };
 
   // 写真を畳んだ環境(lib/features.ts)でも、既に付いている写真は出す

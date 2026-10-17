@@ -412,7 +412,47 @@ export interface Visit {
    * 編集・一覧)は通常の訪問記録と同じ
    */
   unvisited: boolean;
+  /**
+   * 「行った場所」。スポットのピンとは別の、実際に行った位置(ご当地グルメのピンは
+   * 発祥地や主要駅にあり、食べた店はそこに無いため)。両方nullなら「スポットの位置」で、
+   * 片方だけが入ることは無い(DBのcheck制約)。位置として使うときは`visitPosition`(か`visitPlace`)を通す
+   */
+  place_lat: number | null;
+  place_lng: number | null;
   created_at: string;
+}
+
+/**
+ * 座標の近くのスポット(`GET /api/spots/nearby`)。種別をまたいで返すので、
+ * どの種別のものかを添える(一覧の行に種別名を出すため)
+ */
+export interface NearbySpot {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  type_key: string;
+  type_label: string;
+}
+
+/** 訪問記録の「行った場所」が入っていればその座標、無ければnull */
+export function visitPlace(
+  visit: Pick<Visit, "place_lat" | "place_lng">
+): { lat: number; lng: number } | null {
+  return visit.place_lat != null && visit.place_lng != null
+    ? { lat: visit.place_lat, lng: visit.place_lng }
+    : null;
+}
+
+/**
+ * 訪問の位置。「行った場所」が入っていればそちら、無ければスポットの位置
+ * (訪問順の経路など、訪問を地図に置くところはここを通す)
+ */
+export function visitPosition(
+  visit: Pick<Visit, "place_lat" | "place_lng">,
+  spot: { lat: number; lng: number }
+): { lat: number; lng: number } {
+  return visitPlace(visit) ?? { lat: spot.lat, lng: spot.lng };
 }
 
 /**

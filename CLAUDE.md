@@ -121,7 +121,7 @@ manifest(`app/manifest.ts`、Next.jsのMetadata Files規約で`/manifest.webmani
 
 ### MapLibreのワーカースクリプト(`public/maplibre-gl/`)
 
-地図を作るコンポーネント(`MapView`・`MiniMap`・`SpotRepositionModal`)は`maplibre-gl`を直接importせず、必ず`lib/maplibre.ts`(`export *`での再エクスポート+CSSのimport+ワーカーURLの設定)を経由する。
+地図を作るコンポーネント(`MapView`・`MiniMap`・`PinPickerMap`)は`maplibre-gl`を直接importせず、必ず`lib/maplibre.ts`(`export *`での再エクスポート+CSSのimport+ワーカーURLの設定)を経由する。
 
 maplibre-gl 6は、ワーカーURLを指定しない場合`import.meta.url`を起点に`./maplibre-gl-worker.mjs`を解決する実装になった(`src/util/web_worker.ts`の`defaultWorkerUrl`)。ところがwebpackはバンドル時に`import.meta.url`を`"file:///app/node_modules/maplibre-gl/dist/maplibre-gl.mjs"`という文字列へ置き換えるため、`http(s)`で始まらないURLとして弾かれて空文字が返り、`new Worker("", { type: "module" })`=**ページ自身のHTMLをJSモジュールとして読み込む**動作になる。ブラウザは`Failed to load module script: ... non-JavaScript MIME type of "text/html"`で拒否し、ワーカーが起動しないため**タイルもスポットのピンも一切描画されない**(maplibre-gl 5→6の更新で実際に起きた。maplibre-gl 6.0.0時点で上流に修正は無い)。
 

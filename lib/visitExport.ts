@@ -4,6 +4,7 @@ import { parseVisitPhotoPath, readVisitPhoto } from "@/lib/photos";
 import { buildCsv } from "@/lib/csv";
 import { formatCategoryList } from "@/lib/category";
 import type { ZipWriter } from "@/lib/zip";
+import { buildVisitCsvRow, VISIT_CSV_HEADER } from "@/lib/visitExportCsv";
 
 /**
  * 1ユーザーの訪問記録+写真をZIPにまとめる(サーバー専用モジュール)。
@@ -35,6 +36,8 @@ interface ExportRow {
   memo: string | null;
   photos: string[];
   unvisited: boolean;
+  place_lat: number | null;
+  place_lng: number | null;
   name: string;
   name_kana: string | null;
   lat: number;
@@ -43,23 +46,6 @@ interface ExportRow {
   series: string | null;
   categories: string[];
 }
-
-const CSV_HEADER = [
-  "スポット名",
-  "ふりがな",
-  "緯度",
-  "経度",
-  "地域",
-  "シリーズ",
-  "カテゴリ",
-  "訪問日時(JST)",
-  "メモ",
-  // 追記(visit_notes)は訪問記録にぶら下がるので行を増やさず、1列にまとめる
-  // (「<追記日時> <本文>」を改行区切り)。写真は元の記録の写真の後ろに続ける
-  "追記",
-  "写真",
-  "未訪問記録",
-];
 
 interface VisitExportResult {
   visitCount: number;
@@ -77,7 +63,7 @@ export async function writeVisitExport(
   const { rows } = await query<ExportRow>(
     `select v.id,
             st.key as type_key,
-            v.visited_on, v.memo, v.photos, v.unvisited,
+            v.visited_on, v.memo, v.photos, v.unvisited, v.place_lat, v.place_lng,
             s.name, s.name_kana, s.lat, s.lng, s.region, s.series, s.categories
      from visits v
      join spots s on s.id = v.spot_id
@@ -131,27 +117,31 @@ export async function writeVisitExport(
       zipPaths.push(zipPath);
     }
 
-    const csvRows = csvByType.get(row.type_key) ?? [CSV_HEADER];
-    csvRows.push([
-      row.name,
-      row.name_kana,
-      row.lat,
-      row.lng,
-      row.region,
-      row.series,
-      // 複数カテゴリはインポート側のCSVと同じくパイプ区切りの1列にまとめる
-      formatCategoryList(row.categories),
-      formatVisitedAtJst(row.visited_on),
-      row.memo,
-      notes
-        .map(
-          (n) => `${formatVisitedAtJst(n.created_at)} ${n.body ?? ""}`.trimEnd()
-        )
-        .join("\n"),
-      zipPaths.join(";"),
-      // 未訪問記録(訪問済みに数えない記録)は「未訪問」、通常の訪問記録は空欄
-      row.unvisited ? "未訪問" : "",
-    ]);
+    const csvRows = csvByType.get(row.type_key) ?? [[...VISIT_CSV_HEADER]];
+    // 列の並びと読み戻しは lib/visitExportCsv.ts(列は末尾にしか足さない)
+    csvRows.push(
+      buildVisitCsvRow({
+        name: row.name,
+        nameKana: row.name_kana,
+        lat: row.lat,
+        lng: row.lng,
+        region: row.region,
+        series: row.series,
+        // 複数カテゴリはインポート側のCSVと同じくパイプ区切りの1列にまとめる
+        categories: formatCategoryList(row.categories),
+        visitedAt: formatVisitedAtJst(row.visited_on),
+        memo: row.memo,
+        notes: notes
+          .map(
+            (n) => `${formatVisitedAtJst(n.created_at)} ${n.body ?? ""}`.trimEnd()
+          )
+          .join("\n"),
+        photos: zipPaths.join(";"),
+        unvisited: row.unvisited,
+        placeLat: row.place_lat,
+        placeLng: row.place_lng,
+      })
+    );
     csvByType.set(row.type_key, csvRows);
   }
 
@@ -164,7 +154,7 @@ export async function writeVisitExport(
   // 訪問記録が1件も無くても空のZIPを返さず、見出しだけのCSVを1枚入れる
   // (「取り込みに失敗した」のか「記録が無い」のかを開いた人が見分けられるように)
   if (csvByType.size === 0) {
-    await zip.add("visits.csv", csvData([CSV_HEADER]));
+    await zip.add("visits.csv", csvData([[...VISIT_CSV_HEADER]]));
   }
 
   return { visitCount: rows.length, photoCount };

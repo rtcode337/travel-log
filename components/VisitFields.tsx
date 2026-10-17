@@ -4,6 +4,7 @@ import { useState, useId } from "react";
 import { readPhotoTakenAt } from "@/lib/exif";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitPhotoFields from "@/components/VisitPhotoFields";
+import type { LatLng } from "@/lib/coords";
 
 /**
  * 訪問記録の入力欄(訪問日時・写真・メモ)。訪問記録モーダル(VisitFormModal)と、
@@ -20,6 +21,7 @@ export default function VisitFields({
   onPhotosChange,
   onProcessingChange,
   visitedOnHint,
+  onFirstPhotoGpsChange,
 }: {
   visitedOn: string;
   onVisitedOnChange: (value: string) => void;
@@ -32,6 +34,8 @@ export default function VisitFields({
   /** 訪問日時欄の下の説明文。未訪問記録では空にした意味が「時期不明」ではなく
    *  「下調べ」になるため、呼び出し側で差し替えられるようにしてある */
   visitedOnHint?: string;
+  /** 添えた写真のうち撮影地の読めた最初の1枚の位置(「行った場所」を写真の位置で指すため) */
+  onFirstPhotoGpsChange?: (pos: LatLng | null) => void;
 }) {
   // ラベルと入力欄を結ぶid(同じ画面に同じ部品が複数出ても重ならないように)
   const fid = useId();
@@ -147,6 +151,7 @@ export default function VisitFields({
         onPhotosChange={onPhotosChange}
         onProcessingChange={onProcessingChange}
         onEarliestTakenAtChange={setEarliestTakenAt}
+        onFirstGpsChange={onFirstPhotoGpsChange}
       />
 
       <div className="border-t border-gray-100 pt-3">

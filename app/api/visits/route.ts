@@ -6,6 +6,7 @@ import { deleteVisitPhotos, saveVisitPhoto } from "@/lib/photos";
 import { photoQuotaError } from "@/lib/photoQuota";
 import { MAX_PHOTOS_PER_VISIT } from "@/lib/visitPhoto";
 import { PHOTOS_DISABLED_MESSAGE, photosEnabled } from "@/lib/features";
+import { parseOptionalLatLng } from "@/lib/coords";
 import type { Visit } from "@/lib/types";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
@@ -46,6 +47,12 @@ export async function POST(request: Request) {
       { error: "本文が長すぎます(10,000文字まで)。" },
       { status: 400 }
     );
+  }
+
+  // 「行った場所」(空ならスポットの位置)。写真を保存する前に見る(弾くなら何も書かない)
+  const place = parseOptionalLatLng(body.place_lat, body.place_lng);
+  if (!place.ok) {
+    return NextResponse.json({ error: place.error }, { status: 400 });
   }
 
   // 写真はブラウザで縮小・圧縮済みのdata URLで届く。DBにはBase64を入れず、
@@ -104,10 +111,19 @@ export async function POST(request: Request) {
   let rows: Visit[];
   try {
     ({ rows } = await query<Visit>(
-      `insert into visits (user_id, spot_id, visited_on, memo, photos, unvisited)
-       values ($1, $2, $3, $4, $5, $6)
+      `insert into visits (user_id, spot_id, visited_on, memo, photos, unvisited, place_lat, place_lng)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
        returning *`,
-      [userId, body.spot_id, body.visited_on, body.memo, photoPaths, unvisited]
+      [
+        userId,
+        body.spot_id,
+        body.visited_on,
+        body.memo,
+        photoPaths,
+        unvisited,
+        place.value?.lat ?? null,
+        place.value?.lng ?? null,
+      ]
     ));
   } catch (e) {
     // DBに記録できなかった写真ファイルを残さない

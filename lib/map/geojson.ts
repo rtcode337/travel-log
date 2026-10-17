@@ -3,7 +3,7 @@
  * どの日の訪問を結ぶか・重なったピンの数え方)。地図の状態を持たない純粋な関数だけを置く。
  */
 import * as maplibregl from "@/lib/maplibre";
-import type { Spot, SpotRoute, Visit, VisitPlanList } from "@/lib/types";
+import { type Spot, type SpotRoute, type Visit, type VisitPlanList, visitPosition } from "@/lib/types";
 import { type SeriesStyleDefinition } from "@/lib/seriesStyle";
 import { resolveSpotFace, resolveSpotMark, resolveSpotShape } from "@/lib/spotStyle";
 import { pinIconId } from "@/lib/pinIcon";
@@ -116,6 +116,9 @@ export function visitedSpotIdsOn(visits: Visit[], filters: SpotFilters): Set<str
  * 同じスポットへの再訪はそのまま複数回現れる(行って戻る線になる)が、
  * 連続する同じスポットへの訪問(同じ場所で複数回記録した場合)はまとめる
  * (長さ0の線分になり、矢印の向きが定まらないため)。
+ * **訪問記録に「行った場所」が入っていれば、経路はそこを通る**(返すスポットの座標を
+ * 行った場所に差し替える。ご当地グルメのピンは発祥地や駅にあり、実際の道のりと違うため)。
+ * 経路詳細の地点・Google マップの経路検索・地図の寄せ先も、この座標をそのまま使う。
  */
 export function buildVisitPathsByDay(
   visits: Visit[],
@@ -130,7 +133,11 @@ export function buildVisitPathsByDay(
     const date = toVisitDateKey(visit.visited_on);
     if (!spot || !date) continue;
     const day = byDay.get(date) ?? [];
-    day.push({ time: Date.parse(visit.visited_on!), spot });
+    const at = visitPosition(visit, spot);
+    day.push({
+      time: Date.parse(visit.visited_on!),
+      spot: at.lat === spot.lat && at.lng === spot.lng ? spot : { ...spot, ...at },
+    });
     byDay.set(date, day);
   }
   return [...byDay.entries()]
@@ -140,7 +147,14 @@ export function buildVisitPathsByDay(
       path: entries
         .sort((a, b) => a.time - b.time)
         .map((v) => v.spot)
-        .filter((spot, i, list) => i === 0 || spot.id !== list[i - 1].id),
+        // 同じスポットでも行った場所が違えば別の地点として残す(同じ名物を2軒で食べたとき)
+        .filter(
+          (spot, i, list) =>
+            i === 0 ||
+            spot.id !== list[i - 1].id ||
+            spot.lat !== list[i - 1].lat ||
+            spot.lng !== list[i - 1].lng
+        ),
     }))
     .filter((day) => day.path.length > 0);
 }

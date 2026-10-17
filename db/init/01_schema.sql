@@ -165,6 +165,9 @@ create unique index spots_spot_type_key_idx
 -- (5万件規模の種別では26回のソートになる)。並びに id を含めるのは全順序に
 -- するため —— region・name だけでは同値の行の順が実行ごとに変わりうる
 create index spots_download_order_idx on spots (spot_type_id, region, name, id);
+-- 座標を指す画面の「近くのスポット」(GET /api/spots/nearby。種別をまたいで数百m四方を引く)用。
+-- 緯度の範囲で絞ってから経度を見る —— 緯度の帯は国全体でも細いので、これだけで足りる
+create index spots_lat_lng_idx on spots (lat, lng);
 
 -- =============================================================
 -- spot_deletions: 画面から個別削除された公開スポットの記録(削除の墓標)。
@@ -245,7 +248,11 @@ create index spot_route_points_spot_id_idx on spot_route_points (spot_id);
 -- 見られなかった(visited_onあり=その日の訪問順の経路には含まれ、訪問予定も外れる)、
 -- または事前の下調べのメモ(visited_onなし=訪問予定は外れない)。どちらも
 -- 訪問済みの判定(ピンの緑色・訪問状況の絞り込み)には数えず、それ以外の扱い
--- (写真・メモ・編集・一覧)は通常の訪問記録と同じ
+-- (写真・メモ・編集・一覧)は通常の訪問記録と同じ。
+-- place_lat/place_lngは「行った場所」: スポットのピンとは別の、実際に行った位置。
+-- ご当地グルメのようにピンを発祥地や主要駅に置く種別では、食べた店はそこに無いため。
+-- 空(両方null)ならスポットの位置で行ったものとして扱う。片方だけは持たせない
+-- (visits_place_ck)。訪問順の経路と訪問記録のエクスポートは、入っていればこちらを使う
 -- =============================================================
 create table visits (
   id             uuid primary key default gen_random_uuid(),
@@ -257,8 +264,15 @@ create table visits (
   -- 「<ユーザーID>/<年>/<月>/<uuid>.<拡張子>」を保存する(lib/photos.ts参照)
   photos         text[] not null default '{}',
   unvisited      boolean not null default false,
+  place_lat      double precision,
+  place_lng      double precision,
   created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now()
+  updated_at     timestamptz not null default now(),
+  constraint visits_place_ck check (
+    (place_lat is null and place_lng is null)
+    or (place_lat is not null and place_lng is not null
+        and place_lat between -90 and 90 and place_lng between -180 and 180)
+  )
 );
 
 create index visits_user_id_idx on visits (user_id);

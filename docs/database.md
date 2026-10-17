@@ -242,6 +242,8 @@ erDiagram
         text memo
         text_array photos "photos/ 配下の相対パス"
         boolean unvisited "true = 未訪問記録(訪問済みに数えない)"
+        double place_lat "行った場所(null = スポットの位置)"
+        double place_lng "place_lat と両方入るか両方 null(check)"
     }
     spot_hides {
         uuid id PK
@@ -297,6 +299,11 @@ erDiagram
 ```
 
 - **`visits` は同一スポットへの複数回訪問を許容する**(トグルではない)
+- **`visits.place_lat` / `place_lng` は「行った場所」**(スポットのピンとは別の、実際に
+  行った位置)。ご当地グルメのようにピンを発祥地や主要駅に置く種別では、食べた店は
+  そこに無いため。**両方 null なら「スポットの位置」**で、片方だけ・範囲外は
+  `visits_place_ck` で弾く。訪問順の経路と訪問記録のエクスポートは、入っていれば
+  こちらを使う
 - **`visit_plans`(1スポットの予定)と `visit_plan_lists`(順序付きの旅程)は独立**。
   訪問を記録すると `visit_plans` からは自動で消えるが、**旅程の側は消さず
   `visit_plan_list_items.visited_at` に日時を入れる**(訪問済みの印)。旅程は
@@ -334,6 +341,7 @@ erDiagram
 | spots | `categories`(GIN) | 複数カテゴリの包含検索(`&&`) |
 | spots | `(spot_type_id, key)` ユニーク(key が null 以外) | CSV・ルートからの参照キー |
 | spots | `(spot_type_id, region, name, id)` | 公開スポットのダウンロード(`limit`/`offset` の分割取得)の並び |
+| spots | `(lat, lng)` | 座標を指す地図の「近くのスポット」(`GET /api/spots/nearby`。種別をまたいで数百m四方を引く) |
 | spot_deletions | `spot_type_id` | 還元用エクスポートの抽出 |
 | spot_flags | `spot_id` | スポット詳細からの修正の依頼の有無の確認 |
 | spot_flags | `spot_type_id` | 追加の依頼の種別ごとの一覧 |

@@ -2,15 +2,18 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api-client";
-import { type Visit } from "@/lib/types";
+import { type Visit, visitPlace } from "@/lib/types";
+import { distanceMeters, formatDistance, type LatLng } from "@/lib/coords";
 import { toDateTimeLocalValue } from "@/lib/visitPhoto";
 import VisitFields from "@/components/VisitFields";
 import HelpTip from "@/components/HelpTip";
 import Modal from "@/components/Modal";
+import PickLocationModal from "@/components/PickLocationModal";
 
 export default function VisitFormModal({
   spotId,
   spotName,
+  spotPosition,
   reviewsEnabled,
   visit,
   onClose,
@@ -18,6 +21,8 @@ export default function VisitFormModal({
 }: {
   spotId: string;
   spotName: string;
+  /** スポットのピンの位置(「行った場所」を指す地図をここから開く・距離を出す) */
+  spotPosition: LatLng;
   /** falseならこのスポット種別では口コミ機能が無効なので入力欄自体を出さない */
   reviewsEnabled: boolean;
   /** 指定すると既存の訪問記録の編集モードになる(口コミ入力欄は出さない) */
@@ -44,6 +49,14 @@ export default function VisitFormModal({
   // PATCHに渡す(サーバー側がパス=残す・data URL=新規保存と解釈する)
   const [photos, setPhotos] = useState<string[]>(visit?.photos ?? []);
   const [processingPhotos, setProcessingPhotos] = useState(false);
+  // 「行った場所」(nullならスポットの位置)。編集時は既存値から始める
+  const [place, setPlace] = useState<LatLng | null>(() =>
+    visit ? visitPlace(visit) : null
+  );
+  // 行った場所を指す地図を開いているとき、その開始位置
+  const [pickingFrom, setPickingFrom] = useState<LatLng | null>(null);
+  // 添えた写真のうち、撮影地の読めた最初の1枚の位置(行った場所をそこで指せるように)
+  const [photoGps, setPhotoGps] = useState<LatLng | null>(null);
   const [reviewBody, setReviewBody] = useState("");
   // 口コミの入力欄を開いているか(既定は畳む)
   const [showReview, setShowReview] = useState(false);
@@ -63,6 +76,9 @@ export default function VisitFormModal({
       memo: memo.trim() || null,
       photos,
       unvisited,
+      // 指していなければnull(=スポットの位置)。編集で「スポットの位置に戻す」もnullで送る
+      place_lat: place?.lat ?? null,
+      place_lng: place?.lng ?? null,
     };
     const { data: saved, error: visitError } = visit
       ? await api.visits.update(visit.id, payload)
@@ -90,6 +106,7 @@ export default function VisitFormModal({
   };
 
   return (
+    <>
     <Modal
       onClose={onClose}
       closeOnBackdrop={false}
@@ -114,12 +131,65 @@ export default function VisitFormModal({
           photos={photos}
           onPhotosChange={setPhotos}
           onProcessingChange={setProcessingPhotos}
+          onFirstPhotoGpsChange={setPhotoGps}
           visitedOnHint={
             unvisited
               ? "「削除」で空にすると下調べのメモになります(どの経路にも含まれず、訪問予定も残ります)。"
               : undefined
           }
         />
+
+        {/* 行った場所。ピンが店そのものではない種別(ご当地グルメのピンは発祥地や
+            主要駅にある)で、実際に行った位置を残すためのもの。全種別で使える。
+            地図は別のモーダルで開く —— フォームに地図を埋めると、保存ボタンが
+            画面の外へ押し出される */}
+        <div className="border-t border-gray-100 pt-3">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <p className="text-sm font-medium">行った場所</p>
+            <HelpTip>
+              スポットのピンとは別の、実際に行った位置を残せます(ご当地グルメのように、
+              ピンが発祥地や駅に置かれていて、食べた店はそこに無いときなど)。
+              指した位置は、その日の訪問順の経路と訪問記録の書き出しで使われます。
+              指さなければスポットの位置として扱います。
+            </HelpTip>
+            <span className={`text-xs ${place ? "text-gray-800" : "text-gray-500"}`}>
+              {place
+                ? `指した位置(スポットから${formatDistance(distanceMeters(spotPosition, place))})`
+                : "スポットの位置"}
+            </span>
+          </div>
+          {/* 保存ボタンを画面の外へ押し出さないよう、操作は1行に収める
+              (戻すは文字のリンクにして幅を取らない) */}
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPickingFrom(place ?? spotPosition)}
+              className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-700"
+            >
+              {place ? "地図で直す" : "地図で指す"}
+            </button>
+            {/* 添えた写真に撮影地が入っていれば、そこから指し始められる
+                (そのまま決めずに地図で確かめてもらう。写真の位置は数十mずれることがある) */}
+            {photoGps && (
+              <button
+                type="button"
+                onClick={() => setPickingFrom(photoGps)}
+                className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs text-blue-700"
+              >
+                添えた写真の位置で指す
+              </button>
+            )}
+            {place && (
+              <button
+                type="button"
+                onClick={() => setPlace(null)}
+                className="px-1 py-1 text-xs text-gray-500 underline"
+              >
+                スポットの位置に戻す
+              </button>
+            )}
+          </div>
+        </div>
 
         {/* 未訪問記録の切り替え。訪問記録と同じフォーム・同じ訪問履歴に記録し、
             訪問済みに数えるかどうかだけをこのフラグで分ける。
@@ -204,5 +274,24 @@ export default function VisitFormModal({
         </div>
       </form>
     </Modal>
+    {pickingFrom && (
+      <PickLocationModal
+        title="行った場所を指す"
+        description={
+          <>
+            {spotName}の訪問で、実際に行った位置に赤いピンを合わせてください。
+            近くのスポットの点に近づけると、その位置に重なります。
+          </>
+        }
+        initial={pickingFrom}
+        confirmLabel="この位置にする"
+        onConfirm={(pos) => {
+          setPlace(pos);
+          setPickingFrom(null);
+        }}
+        onClose={() => setPickingFrom(null)}
+      />
+    )}
+    </>
   );
 }
