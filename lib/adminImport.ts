@@ -7,6 +7,8 @@ import { api } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
 import { parseRank, type Rank } from "@/lib/rank";
 import { parseCategoryList, sameCategories } from "@/lib/category";
+import { normalizeAvailableMonths } from "@/lib/availableMonths";
+import { normalizeOpeningHours } from "@/lib/openingHours";
 import { type Spot, type SpotRoute } from "@/lib/types";
 
 // CSVインポートを1リクエストにまとめず1000件ずつに分けて送る(進捗表示のためと、
@@ -24,6 +26,10 @@ export const CSV_COLUMNS = [
   "series",
   "categories",
   "description",
+  // 提供の時期(`11-3`・`6,7,8`)と営業時間(OSMのopening_hoursの書式)。どちらも省略可で、
+  // 列が無いCSVは既存の値に触らない(categoriesと同じ扱い)
+  "available_months",
+  "opening_hours",
 ] as const;
 
 // ルートCSV(スポットを巡った順に矢印で繋ぐ)の列。spot_keyはスポットCSVのkey列を指す。
@@ -72,6 +78,9 @@ interface CsvSpotRecord {
   /** null = CSVにcategories列が無い(既存のカテゴリを触らない) */
   categories: string[] | null;
   description: string | null;
+  /** 列が無いCSVではnull(既存の値は`hasMonthsColumn`で守る) */
+  available_months: string | null;
+  opening_hours: string | null;
   status: string;
   origin: "csv";
 }
@@ -114,6 +123,9 @@ export const runSpotsCsvImport = async (
     // categories列を持たないCSVは「カテゴリを指定していない」だけなので、
     // 既存スポットのカテゴリを消さずに維持する(key列と同じ扱い)
     const hasCategoriesColumn = header.includes("categories");
+    // 提供の時期・営業時間も同じ。列の無いCSV(これまでの形)は既存の値を消さない
+    const hasMonthsColumn = header.includes("available_months");
+    const hasHoursColumn = header.includes("opening_hours");
     const idx = Object.fromEntries(
       CSV_COLUMNS.map((c) => [c, header.indexOf(c)])
     ) as Record<(typeof CSV_COLUMNS)[number], number>;
@@ -149,6 +161,16 @@ export const runSpotsCsvImport = async (
       const categories = hasCategoriesColumn
         ? parseCategoryList(get("categories"))
         : null;
+      // 提供の時期の壊れた値は取り込みを止める(黙って空にすると「通年」として
+      // 手に入る側に数えられ、時期外のものが「今手に入る」に並ぶ)
+      const months = normalizeAvailableMonths(get("available_months"));
+      if (!months.ok) {
+        errors.push(`${i + 1}行目: ${months.error}`);
+        continue;
+      }
+      // 営業時間は書式を検査しない —— 渡されるデータの1件の書き方で取り込み全体が
+      // 止まるより、保存しておいて読めない部分を「不明」に倒すほうがよい(lib/openingHours.ts)
+      const openingHours = normalizeOpeningHours(get("opening_hours"));
       const lat = Number(get("lat"));
       const lng = Number(get("lng"));
       if (!get("name")) errors.push(`${i + 1}行目: name が空`);
@@ -166,6 +188,8 @@ export const runSpotsCsvImport = async (
           series,
           categories,
           description: get("description") || null,
+          available_months: months.value,
+          opening_hours: openingHours,
           // CSVインポートはこのページ(spot_admin/admin専用)からのみ行えるため、
           // 承認待ちを経由せずそのまま公開する
           status: "published",
@@ -233,6 +257,8 @@ export const runSpotsCsvImport = async (
       (record.categories !== null &&
         !sameCategories(spot.categories, record.categories)) ||
       spot.description !== record.description ||
+      (hasMonthsColumn && (spot.available_months ?? null) !== record.available_months) ||
+      (hasHoursColumn && (spot.opening_hours ?? null) !== record.opening_hours) ||
       (record.key !== null && spot.key !== record.key) ||
       // 手動追加(manual)の行がCSVと一致した=travel-log-dataへ還元済みなので、
       // 内容が同一でもPATCHしてorigin='csv'に倒す(次回の還元用エクスポートから外す)
@@ -317,6 +343,8 @@ export const runSpotsCsvImport = async (
               ? { categories: record.categories }
               : {}),
             description: record.description,
+            ...(hasMonthsColumn ? { available_months: record.available_months } : {}),
+            ...(hasHoursColumn ? { opening_hours: record.opening_hours } : {}),
             ...(record.key !== null ? { key: record.key } : {}),
             origin: record.origin,
           })),

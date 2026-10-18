@@ -5,6 +5,8 @@ import { deleteVisitPhotos } from "@/lib/photos";
 import { collectVisitPhotoPaths } from "@/lib/visitPhotoPaths";
 import { MODERATION_ROLES, SPOT_ADMIN_ROLES, type Role, type Spot } from "@/lib/types";
 import { parseRank } from "@/lib/rank";
+import { normalizeAvailableMonths } from "@/lib/availableMonths";
+import { normalizeOpeningHours } from "@/lib/openingHours";
 
 /**
  * 閲覧できるのは「公開スポット」「本人が追加したスポット(status問わず)」、
@@ -94,13 +96,23 @@ export async function PATCH(
       );
     }
   }
+  // 提供の時期・営業時間もボディに含まれるときだけ更新する(この欄を知らない画面
+  // —— 位置の修正など —— から保存しても消えないように)。消すのは明示のnull・空
+  const hasMonths = Object.prototype.hasOwnProperty.call(spot, "available_months");
+  const months = normalizeAvailableMonths(hasMonths ? spot.available_months : null);
+  if (!months.ok) {
+    return NextResponse.json({ error: months.error }, { status: 400 });
+  }
+  const hasHours = Object.prototype.hasOwnProperty.call(spot, "opening_hours");
   const { rows } = await query<Spot>(
     `update spots set
       name = $1, name_kana = $2, lat = $3, lng = $4, region = $5,
       series = $6, description = $7, rank = $15,
       categories = case when $8 then $9::text[] else categories end,
       key = case when $10 then $11 else key end,
-      origin = case when $12 then $13 else origin end
+      origin = case when $12 then $13 else origin end,
+      available_months = case when $16 then $17 else available_months end,
+      opening_hours = case when $18 then $19 else opening_hours end
      where id = $14
      returning *`,
     [
@@ -119,6 +131,10 @@ export async function PATCH(
       hasOrigin ? spot.origin : null,
       id,
       parseRank(spot.rank),
+      hasMonths,
+      months.value,
+      hasHours,
+      hasHours ? normalizeOpeningHours(spot.opening_hours) : null,
     ]
   );
 

@@ -26,7 +26,7 @@ LAN内の別端末から開発サーバを開くときは`ALLOWED_DEV_ORIGINS`(`
 
 **リポジトリに置くのは`.example`の付いた雛形だけ**で、実値を入れてコピーした`docker-compose.standalone.yml`は`.gitignore`してある(`.env.example`と`.env`の関係と同じ。この形式は`SESSION_SECRET`等を直書きするので、雛形を直接編集すると秘密がコミット対象に入る)。
 
-テストは`npm test`(`lib/**/*.test.ts`を`node:test`+`tsx`で流す。`@/`の別名もそのまま解決される)。**対象は`lib/`の純粋な関数**(日時の書式・CSV・ZIPの書き出しと読み戻し・セッション・レート制限・入力の検査など)で、画面とAPIは含まない。DBに触る検査は`scripts/bootstrap-sql_test.sh`(スキーマ本体+マイグレーションを2回当てて冪等であること、Supabase向けの一括SQLと同じ状態になることを確かめる。`db/migrations/README.md`参照)。リンターは`npm run lint`(Biome。**lintだけで整形はしない**)。ESLintは`eslint-config-next`の依存チェーンに未修正の脆弱性(GHSA-mh99-v99m-4gvg)があり見送った。`biome.json`は推奨ルールを基本に、誤検出の多いもの(配列の添字をkeyにする・`forEach`の戻り値など)と書き方の好みのルールだけを切ってある。**フックの依存配列を意図して絞るときは`biome-ignore lint/correctness/useExhaustiveDependencies: <理由>`を書く**(理由の無い抑止は残さない)。**モーダルは`components/Modal.tsx`の器を使う**(`fixed inset-0`の重ねを画面ごとに手で書かない。理由は`docs/design/map.md`「モーダルの器」)。型チェックは`next build`が行う。CIはこの3つと`next build`を回す(`.github/workflows/ci.yml`)。
+テストは`npm test`(`lib/**/*.test.ts`を`node:test`+`tsx`で流す。`@/`の別名もそのまま解決される)。**対象は`lib/`の純粋な関数**(日時の書式・CSV・ZIPの書き出しと読み戻し・セッション・レート制限・入力の検査・提供の時期と営業時間と日本の祝日の判定など)で、画面とAPIは含まない。DBに触る検査は`scripts/bootstrap-sql_test.sh`(スキーマ本体+マイグレーションを2回当てて冪等であること、Supabase向けの一括SQLと同じ状態になることを確かめる。`db/migrations/README.md`参照)。リンターは`npm run lint`(Biome。**lintだけで整形はしない**)。ESLintは`eslint-config-next`の依存チェーンに未修正の脆弱性(GHSA-mh99-v99m-4gvg)があり見送った。`biome.json`は推奨ルールを基本に、誤検出の多いもの(配列の添字をkeyにする・`forEach`の戻り値など)と書き方の好みのルールだけを切ってある。**フックの依存配列を意図して絞るときは`biome-ignore lint/correctness/useExhaustiveDependencies: <理由>`を書く**(理由の無い抑止は残さない)。**モーダルは`components/Modal.tsx`の器を使う**(`fixed inset-0`の重ねを画面ごとに手で書かない。理由は`docs/design/map.md`「モーダルの器」)。型チェックは`next build`が行う。CIはこの3つと`next build`を回す(`.github/workflows/ci.yml`)。
 
 ### スキーマ変更のルール
 
@@ -144,7 +144,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 
 | ファイル | 中身 |
 |---|---|
-| [docs/design/spot-types.md](docs/design/spot-types.md) | スポット種別(`spot_types`)と種別ごとの設定、ランク・シリーズ・カテゴリ、ピンの見た目を決める仕組み。 |
+| [docs/design/spot-types.md](docs/design/spot-types.md) | スポット種別(`spot_types`)と種別ごとの設定、ランク・シリーズ・カテゴリ、ピンの見た目を決める仕組み。提供の時期・営業時間と「今手に入る」「今営業中」の判定。 |
 | [docs/design/map.md](docs/design/map.md) | 画面の骨組み(下タブとスクロールする領域)、経路と訪問順・訪問予定リストの線、Google マップ・生成AIへの導線、ピンと線の出し分け、重なったピン、別種別の重ね表示、共通の UI 部品。 |
 | [docs/design/admin.md](docs/design/admin.md) | キー一覧での削除、GitHub・ZIP からの取り込み、修正・追加の依頼、還元用エクスポート、全削除、スポットの新規登録と CSV の差分更新。 |
 | [docs/design/visits.md](docs/design/visits.md) | 訪問記録と口コミ、写真と追記、エクスポート、未訪問記録と非表示、訪問予定リスト(旅程)と天気。 |

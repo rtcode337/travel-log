@@ -915,7 +915,19 @@ export default function AdminView({
       const now = new Date();
       const dateKey = jstDateStamp(now);
       const spotsCsv = buildCsv([
-        ["name", "name_kana", "lat", "lng", "region", "rank", "series", "categories", "description"],
+        [
+          "name",
+          "name_kana",
+          "lat",
+          "lng",
+          "region",
+          "rank",
+          "series",
+          "categories",
+          "description",
+          "available_months",
+          "opening_hours",
+        ],
         ...manualSpots.map((s) => [
           s.name,
           s.name_kana,
@@ -926,6 +938,8 @@ export default function AdminView({
           s.series,
           formatCategoryList(s.categories),
           s.description,
+          s.available_months,
+          s.opening_hours,
         ]),
       ]).trimEnd();
       const excludeKeys = deleted.map((d) => d.key ?? d.name).join("\n");
@@ -1606,7 +1620,12 @@ export default function AdminView({
                   ランクを使わない種別では入っていても効かない)。
                   series/categoriesは自由入力で空でも可。categoriesは1スポットに複数
                   付けられ、パイプ区切りで書く(例: 自然|夜景|展望)。keyは省略可の
-                  種別内一意な参照キーで、経路のCSVからスポットを指すのに使う)。
+                  種別内一意な参照キーで、経路のCSVからスポットを指すのに使う。
+                  available_monthsは手に入る月(例: 11-3=11月〜3月、6,7,8、12-2,7。
+                  空=通年か不明。読めない値は取り込みを止める)、opening_hoursは
+                  OpenStreetMapのopening_hoursの書式の営業時間(例: Mo-Fr 11:00-22:00; We off。
+                  空=不明。読めない書き方もそのまま保存し、営業中かの判定では「不明」になる)。
+                  この2列が無いCSVは、既存スポットの値を変えない)。
                 </HelpTip>
               </h3>
 

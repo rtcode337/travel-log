@@ -9,6 +9,8 @@ import {
 } from "@/lib/seriesStyle";
 import { getCategoryOrder, hasAllCategories } from "@/lib/category";
 import { NO_RANK, type Rank, type RankFilterValue } from "@/lib/rank";
+import { isAvailableNow } from "@/lib/availableMonths";
+import { openingStateAt } from "@/lib/openingHours";
 import SeriesFilter from "@/components/SeriesFilter";
 import RankFilter from "@/components/RankFilter";
 import ChoiceRow from "@/components/ChoiceRow";
@@ -32,6 +34,23 @@ export interface SpotFilters {
    * (「すべて」選択中、全件表示)で、シリーズ・カテゴリと同じ扱い
    */
   visited: VisitedValue[];
+  /**
+   * 「今手に入る」= 提供の時期(`available_months`)が今の月(JST)を含むスポットだけにする。
+   * **時期が空(通年か不明)のスポットは通す**(lib/availableMonths.tsの`isAvailableInMonth`)。
+   * 時期の値を持つスポットが1件も無い種別では選択肢を出さない
+   */
+  availableNow: boolean;
+  /**
+   * 「今営業中」= 営業時間(`opening_hours`)から今(JST)営業していると読めるスポットだけにする。
+   * 営業時間外は外す。不明(空・読めない書き方)は`openNowIncludeUnknown`で決める
+   */
+  openNow: boolean;
+  /**
+   * 「今営業中」で絞るとき、営業時間が不明なスポットも出すか。**既定は出す** ——
+   * 営業時間を持たないスポットが多い種別で、知らないだけのものまで消えると
+   * 「営業時間外」と見分けが付かないため。外したいときはトグルで外す
+   */
+  openNowIncludeUnknown: boolean;
   /**
    * 訪問順の経路を描く対象日(`YYYY-MM-DD`のローカル日付)。絞り込みではなく、
    * 地図でその日に訪問したスポットを訪問順に矢印で結ぶための対象日。
@@ -87,6 +106,9 @@ export const DEFAULT_FILTERS: SpotFilters = {
   series: [],
   categories: [],
   visited: ["unvisited"],
+  availableNow: false,
+  openNow: false,
+  openNowIncludeUnknown: true,
   visitedDate: null,
   visitedDateTo: null,
   planListId: null,
@@ -122,10 +144,19 @@ export function formatVisitDate(dateKey: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日(${weekday})`;
 }
 
+/** 「今手に入る」「今営業中」の判定に要るスポットの値 */
+export type SpotPeriod = Pick<Spot, "available_months" | "opening_hours">;
+
+/** 「今手に入る」「今営業中」のどちらかで絞っているか(今の時刻を進める合図に使う) */
+export function usesNowFilters(filters: SpotFilters): boolean {
+  return filters.availableNow || filters.openNow;
+}
+
 /**
  * フィルタを通過するか判定する(地図・リスト共通ロジック)。
  * `visitedDate`は絞り込みではなく地図の「訪問順の経路」表示専用になったため、
- * ここでは扱わない(シリーズ・カテゴリ・訪問状況の3つだけを見る)。
+ * ここでは扱わない(ランク・シリーズ・カテゴリ・訪問状況と、今手に入る・今営業中を見る)。
+ * 「今」は`now`(既定は呼んだ時刻)で、判定はJST(実行環境のTZに依らない)。
  */
 export function passesFilters(
   filters: SpotFilters,
@@ -133,7 +164,10 @@ export function passesFilters(
   categories: Category[],
   isVisited: boolean,
   /** ランク。使わない種別・渡されない呼び出しはランクなし扱い */
-  rank: Rank | null = null
+  rank: Rank | null = null,
+  /** 提供の時期・営業時間。渡されなければ空(通年か不明・営業時間不明)扱い */
+  period: SpotPeriod | null = null,
+  now: number = Date.now()
 ): boolean {
   if (filters.ranks.length > 0) {
     if (!filters.ranks.includes(rank ?? NO_RANK)) return false;
@@ -149,6 +183,14 @@ export function passesFilters(
     const value: VisitedValue = isVisited ? "visited" : "unvisited";
     if (!filters.visited.includes(value)) return false;
   }
+  if (filters.availableNow && !isAvailableNow(period?.available_months, now)) {
+    return false;
+  }
+  if (filters.openNow) {
+    const state = openingStateAt(period?.opening_hours, now);
+    if (state === "closed") return false;
+    if (state === "unknown" && !filters.openNowIncludeUnknown) return false;
+  }
   return true;
 }
 
@@ -157,19 +199,22 @@ export function passesFilters(
  * 地図の絞り込みボタンの見た目の条件)。訪問状況は既定が「未訪問のみ」のため、
  * 空ではなく既定と違うかどうかで見る。`showRoutes`は表示の切り替え、
  * `visitedDate`は訪問順の経路の対象日(絞り込みではない)であって、
- * どちらも絞り込みではないため含めない。
+ * どちらも絞り込みではないため含めない。「今手に入る」「今営業中」は絞り込みなので含める
+ * (`openNowIncludeUnknown`は「今営業中」の中の扱いで、それだけでは何も絞らないので見ない)。
  */
 export function hasActiveFilters(filters: SpotFilters): boolean {
   return (
     filters.ranks.length > 0 ||
     filters.series.length > 0 ||
     filters.categories.length > 0 ||
-    !isDefaultVisited(filters.visited)
+    !isDefaultVisited(filters.visited) ||
+    filters.availableNow ||
+    filters.openNow
   );
 }
 
 /**
- * 絞り込み(シリーズ・カテゴリ・訪問状況)だけを既定に戻すボタン
+ * 絞り込み(ランク・シリーズ・カテゴリ・訪問状況・今手に入る・今営業中)だけを既定に戻すボタン
  * (条件を1つずつ戻す手間を省く)。常に出しておき、戻す対象があるとき
  * (`hasActiveFilters`)だけチップと同じ青にして知らせる
  * (出し入れするとボタンの位置が動くため)。
@@ -197,6 +242,9 @@ export function FilterResetButton({
           series: [],
           categories: [],
           visited: [...DEFAULT_FILTERS.visited],
+          availableNow: false,
+          openNow: false,
+          openNowIncludeUnknown: DEFAULT_FILTERS.openNowIncludeUnknown,
         })
       }
       className={`rounded-full border px-3 py-1 text-xs font-medium ${
@@ -292,6 +340,12 @@ export default function FilterBar({
     const orphaned = filters.categories.filter((c) => !known.includes(c));
     return [...known, ...orphaned];
   }, [spots, categories, filters.categories]);
+  // 「今手に入る」「今営業中」は、その値を持つスポットが1件でもある種別でだけ出す
+  // (値を持たない種別では押しても全件のままか、営業中では不明しか残らない)。
+  // 選択中なら値が無くなっても外せるよう出したままにする(シリーズの選択肢と同じ)
+  const showAvailableNow =
+    filters.availableNow || spots.some((s) => !!s.available_months);
+  const showOpenNow = filters.openNow || spots.some((s) => !!s.opening_hours);
 
   return (
     <div className="space-y-3 text-sm">
@@ -361,6 +415,53 @@ export default function FilterBar({
           onChange={(visited) => onChange({ ...filters, visited })}
         />
       </div>
+
+      {(showAvailableNow || showOpenNow) && (
+        <div>
+          <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-gray-500">
+            時期・営業時間
+            <HelpTip>
+              「今」は日本時間で数えます(海外のスポットも日本時間で比べます)。
+              今手に入る: 提供の時期に今の月が入るものに絞ります。時期が書かれていないもの(通年か不明)は手に入るものとして残します。
+              今営業中: 営業時間から今営業していると読めるものに絞ります。営業時間が書かれていない・読めない書き方(月や学校の休みの指定など。祝日は日本の祝日で判定します)のものは「不明」で、「不明も出す」がオンのときだけ残します。
+            </HelpTip>
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {showAvailableNow && (
+              <Chip
+                label="今手に入る"
+                active={filters.availableNow}
+                activeClassName={ALL_CHIP_ACTIVE_CLASS}
+                onClick={() =>
+                  onChange({ ...filters, availableNow: !filters.availableNow })
+                }
+              />
+            )}
+            {showOpenNow && (
+              <Chip
+                label="今営業中"
+                active={filters.openNow}
+                activeClassName={ALL_CHIP_ACTIVE_CLASS}
+                onClick={() => onChange({ ...filters, openNow: !filters.openNow })}
+              />
+            )}
+            {/* 不明の扱いは「今営業中」で絞っているときだけ意味を持つので、そのときだけ出す */}
+            {showOpenNow && filters.openNow && (
+              <Chip
+                label="営業時間が不明も出す"
+                active={filters.openNowIncludeUnknown}
+                activeClassName={ALL_CHIP_ACTIVE_CLASS}
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    openNowIncludeUnknown: !filters.openNowIncludeUnknown,
+                  })
+                }
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {showRouteToggle && (
         <div className="border-t border-gray-100 pt-3">

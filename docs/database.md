@@ -166,6 +166,8 @@ erDiagram
         text series "1スポット1つ。ピンの中身と形。ルートとの突き合わせの単位"
         text_array categories "0個以上(GIN索引)。絞り込み専用"
         text description
+        text available_months "提供の時期(11-3・6,7,8 など。null=通年か不明。check)"
+        text opening_hours "営業時間(OSM の opening_hours の書式のまま。null=不明)"
         text status "published / pending / rejected / private"
         text origin "csv / manual。travel-log-data への還元抽出に使う"
         uuid created_by FK "on delete set null"
@@ -219,6 +221,12 @@ erDiagram
   (種別ごとの `series_styles` 設定)。`rank` を使うかは種別ごとの `rank_enabled`
   設定。`series` に色の指定があれば、ランクを使う種別でもランクの色より優先する。
   `categories` は絞り込み専用で見た目には効かない(かつての `category_styles` 設定は廃止した)
+- **`available_months` / `opening_hours` は「今手に入るか」「今営業しているか」の材料**。
+  提供の時期は`11-3`(年をまたぐ範囲)・`6,7,8`・`12-2,7`の形に整えて保存し、字面を
+  `spots_available_months_ck`で検査する(壊れた値を「通年」と取り違えないため)。
+  営業時間は OpenStreetMap の opening_hours の書式をそのまま持ち、**書式の検査はしない**
+  (読めない書き方は判定で「不明」に倒す。読み方は`lib/openingHours.ts`)。どちらも null が
+  「通年か不明」「不明」
 - **`spot_deletions` は削除の墓標**。CSV 由来の公開スポットを画面から個別削除した
   ときだけ記録し、travel-log-data 側の `exclude.txt` へ追記する候補として
   還元用エクスポートに出す(行が消えるので値をコピーして残す)

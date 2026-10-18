@@ -14,6 +14,8 @@ import {
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import { parseRank, RANKS } from "@/lib/rank";
+import { normalizeAvailableMonths } from "@/lib/availableMonths";
+import { normalizeOpeningHours } from "@/lib/openingHours";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
 // (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
@@ -184,6 +186,10 @@ interface SpotInput {
   /** 0個以上。省略・nullは「カテゴリなし」(空配列)として扱う */
   categories?: string[] | null;
   description: string | null;
+  /** 提供の時期(`11-3`・`6,7,8`)。省略・null・空は「通年か不明」。読めない値は400 */
+  available_months?: string | null;
+  /** 営業時間(OSMのopening_hoursの書式)。省略・null・空は「不明」。書式は問わない */
+  opening_hours?: string | null;
   /** 登録経路。CSVインポート(AdminView)だけが'csv'を明示し、省略時は'manual' */
   origin?: string;
 }
@@ -202,11 +208,13 @@ async function insertSpots(
   // 1件分を1つのJSON配列にまとめた jsonb[] として渡し、SQL側で text[] に開く
   const { rows } = await query<Spot>(
     `insert into spots
-      (spot_type_id, key, name, name_kana, lat, lng, region, rank, series, categories, description, status, origin, created_by)
+      (spot_type_id, key, name, name_kana, lat, lng, region, rank, series, categories, description,
+       available_months, opening_hours, status, origin, created_by)
      select $1, u.key, u.name, u.name_kana, u.lat, u.lng, u.region, u.rank, u.series,
-            array(select jsonb_array_elements_text(u.categories)), u.description, u.status, u.origin, $2
-     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::text[], $11::jsonb[], $12::text[], $13::text[], $14::text[])
-       with ordinality as u(key, name, name_kana, lat, lng, region, rank, series, categories, description, status, origin, ord)
+            array(select jsonb_array_elements_text(u.categories)), u.description,
+            u.available_months, u.opening_hours, u.status, u.origin, $2
+     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::text[], $11::jsonb[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[])
+       with ordinality as u(key, name, name_kana, lat, lng, region, rank, series, categories, description, status, origin, available_months, opening_hours, ord)
      order by u.ord
      returning *`,
     [
@@ -224,6 +232,9 @@ async function insertSpots(
       records.map((r) => r.description),
       statuses,
       records.map((r) => r.origin ?? "manual"),
+      // 呼び出し側(POST)で整えてある
+      records.map((r) => r.available_months ?? null),
+      records.map((r) => r.opening_hours ?? null),
     ]
   );
   return rows;
@@ -289,6 +300,20 @@ export async function POST(request: Request) {
       { error: `origin「${invalidOrigin.origin}」は指定できません。` },
       { status: 403 }
     );
+  }
+
+  // 提供の時期は読めない値を弾く(黙って空にすると「通年」として手に入る側に数えられる)。
+  // 営業時間は書式を問わず保存し、読めない部分は判定で「不明」に倒す(lib/openingHours.ts)
+  for (const [i, r] of records.entries()) {
+    const months = normalizeAvailableMonths(r.available_months);
+    if (!months.ok) {
+      return NextResponse.json(
+        { error: records.length > 1 ? `${i + 1}件目: ${months.error}` : months.error },
+        { status: 400 }
+      );
+    }
+    r.available_months = months.value;
+    r.opening_hours = normalizeOpeningHours(r.opening_hours);
   }
 
   try {

@@ -63,8 +63,10 @@ import FilterBar, {
   hasActiveFilters,
   passesFilters,
   toVisitDateKey,
+  usesNowFilters,
   type SpotFilters,
 } from "@/components/FilterBar";
+import { useNow } from "@/lib/useNow";
 import AddSpotModal from "@/components/AddSpotModal";
 import SpotDetailModal from "@/components/SpotDetailModal";
 import VisitDateCalendar from "@/components/VisitDateCalendar";
@@ -643,6 +645,11 @@ export default function MapView({
     new Map()
   );
   const [overlayMessage, setOverlayMessage] = useState<string | null>(null);
+  // 「今手に入る」「今営業中」の判定に使う今の時刻。本体か重ね表示のどれかで
+  // 絞っている間だけ1分ごとに進める(進むたびにピンを描き直すため)
+  const now = useNow(
+    usesNowFilters(filters) || [...overlayFilters.values()].some(usesNowFilters)
+  );
   // 重ね表示する種別の絞り込みを、種別を切り替えずこの地図の上のモーダルで編集する
   // (編集対象の種別キー。nullならモーダルを出さない)
   const [overlayFilterTypeKey, setOverlayFilterTypeKey] = useState<string | null>(
@@ -1771,7 +1778,9 @@ export default function MapView({
             spot.series,
             spot.categories,
             visitedIds.has(spot.id),
-            spot.rank
+            spot.rank,
+            spot,
+            now
           ))
     );
 
@@ -1853,6 +1862,7 @@ export default function MapView({
     runWhenMapReady,
     seriesStyles,
     rankEnabled,
+    now,
   ]);
 
   // ルートの矢印描画。経由地2点以上のルートを、巡った順(seq昇順)に繋いだ
@@ -1999,7 +2009,9 @@ export default function MapView({
                   spot.series,
                   spot.categories,
                   visitedIds.has(spot.id),
-                  spot.rank
+                  spot.rank,
+                  spot,
+                  now
                 ))
           );
 
@@ -2072,6 +2084,7 @@ export default function MapView({
     filters,
     planLists,
     visits,
+    now,
   ]);
 
   // 今回のセッションで送信した承認待ち/非公開スポットの仮ピン(破線)を表示

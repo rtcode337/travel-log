@@ -34,6 +34,7 @@ import VisitFormModal from "@/components/VisitFormModal";
 import { distanceMeters, formatDistance } from "@/lib/coords";
 import VisitNoteFormModal from "@/components/VisitNoteFormModal";
 import AddSpotModal from "@/components/AddSpotModal";
+import SpotPeriodInfo from "@/components/SpotPeriodInfo";
 import SpotRepositionModal from "@/components/SpotRepositionModal";
 import AddToPlanListModal from "@/components/AddToPlanListModal";
 import CopyTextButton from "@/components/CopyTextButton";
@@ -673,6 +674,9 @@ export default function SpotDetailModal({
               <LinkedText text={spot.description} />
             </p>
           )}
+
+          {/* 提供の時期・営業時間と今の状態(値が無ければ出さない) */}
+          <SpotPeriodInfo spot={spot} />
 
           <div className="relative">
             <MiniMap

@@ -21,6 +21,8 @@ export type CachedSpot = Pick<
   | "rank"
   | "series"
   | "categories"
+  | "available_months"
+  | "opening_hours"
   | "status"
 >;
 
@@ -54,6 +56,10 @@ export function trimSpot(spot: Spot): CachedSpot {
     rank: spot.rank,
     series: spot.series,
     categories: spot.categories,
+    // 提供の時期・営業時間は「今手に入る」「今営業中」の絞り込みが読む。
+    // 値を持つのは一部の種別だけなので、持たない行では null のまま小さく済む
+    available_months: spot.available_months ?? null,
+    opening_hours: spot.opening_hours ?? null,
     status: spot.status,
   };
 }
@@ -92,7 +98,9 @@ const DB_NAME = "travel-log";
 // ダウンロードし直させる)。
 // 7はCachedSpotにrank(ピンの色・大きさを決める段階)が加わったため
 // (旧エントリのままだと、ランクを使う種別のピンが全部「ランクなし」の白になる)。
-const DB_VERSION = 7;
+// 8はCachedSpotにavailable_months・opening_hours(提供の時期・営業時間)が加わったため
+// (旧エントリのままだと「今手に入る」「今営業中」の絞り込みが出ず、効きもしない)。
+const DB_VERSION = 8;
 const STORE = "public-spots"; // 値のキーはtypeKey
 
 function idbAvailable(): boolean {

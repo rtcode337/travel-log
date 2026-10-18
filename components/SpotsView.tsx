@@ -25,6 +25,7 @@ import { useRegionScope } from "@/lib/useRegionScope";
 import FilterBar, {
   DEFAULT_FILTERS,
   passesFilters,
+  usesNowFilters,
   type SpotFilters,
 } from "@/components/FilterBar";
 import RankFilter from "@/components/RankFilter";
@@ -48,6 +49,7 @@ import { useSpotCache } from "@/lib/useSpotCache";
 import { formatJstDate } from "@/lib/datetime";
 import LoadErrorBanner from "@/components/LoadErrorBanner";
 import PrefectureTileMap from "@/components/PrefectureTileMap";
+import { useNow } from "@/lib/useNow";
 
 type SortKey = "series" | "name" | "visited";
 
@@ -240,6 +242,8 @@ export default function SpotsView({
   const [dataError, setDataError] = useState<string | null>(null);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [filters, setFilters] = useState<SpotFilters>(DEFAULT_FILTERS);
+  // 「今手に入る」「今営業中」で絞っている間だけ1分ごとに進める今の時刻
+  const now = useNow(usesNowFilters(filters));
   const [sortKey, setSortKey] = useState<SortKey>("series");
   const [detailSpotId, setDetailSpotId] = useState<string | null>(null);
   // 訪問予定リストの新規作成モーダル、詳細表示中のリストID
@@ -532,7 +536,9 @@ export default function SpotsView({
         s.series,
         s.categories,
         visitedIds.has(s.id),
-        s.rank
+        s.rank,
+        s,
+        now
       );
     });
     list.sort((a, b) => {
@@ -567,6 +573,7 @@ export default function SpotsView({
     sortKey,
     latestVisitDate,
     seriesStyles,
+    now,
   ]);
 
   const plannedPager = usePagedItems(plannedSpots, CLIENT_PAGE_SIZE);

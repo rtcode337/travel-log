@@ -138,6 +138,16 @@ create table spots (
   series        text,
   categories    text[] not null default '{}',
   description   text,
+  -- 提供の時期(手に入る月)。`11-3`(11月〜3月。終わりが小さければ年をまたぐ)・`6,7,8`・
+  -- `12-2,7`(範囲と列挙の混在)のように書く。画面・取り込みはlib/availableMonths.tsで
+  -- 整えた形(空白なし・先頭の0なし)で保存する。nullは通年か不明(絞り込みでは手に入る側)
+  available_months text constraint spots_available_months_ck check (
+    available_months ~ '^(1[0-2]|[1-9])(-(1[0-2]|[1-9]))?(,(1[0-2]|[1-9])(-(1[0-2]|[1-9]))?)*$'
+  ),
+  -- 営業時間。OpenStreetMapのopening_hoursの書式のまま(lib/openingHours.tsがよく使われる
+  -- 部分だけを読む)。nullは不明。**書式の検査はしない** —— 読めない書き方でも保存して
+  -- 判定で「不明」に倒す(1件の書き方で取り込み全体を止めないため)
+  opening_hours text,
   -- private: 誰でも作成できる非公開スポット。作成者本人にしか見えず、口コミも使えない
   status        text not null default 'published' check (
     status in ('published', 'pending', 'rejected', 'private')

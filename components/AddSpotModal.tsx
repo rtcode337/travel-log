@@ -27,6 +27,8 @@ import Modal from "@/components/Modal";
 import PhotoLocationButton from "@/components/PhotoLocationButton";
 import PickLocationModal from "@/components/PickLocationModal";
 import { isValidLatLng, type LatLng } from "@/lib/coords";
+import { formatAvailableMonths, normalizeAvailableMonths } from "@/lib/availableMonths";
+import { describeOpeningHours, normalizeOpeningHours } from "@/lib/openingHours";
 
 export default function AddSpotModal({
   lat,
@@ -83,6 +85,12 @@ export default function AddSpotModal({
   // 一覧に無いカテゴリを手入力で足すための欄(確定するとcategoriesに入る)
   const [categoryInput, setCategoryInput] = useState("");
   const [description, setDescription] = useState(spot?.description ?? "");
+  // 提供の時期(`11-3`など)と営業時間(OSMのopening_hoursの書式)。手で作る非公開スポット
+  // (よく行く店など)にも付けられるよう、取り込みと同じ書き方で入れてもらう
+  const [availableMonths, setAvailableMonths] = useState(spot?.available_months ?? "");
+  const [openingHours, setOpeningHours] = useState(spot?.opening_hours ?? "");
+  const monthsCheck = normalizeAvailableMonths(availableMonths);
+  const hoursPreview = describeOpeningHours(openingHours);
   const [status, setStatus] = useState<SpotStatus>(defaultStatus);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -206,6 +214,11 @@ export default function AddSpotModal({
       setError("公開・承認待ちのスポットはシリーズを選択してください。");
       return;
     }
+    // 提供の時期の読めない値は送らない(APIも400で断る)。営業時間は読めなくても保存する
+    if (!monthsCheck.ok) {
+      setError(monthsCheck.error);
+      return;
+    }
     setSaving(true);
     setError(null);
     const payload = {
@@ -218,6 +231,8 @@ export default function AddSpotModal({
       series: series.trim() || null,
       categories,
       description: description.trim() || null,
+      available_months: monthsCheck.value,
+      opening_hours: normalizeOpeningHours(openingHours),
     };
     const { data, error } = isEdit
       ? await api.spots.update(spot!.id, payload)
@@ -569,6 +584,73 @@ export default function AddSpotModal({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </div>
+        {/* 提供の時期・営業時間。使う種別は限られるので畳んでおき、値があれば開いて出す */}
+        <details
+          open={!!(spot?.available_months || spot?.opening_hours)}
+          className="rounded-lg border border-gray-200"
+        >
+          <summary className="cursor-pointer p-3 text-sm font-medium">
+            提供の時期・営業時間
+            <span className="ml-1 text-xs font-normal text-gray-500">(任意)</span>
+          </summary>
+          <div className="space-y-3 border-t border-gray-200 p-3">
+            <div>
+              <label htmlFor={`${fid}-months`} className="mb-1 block text-sm font-medium">
+                提供の時期(手に入る月)
+              </label>
+              <input
+                id={`${fid}-months`}
+                autoComplete="off"
+                inputMode="numeric"
+                value={availableMonths}
+                onChange={(e) => setAvailableMonths(e.target.value)}
+                placeholder="例: 11-3、6,7,8、12-2,7"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+              <p className={`mt-1 text-xs ${monthsCheck.ok ? "text-gray-500" : "text-red-600"}`}>
+                {!monthsCheck.ok
+                  ? monthsCheck.error
+                  : monthsCheck.value
+                    ? `${formatAvailableMonths(monthsCheck.value)}に手に入るものとして扱います。`
+                    : "空なら通年か不明として扱います(「今手に入る」で絞っても残ります)。"}
+              </p>
+            </div>
+            <div>
+              <label htmlFor={`${fid}-hours`} className="mb-1 block text-sm font-medium">
+                営業時間
+              </label>
+              <input
+                id={`${fid}-hours`}
+                autoComplete="off"
+                autoCapitalize="off"
+                value={openingHours}
+                onChange={(e) => setOpeningHours(e.target.value)}
+                placeholder="例: Mo-Fr 11:00-15:00,17:00-22:00; We off"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+              <div className="mt-1 text-xs text-gray-500">
+                {hoursPreview ? (
+                  <>
+                    <ul>
+                      {hoursPreview.lines.map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                    {hoursPreview.unreadable && (
+                      <p className="text-amber-700">
+                        読めない書き方を含むため、営業中かどうかは「不明」になります(そのまま保存します)。
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p>
+                    OpenStreetMap の opening_hours の書き方です(曜日は Mo〜Su、休みは off、終日は 24/7)。空なら不明として扱います。
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </details>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex gap-2 pt-1">
           <button

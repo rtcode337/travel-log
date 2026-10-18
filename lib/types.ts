@@ -57,6 +57,12 @@ export interface Spot {
    * 種別のカテゴリ設定(lib/category.tsのgetCategoryOrder)に従う */
   categories: Category[];
   description: string | null;
+  /** 提供の時期(手に入る月。`11-3`・`6,7,8`・`12-2,7`)。null=通年か不明。
+   * 読み書きと判定は lib/availableMonths.ts */
+  available_months: string | null;
+  /** 営業時間(OpenStreetMap の opening_hours の書式のまま)。null=不明。
+   * 判定と日本語の表記は lib/openingHours.ts(読めない書き方は「不明」に倒す) */
+  opening_hours: string | null;
   status: SpotStatus;
   /** 登録経路。csv=CSVインポート(travel-log-data由来)、manual=画面からの手動追加。
    * 手動追加の公開スポットをtravel-log-dataへ還元するエクスポートの抽出条件に使う */

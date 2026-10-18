@@ -5,6 +5,8 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { SPOT_ADMIN_ROLES, type Spot, type SpotType } from "@/lib/types";
 import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { parseRank } from "@/lib/rank";
+import { normalizeAvailableMonths } from "@/lib/availableMonths";
+import { normalizeOpeningHours } from "@/lib/openingHours";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
 // (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
@@ -26,6 +28,10 @@ interface BulkUpdateRecord {
   key?: string | null;
   /** 含まれるときだけ更新(同上) */
   origin?: string;
+  /** 含まれるときだけ更新(同上。CSVに列が無いときは送られない) */
+  available_months?: string | null;
+  /** 含まれるときだけ更新(同上) */
+  opening_hours?: string | null;
 }
 
 /**
@@ -71,7 +77,7 @@ export async function POST(request: Request) {
   }
   const records = body as BulkUpdateRecord[];
 
-  // key/categories/originは「ボディに含まれるときだけ更新」(単体PATCHと同じ理由。
+  // key/categories/origin(と提供の時期・営業時間)は「ボディに含まれるときだけ更新」(単体PATCHと同じ理由。
   // CSVに列が無いときに既存値をnull・空で消さないため)。行ごとに有無が違えるよう
   // boolean列で渡す
   const hasCategories = records.map((r) =>
@@ -91,6 +97,21 @@ export async function POST(request: Request) {
     );
   }
 
+  const hasMonths = records.map((r) =>
+    Object.prototype.hasOwnProperty.call(r, "available_months")
+  );
+  const hasHours = records.map((r) =>
+    Object.prototype.hasOwnProperty.call(r, "opening_hours")
+  );
+  const months: (string | null)[] = [];
+  for (const [i, r] of records.entries()) {
+    const parsed = normalizeAvailableMonths(hasMonths[i] ? r.available_months : null);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: `${i + 1}件目: ${parsed.error}` }, { status: 400 });
+    }
+    months.push(parsed.value);
+  }
+
   try {
     // categoriesはPOST /api/spotsのINSERTと同じく、1件分を1つのJSON配列に
     // まとめたjsonb[]で渡してSQL側でtext[]に開く(要素数が行ごとに異なるため)
@@ -101,13 +122,16 @@ export async function POST(request: Request) {
         categories = case when u.has_categories
           then array(select jsonb_array_elements_text(u.categories)) else s.categories end,
         key = case when u.has_key then u.key else s.key end,
-        origin = case when u.has_origin then u.origin else s.origin end
+        origin = case when u.has_origin then u.origin else s.origin end,
+        available_months = case when u.has_months then u.available_months else s.available_months end,
+        opening_hours = case when u.has_hours then u.opening_hours else s.opening_hours end
        from unnest(
          $2::uuid[], $3::text[], $4::text[], $5::float8[], $6::float8[], $7::text[],
          $8::text[], $9::text[], $10::bool[], $11::jsonb[], $12::bool[], $13::text[],
-         $14::bool[], $15::text[], $16::text[]
+         $14::bool[], $15::text[], $16::text[], $17::bool[], $18::text[], $19::bool[], $20::text[]
        ) as u(id, name, name_kana, lat, lng, region, series, description,
-              has_categories, categories, has_key, key, has_origin, origin, rank)
+              has_categories, categories, has_key, key, has_origin, origin, rank,
+              has_months, available_months, has_hours, opening_hours)
        where s.id = u.id and s.spot_type_id = $1 and s.status = 'published'
        returning s.*`,
       [
@@ -127,6 +151,10 @@ export async function POST(request: Request) {
         hasOrigin,
         records.map((r) => r.origin ?? null),
         records.map((r) => parseRank(r.rank)),
+        hasMonths,
+        months,
+        hasHours,
+        records.map((r, i) => (hasHours[i] ? normalizeOpeningHours(r.opening_hours) : null)),
       ]
     );
     return NextResponse.json({ data: rows });

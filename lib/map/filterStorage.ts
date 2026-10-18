@@ -83,6 +83,14 @@ export function loadSavedFilters(typeKey: string): SpotFilters {
       // キー自体が無いとき(この項目より前の保存データ)だけ既定=未訪問のみに倒す
       // —— 空を既定へ倒すと、「すべて」を選んで地図を開き直すたびに未訪問へ戻る
       visited: Array.isArray(obj.visited) ? visited : [...DEFAULT_FILTERS.visited],
+      // 今手に入る・今営業中。キー欠落(この項目より前の保存データ)は絞り込みなし。
+      // 不明の扱いはキー欠落なら既定(不明も出す)
+      availableNow: obj.availableNow === true,
+      openNow: obj.openNow === true,
+      openNowIncludeUnknown:
+        typeof obj.openNowIncludeUnknown === "boolean"
+          ? obj.openNowIncludeUnknown
+          : DEFAULT_FILTERS.openNowIncludeUnknown,
       // "none"=表示しない、"today"=(その日ではなく)常に今日、日付=その日、
       // それ以外(旧null・キー欠落など)=今日
       visitedDate:

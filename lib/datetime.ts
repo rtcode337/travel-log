@@ -43,3 +43,28 @@ export function jstDateStamp(value: string | number | Date = Date.now()): string
   if (!p) return "";
   return `${p.y}${String(p.m).padStart(2, "0")}${String(p.d).padStart(2, "0")}`;
 }
+
+/**
+ * JSTの「今」を、年月日・曜日・その日の経過分で返す(提供の時期・営業時間・祝日の判定用。
+ * `lib/availableMonths.ts`・`lib/openingHours.ts`)。**実行環境のTZで読まない** ——
+ * `getMonth`・`getDay`のままだと、サーバー(UTC)とブラウザで別の月・曜日になる。
+ * `weekday`は月曜を0とする(営業時間の書き方`Mo`〜`Su`の並びに合わせる)。読めない値はnull
+ */
+export function jstClock(value: string | number | Date = Date.now()): {
+  year: number;
+  month: number;
+  day: number;
+  weekday: number;
+  minutes: number;
+} | null {
+  const t = new Date(value).getTime();
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t + JST_OFFSET_MS);
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+    weekday: (d.getUTCDay() + 6) % 7,
+    minutes: d.getUTCHours() * 60 + d.getUTCMinutes(),
+  };
+}
