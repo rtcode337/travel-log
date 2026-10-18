@@ -33,8 +33,13 @@ export async function POST(request: Request) {
   }
 
   try {
+    // **新しい種別は並びの最後に足す。** sort_orderの既定値0のまま入れると、管理画面で
+    // 並び替えた後(0, 1, 2, …が振られている)に足した種別が先頭のあたりへ割り込む。
+    // 1文で最大値+1を取るので、同時に2つ足しても並びが崩れるだけで失敗はしない
     const { rows } = await query<Omit<SpotType, "settings">>(
-      "insert into spot_types (key, label) values ($1, $2) returning *",
+      `insert into spot_types (key, label, sort_order)
+       values ($1, $2, (select coalesce(max(sort_order), -1) + 1 from spot_types))
+       returning *`,
       [key.trim(), label.trim()]
     );
     // 新規作成直後はsettings行が1件も無いので空オブジェクトで補う(既定値扱い)
