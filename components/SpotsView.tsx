@@ -1098,6 +1098,7 @@ export default function SpotsView({
                       selected={managementSeries}
                       onChange={handleManagementSeriesChange}
                       seriesStyles={seriesStyles}
+                      collapsible
                     />
                   </div>
                 )}

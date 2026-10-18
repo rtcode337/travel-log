@@ -73,7 +73,8 @@ export default function SeriesFilter({
   seriesStyles: SeriesStyleDefinition[];
   /**
    * 名前で並べる一覧が長いときは、「シリーズで絞り込む」を押すまで畳んでおく
-   * (絞り込み画面で使う。「シリーズから探す」タブのように一覧が本題の画面では畳まない)
+   * (絞り込み画面と「シリーズから探す」タブ。開いたままだと1件1行の一覧が画面を占め、
+   * その下に出る結果の一覧が画面の外へ押し出される)
    */
   collapsible?: boolean;
 }) {
