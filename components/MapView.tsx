@@ -3196,7 +3196,7 @@ export default function MapView({
 
       {/* 作成モード中にピンをタップしたとき: リストへ追加するか確認するダイアログ。
           名前だけでは入れるか決められないため、スポットの説明とGoogleの導線
-          (地図・経路・画像検索・Gemini)も出す。スポット詳細と同じ並び */}
+          (検索・地図・経路・Gemini)も出す。スポット詳細と同じ並び */}
       {addCandidate && buildDraft && (
         <Modal
           onClose={closeAddCandidate}

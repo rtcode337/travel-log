@@ -23,21 +23,22 @@ function GoogleMapsIcon({ className }: { className?: string }) {
   );
 }
 
-/** 画像アイコン(Google Material Symbols「image」、Apache License 2.0) */
-function GoogleImagesIcon({ className }: { className?: string }) {
+/** Google の「G」のロゴマーク(Simple Icons、CC0) */
+function GoogleSearchIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
+      <path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z" />
     </svg>
   );
 }
 
 /**
- * スポットについてGoogleで調べる導線(地図・経路・画像検索・Gemini)。
+ * スポットについてGoogleで調べる導線(検索・地図・経路・Gemini)。
  * スポット詳細と、地図の訪問予定リスト作成中の追加確認で共用する ——
  * どちらも「この場所に行くかどうか」を決める場面で、同じものが要る。
  *
- * 並びは軽いものから重いものへ(地図 → 経路 → 画像検索 → Gemini)。
+ * 並びは検索 → 地図 → 経路 → Gemini。調べ始めはふつうの検索がいちばん多い
+ * (公式サイト・営業の案内・写真をまとめて見られる)ので先頭に置き、残りは
  * 押せばすぐ答えが出るものを先に、読むのに時間がかかるものを最後に置く。
  *
  * アイコンだけの行にしてある。文字のリンクを混ぜると狭い画面で折り返し、
@@ -58,6 +59,22 @@ export default function GoogleSpotLinks({
   return (
     <div className={`flex items-center gap-1 text-sm text-gray-500 ${className}`}>
       Google:
+      {/* ふつうの Google 検索。検索語は名前と所在地で、座標は入れない ——
+          地図・経路と違って検索は座標を地名として扱わないので、数字が混ざると
+          関係のない結果が並ぶ(かつては画像検索(`udm=2`)だったが、写真だけでなく
+          公式サイトや営業の案内も見たい場面が多いので、絞らない検索にした) */}
+      <a
+        href={`https://www.google.com/search?q=${encodeURIComponent(
+          [spot.name, spot.region].filter(Boolean).join(" ")
+        )}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Google でこのスポットを検索"
+        title="Google でこのスポットを検索"
+        className="rounded p-1 text-blue-600 hover:bg-blue-50"
+      >
+        <GoogleSearchIcon className="size-5" />
+      </a>
       <a
         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
           `${spot.name} ${spot.lat},${spot.lng}`
@@ -85,24 +102,6 @@ export default function GoogleSpotLinks({
         className="rounded p-1 text-blue-600 hover:bg-blue-50"
       >
         <DirectionsIcon className="size-5" />
-      </a>
-      {/* Google の画像検索(`udm=2`が画像タブ。AIモードの`udm=50`と同じ渡し方)。
-          文章より写真のほうが早い場面がある —— 見た目が分かれば
-          「行くかどうか」も「着いたときにそれと分かるか」も判断できる。
-          検索語に座標は入れない(名前と所在地で引く) ——
-          地図・経路と違って画像検索は座標を地名として扱わないため、
-          数字が混ざるとかえって関係のない画像が並ぶ */}
-      <a
-        href={`https://www.google.com/search?udm=2&q=${encodeURIComponent(
-          [spot.name, spot.region].filter(Boolean).join(" ")
-        )}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Google 画像検索でこのスポットを見る"
-        title="Google 画像検索でこのスポットを見る"
-        className="rounded p-1 text-blue-600 hover:bg-blue-50"
-      >
-        <GoogleImagesIcon className="size-5" />
       </a>
       {/* 検索のAIモード(udm=50)。gemini.google.com はURLで質問文を渡せない
           ため、同じGeminiが答えるAIモードに質問文を渡す(lib/askAi.ts) */}
