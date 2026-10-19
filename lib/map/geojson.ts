@@ -341,7 +341,12 @@ export function buildClusterGeoJSON(
    * (`SpotFilters.showVisitedOriginalPin`)。**プロパティの`visited`は訪問の事実
    * そのものなので落とさず**、見た目(ピン画像)だけを切り替える
    */
-  showVisitedOriginalPin: boolean
+  showVisitedOriginalPin: boolean,
+  /**
+   * 時期外・営業時間外として灰色で描くか(`FilterBar`の`isDimmed`)。
+   * **ピン画像の登録(`ensurePinImage`)と同じ判定を渡すこと**(食い違うと未登録のIDを指す)
+   */
+  dimmedOf: (spot: Spot) => boolean = () => false
 ): GeoJSON.FeatureCollection<GeoJSON.Point, ClusterFeatureProps> {
   return {
     type: "FeatureCollection",
@@ -357,7 +362,8 @@ export function buildClusterGeoJSON(
           resolveSpotMark(spot.series, seriesStyles),
           resolveSpotShape(spot.series, seriesStyles),
           visitedPinOf(spot.id, visitedIds, showVisitedOriginalPin),
-          spot.status === "private"
+          spot.status === "private",
+          dimmedOf(spot)
         ),
         stack: stacks.get(stackKey(spot)) ?? 1,
       },

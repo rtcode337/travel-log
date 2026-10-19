@@ -25,6 +25,15 @@ const PIXEL_RATIO = 2;
  */
 export const PIN_ICON_PAD = 3;
 
+/**
+ * 時期外・営業時間外のピンの色。ランクなしの白(縁は灰)と見分けられるよう、塗りも灰にする
+ */
+const DIMMED_FILL = "#d1d5db";
+const DIMMED_BORDER = "#9ca3af";
+const DIMMED_TEXT = "#6b7280";
+/** 時期外・営業時間外のピンの不透明度(下の地図とほかのピンが透けて、退いて見えるように) */
+const DIMMED_ALPHA = 0.7;
+
 /** とんがり部分の高さ(頭の円のサイズに比例、最低5px) */
 function pinTailHeight(size: number): number {
   return Math.max(5, Math.round(size * 0.45));
@@ -52,9 +61,11 @@ export function pinIconId(
   mark: SpotMark,
   shape: PinShapeSpec,
   visited: boolean,
-  isPrivate: boolean
+  isPrivate: boolean,
+  /** 時期外・営業時間外(`FilterBar`の`isDimmed`)。灰色で描く */
+  dimmed = false
 ): string {
-  const base = `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}`;
+  const base = `pin-${visited ? "visited" : "normal"}${isPrivate ? "-private" : ""}${dimmed ? "-dim" : ""}`;
   const faceKey = fnv1a(
     `${face.color}|${face.borderColor}|${face.size}|${face.textColor}`
   );
@@ -83,15 +94,21 @@ export async function ensurePinImage(
   shape: PinShapeSpec,
   visited: boolean,
   /** 自分だけの非公開スポット。公開スポットと見分けられるよう破線で縁取る */
-  isPrivate: boolean
+  isPrivate: boolean,
+  /**
+   * 時期外・営業時間外。**色を抜いた薄い灰色**で描く(形・大きさ・中身はそのまま ——
+   * 何のスポットかは読めて、今は手に入らない・開いていないことだけが分かるように)。
+   * 訪問済みの緑より優先する(訪問済みでも、今行って手に入るかが知りたいため)
+   */
+  dimmed = false
 ): Promise<string> {
-  const id = pinIconId(face, mark, shape, visited, isPrivate);
+  const id = pinIconId(face, mark, shape, visited, isPrivate, dimmed);
   if (map.hasImage(id)) return id;
 
   // 訪問済みは(ランク・シリーズの色より視認性を優先し)ピン全体を緑+チェックマークにする
-  const fill = visited ? "#16a34a" : face.color;
-  const borderColor = visited ? "#15803d" : face.borderColor;
-  const textColor = visited ? "#ffffff" : face.textColor;
+  const fill = dimmed ? DIMMED_FILL : visited ? "#16a34a" : face.color;
+  const borderColor = dimmed ? DIMMED_BORDER : visited ? "#15803d" : face.borderColor;
+  const textColor = dimmed ? DIMMED_TEXT : visited ? "#ffffff" : face.textColor;
 
   const size = face.size;
   const tail = pinTailHeight(size);
@@ -103,6 +120,7 @@ export async function ensurePinImage(
   const ctx = canvas.getContext("2d");
   if (!ctx) return id;
   ctx.scale(PIXEL_RATIO, PIXEL_RATIO);
+  if (dimmed) ctx.globalAlpha = DIMMED_ALPHA;
 
   const r = size / 2;
   const cx = w / 2;
@@ -225,7 +243,10 @@ export async function ensurePinImage(
     try {
       const img = await loadImage(drawn.src);
       const imgSize = size * 0.7;
+      // 灰色のピンでは画像も色を抜く(絵だけ色が残ると、灰色にした意味が薄れる)
+      if (dimmed) ctx.filter = "grayscale(1)";
       ctx.drawImage(img, cx - imgSize / 2, cy - imgSize / 2, imgSize, imgSize);
+      ctx.filter = "none";
     } catch {
       // 画像の読み込みに失敗した場合はラベル無しのまま(ピン自体は表示する)
     }

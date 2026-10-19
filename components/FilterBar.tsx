@@ -9,8 +9,7 @@ import {
 } from "@/lib/seriesStyle";
 import { getCategoryOrder, hasAllCategories } from "@/lib/category";
 import { NO_RANK, type Rank, type RankFilterValue } from "@/lib/rank";
-import { isAvailableNow } from "@/lib/availableMonths";
-import { openingStateAt } from "@/lib/openingHours";
+import { isOutOfTime, type OutOfTimeMode } from "@/lib/periodFilter";
 import SeriesFilter from "@/components/SeriesFilter";
 import RankFilter from "@/components/RankFilter";
 import ChoiceRow from "@/components/ChoiceRow";
@@ -51,6 +50,11 @@ export interface SpotFilters {
    * 「営業時間外」と見分けが付かないため。外したいときはトグルで外す
    */
   openNowIncludeUnknown: boolean;
+  /**
+   * 「今手に入る」「今営業中」で外れたスポットを**灰色で残す**(`"dim"`。既定)か**隠す**(`"hide"`)か。
+   * 隠すと時期外・営業時間外のものがあることすら読めなくなるので、既定は灰色(`lib/periodFilter.ts`)
+   */
+  outOfTime: OutOfTimeMode;
   /**
    * 訪問順の経路を描く対象日(`YYYY-MM-DD`のローカル日付)。絞り込みではなく、
    * 地図でその日に訪問したスポットを訪問順に矢印で結ぶための対象日。
@@ -109,6 +113,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   availableNow: false,
   openNow: false,
   openNowIncludeUnknown: true,
+  outOfTime: "dim",
   visitedDate: null,
   visitedDateTo: null,
   planListId: null,
@@ -183,15 +188,21 @@ export function passesFilters(
     const value: VisitedValue = isVisited ? "visited" : "unvisited";
     if (!filters.visited.includes(value)) return false;
   }
-  if (filters.availableNow && !isAvailableNow(period?.available_months, now)) {
-    return false;
-  }
-  if (filters.openNow) {
-    const state = openingStateAt(period?.opening_hours, now);
-    if (state === "closed") return false;
-    if (state === "unknown" && !filters.openNowIncludeUnknown) return false;
-  }
+  // 時期外・営業時間外は、隠す設定のときだけ外す(既定は灰色で残す。`isDimmed`)
+  if (filters.outOfTime === "hide" && isOutOfTime(filters, period, now)) return false;
   return true;
+}
+
+/**
+ * 時期外・営業時間外として**灰色で描く**か(「今手に入る」「今営業中」で絞っていて、
+ * 外れたものを隠さずに残す設定のとき)。地図のピンとスポット一覧の行で同じ判定を使う
+ */
+export function isDimmed(
+  filters: SpotFilters,
+  period: SpotPeriod | null,
+  now: number = Date.now()
+): boolean {
+  return filters.outOfTime === "dim" && isOutOfTime(filters, period, now);
 }
 
 /**
@@ -245,6 +256,7 @@ export function FilterResetButton({
           availableNow: false,
           openNow: false,
           openNowIncludeUnknown: DEFAULT_FILTERS.openNowIncludeUnknown,
+          outOfTime: DEFAULT_FILTERS.outOfTime,
         })
       }
       className={`rounded-full border px-3 py-1 text-xs font-medium ${
@@ -424,6 +436,7 @@ export default function FilterBar({
               「今」は日本時間で数えます(海外のスポットも日本時間で比べます)。
               今手に入る: 提供の時期に今の月が入るものに絞ります。時期が書かれていないもの(通年か不明)は手に入るものとして残します。
               今営業中: 営業時間から今営業していると読めるものに絞ります。営業時間が書かれていない・読めない書き方(月や学校の休みの指定など。祝日は日本の祝日で判定します)のものは「不明」で、「不明も出す」がオンのときだけ残します。
+              外れたもの(時期外・営業時間外)は灰色で残します。「時間外は隠す」をオンにすると地図と一覧から消します。
             </HelpTip>
           </span>
           <div className="flex flex-wrap gap-1.5">
@@ -443,6 +456,20 @@ export default function FilterBar({
                 active={filters.openNow}
                 activeClassName={ALL_CHIP_ACTIVE_CLASS}
                 onClick={() => onChange({ ...filters, openNow: !filters.openNow })}
+              />
+            )}
+            {/* 外れたものの見せ方は、どちらかで絞っているときだけ意味を持つ */}
+            {(filters.availableNow || filters.openNow) && (
+              <Chip
+                label="時間外は隠す"
+                active={filters.outOfTime === "hide"}
+                activeClassName={ALL_CHIP_ACTIVE_CLASS}
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    outOfTime: filters.outOfTime === "hide" ? "dim" : "hide",
+                  })
+                }
               />
             )}
             {/* 不明の扱いは「今営業中」で絞っているときだけ意味を持つので、そのときだけ出す */}

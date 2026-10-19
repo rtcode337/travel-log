@@ -61,6 +61,7 @@ import FilterBar, {
   FilterResetButton,
   formatVisitDate,
   hasActiveFilters,
+  isDimmed,
   passesFilters,
   toVisitDateKey,
   usesNowFilters,
@@ -1784,6 +1785,8 @@ export default function MapView({
           ))
     );
 
+    // 時期外・営業時間外を灰色で描くか(画像の登録と GeoJSON の画像IDで同じ判定を使う)
+    const dimmedOf = (spot: Spot) => isDimmed(filters, spot, now);
     const renderSpots = async () => {
       ensureClusterLayers(map, overlayKeysRef, handleMapSpotSelect);
       showClusterLayers(map);
@@ -1797,7 +1800,8 @@ export default function MapView({
             resolveSpotMark(spot.series, seriesStyles),
             resolveSpotShape(spot.series, seriesStyles),
             visitedPinOf(spot.id, visitedIds, filters.showVisitedOriginalPin),
-            spot.status === "private"
+            spot.status === "private",
+            dimmedOf(spot)
           )
         )
       );
@@ -1824,7 +1828,8 @@ export default function MapView({
           seriesStyles,
           rankEnabled,
           stacks,
-          filters.showVisitedOriginalPin
+          filters.showVisitedOriginalPin,
+          dimmedOf
         )
       );
       const pathSource = map.getSource(PATH_PIN_SOURCE_ID) as
@@ -1837,7 +1842,8 @@ export default function MapView({
           seriesStyles,
           rankEnabled,
           stacks,
-          filters.showVisitedOriginalPin
+          filters.showVisitedOriginalPin,
+          dimmedOf
         )
       );
       // 本体のレイヤーを重ね表示より後に作った場合でも、重ね表示を上に保つ
@@ -2039,7 +2045,8 @@ export default function MapView({
                 resolveSpotMark(spot.series, styles),
                 resolveSpotShape(spot.series, styles),
                 visitedPin(spot.id),
-                false
+                false,
+                isDimmed(typeFilters, spot, now)
               )
             )
           );
@@ -2054,7 +2061,8 @@ export default function MapView({
               styles,
               overlayRank,
               countStacks(filtered),
-              filters.showVisitedOriginalPin
+              filters.showVisitedOriginalPin,
+              (spot) => isDimmed(typeFilters, spot, now)
             )
           );
           (

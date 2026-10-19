@@ -91,6 +91,8 @@ export function loadSavedFilters(typeKey: string): SpotFilters {
         typeof obj.openNowIncludeUnknown === "boolean"
           ? obj.openNowIncludeUnknown
           : DEFAULT_FILTERS.openNowIncludeUnknown,
+      // 外れたものの見せ方。キー欠落(この項目より前の保存データ)は既定=灰色で残す
+      outOfTime: obj.outOfTime === "hide" ? "hide" : DEFAULT_FILTERS.outOfTime,
       // "none"=表示しない、"today"=(その日ではなく)常に今日、日付=その日、
       // それ以外(旧null・キー欠落など)=今日
       visitedDate:

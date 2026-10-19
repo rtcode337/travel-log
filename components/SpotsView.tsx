@@ -24,6 +24,7 @@ import {
 import { useRegionScope } from "@/lib/useRegionScope";
 import FilterBar, {
   DEFAULT_FILTERS,
+  isDimmed,
   passesFilters,
   usesNowFilters,
   type SpotFilters,
@@ -1290,7 +1291,10 @@ export default function SpotsView({
             <button
               type="button"
               onClick={() => setDetailSpotId(spot.id)}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
+              className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 ${
+                // 時期外・営業時間外は地図の灰色のピンと同じく、退いて見せる(隠さない)
+                isDimmed(filters, spot, now) ? "opacity-50" : ""
+              }`}
             >
               <SpotBadge
                 rank={spot.rank}
