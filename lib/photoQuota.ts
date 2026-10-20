@@ -58,14 +58,19 @@ export function dataUrlBytes(dataUrl: string): number {
 /**
  * 新しく保存する写真(data URL)を足すと上限を超えるなら、利用者に見せる理由を返す。
  * 収まる・上限なしならnull。**保存する前に呼ぶ**(保存してから消すと、途中で落ちたときに残る)
+ *
+ * **上限なしなら使用量を数えない。** 数えるには保存先の写真を1枚ずつ見て回るので、
+ * 写真が増えるほど保存が遅くなる(遅いディスクでは数千枚で秒単位)。比べる相手の無い
+ * 数のために、保存のたびにその手間を払わない
  */
 export async function photoQuotaError(
   userId: string,
   newDataUrls: string[]
 ): Promise<string | null> {
   if (newDataUrls.length === 0) return null;
-  const { usedBytes, quotaBytes } = await getPhotoUsage(userId);
+  const quotaBytes = await getPhotoQuotaBytes();
   if (quotaBytes === null) return null;
+  const { bytes: usedBytes } = await photoStorage.usage(`${userId}/`);
   const adding = newDataUrls.reduce((n, u) => n + dataUrlBytes(u), 0);
   if (usedBytes + adding <= quotaBytes) return null;
   return (

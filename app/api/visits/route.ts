@@ -21,6 +21,9 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const spotId = searchParams.get("spot_id");
+  // 種別で絞る(一覧の画面はその種別の訪問記録しか使わない)。地図は訪問順の経路が
+  // 種別をまたぐので、絞らずに全種別ぶんを取る
+  const typeKey = searchParams.get("type");
 
   const { rows } = spotId
     ? await query<Visit>(
@@ -28,7 +31,15 @@ export async function GET(request: Request) {
          order by visited_on desc nulls last`,
         [userId, spotId]
       )
-    : await query<Visit>("select * from visits where user_id = $1", [userId]);
+    : typeKey
+      ? await query<Visit>(
+          `select v.* from visits v
+             join spots s on s.id = v.spot_id
+             join spot_types t on t.id = s.spot_type_id
+            where v.user_id = $1 and t.key = $2`,
+          [userId, typeKey]
+        )
+      : await query<Visit>("select * from visits where user_id = $1", [userId]);
 
   return NextResponse.json({ data: rows });
 }

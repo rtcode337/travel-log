@@ -415,6 +415,9 @@ export const api = {
   visits: {
     list: (spotId?: string) =>
       request<Visit[]>(`/api/visits${spotId ? `?spot_id=${spotId}` : ""}`),
+    /** 1つの種別のスポットへの訪問記録だけ(一覧の画面用) */
+    listOfType: (typeKey: string) =>
+      request<Visit[]>(`/api/visits?type=${encodeURIComponent(typeKey)}`),
     create: (visit: unknown) =>
       request<Visit>("/api/visits", { method: "POST", body: JSON.stringify(visit) }),
     // 写真は「既存の相対パス(残す写真)」と「data URL(追加する写真)」の混在で送る

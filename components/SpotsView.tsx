@@ -344,10 +344,10 @@ export default function SpotsView({
   const managementTotalPages = Math.max(1, Math.ceil(managementTotal / SPOTS_PAGE_SIZE));
 
   const loadVisits = useCallback(async () => {
-    const { data, error } = await api.visits.list();
+    const { data, error } = await api.visits.listOfType(spotTypeKey);
     if (error) return setDataError(error.message);
     setVisits(data ?? []);
-  }, []);
+  }, [spotTypeKey]);
 
   const loadVisitPlans = useCallback(async () => {
     const { data, error } = await api.visitPlans.list();
