@@ -21,11 +21,16 @@ interface MonthSegment {
 }
 
 function parseSegments(value: string): MonthSegment[] | null {
-  // 区切り(`,`・`-`)の前後の空白だけを許す(`1 1-3`を`11-3`と読まないよう、数字の間の空白は残す)
-  const compact = value.trim().replace(/\s*([,-])\s*/g, "$1");
-  if (compact === "") return null;
+  // 区切り(`,`・`-`)の前後の空白だけを許す(`1 1-3`を`11-3`と読まないよう、数字の間の空白は残す)。
+  // 正規表現で空白ごと置き換えずに区切りで割ってから端を落とす —— `\s*([,-])\s*`の置き換えは、
+  // 空白が長く続く値で照合が文字数の2乗に伸びる(外から来る値なので、長い空白を渡されうる)
+  if (value.trim() === "") return null;
   const segments: MonthSegment[] = [];
-  for (const part of compact.split(",")) {
+  for (const raw of value.split(",")) {
+    const part = raw
+      .split("-")
+      .map((s) => s.trim())
+      .join("-");
     const m = SEGMENT_RE.exec(part);
     if (!m) return null;
     const from = Number(m[1]);

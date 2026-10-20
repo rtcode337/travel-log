@@ -26,6 +26,13 @@ test("壊れた値はエラーにする", () => {
   }
 });
 
+test("区切りの前後の空白は落とし、長い空白でも時間がかからない", () => {
+  assert.deepEqual(normalizeAvailableMonths("11 - 3 , 7"), { ok: true, value: "11-3,7" });
+  const started = Date.now();
+  assert.equal(normalizeAvailableMonths(`1${" ".repeat(50_000)}x`).ok, false);
+  assert.ok(Date.now() - started < 200);
+});
+
 test("年をまたぐ範囲", () => {
   assert.equal(isAvailableInMonth("11-3", 12), true);
   assert.equal(isAvailableInMonth("11-3", 1), true);
