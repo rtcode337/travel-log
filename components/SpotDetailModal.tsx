@@ -114,7 +114,9 @@ export default function SpotDetailModal({
   /**
    * 読み取り専用表示(地図の「別の種別を重ねて表示」から開いた場合)。
    * スポット自体の更新系(編集・削除・承認/却下・非表示の切り替え・修正の依頼)を出さない。
-   * **訪問記録と訪問予定リストへの追加は出す** —— 対象は常に今開いている地図の種別
+   * **訪問記録(追加・編集・削除・追記)と訪問予定リストへの追加は出す** —— 訪問記録は
+   * 種別に依らない自分の記録で、重ねた地図から開いても直せないと、記録を直すためだけに
+   * その種別の地図へ移ることになる。訪問予定リストの対象は常に今開いている地図の種別
    * (URLの`[type]`)のリストで、リストの経由スポットは種別非依存のため、
    * 別種別のスポットも現在の種別の旅程に混ぜて入れられる
    */
@@ -949,24 +951,23 @@ export default function SpotDetailModal({
                               <p className="text-xs font-medium text-gray-500">
                                 {formatVisitNoteAt(note.created_at)}
                               </p>
-                              {!readOnly && (
-                                <div className="flex shrink-0 gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingNote(note)}
-                                    className="text-xs text-gray-400 hover:text-blue-600"
-                                  >
-                                    編集
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => deleteVisitNote(note.id)}
-                                    className="text-xs text-gray-400 hover:text-red-500"
-                                  >
-                                    削除
-                                  </button>
-                                </div>
-                              )}
+                              {/* 訪問記録と追記は自分の記録なので、重ね表示(readOnly)でも直せる */}
+                              <div className="flex shrink-0 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingNote(note)}
+                                  className="text-xs text-gray-400 hover:text-blue-600"
+                                >
+                                  編集
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteVisitNote(note.id)}
+                                  className="text-xs text-gray-400 hover:text-red-500"
+                                >
+                                  削除
+                                </button>
+                              </div>
                             </div>
                             {note.body && (
                               <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-600">
@@ -1011,34 +1012,30 @@ export default function SpotDetailModal({
                         ))}
                         {/* 追記の追加。訪問記録の編集(右の「編集」)とは別物
                             —— こちらは記録を書き換えず、後から足すだけ */}
-                        {!readOnly && (
-                          <button
-                            type="button"
-                            onClick={() => setAddingNoteVisit(visit)}
-                            className="mt-2 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
-                          >
-                            + 追記
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => setAddingNoteVisit(visit)}
+                          className="mt-2 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                        >
+                          + 追記
+                        </button>
                       </div>
-                      {!readOnly && (
-                        <div className="flex shrink-0 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setEditingVisit(visit)}
-                            className="text-xs text-gray-400 hover:text-blue-600"
-                          >
-                            編集
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteVisit(visit.id)}
-                            className="text-xs text-gray-400 hover:text-red-500"
-                          >
-                            削除
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditingVisit(visit)}
+                          className="text-xs text-gray-400 hover:text-blue-600"
+                        >
+                          編集
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteVisit(visit.id)}
+                          className="text-xs text-gray-400 hover:text-red-500"
+                        >
+                          削除
+                        </button>
+                      </div>
                     </div>
                   </li>
                 ))}
