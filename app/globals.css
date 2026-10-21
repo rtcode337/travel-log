@@ -10,11 +10,13 @@ body {
   @apply bg-gray-50 text-gray-900 antialiased;
 }
 
-/* 現在地の青い丸・精度円はクリックを奪わないようにする(下にあるスポットピンを
-   選択できなくなるため)。ラッパーの .maplibregl-marker ごと透過させないと
-   円のサイズ分だけ当たり判定だけが残ってしまう */
-.maplibregl-marker:has(> .maplibregl-user-location-dot),
-.maplibregl-marker:has(> .maplibregl-user-location-accuracy-circle) {
+/* 現在地の青い丸・精度円はクリックを奪わないようにする(下にあるスポットピンや
+   追加の依頼の印を押せなくなるため)。**MapLibre は丸そのものをマーカーの要素にする**
+   (`new Marker({ element: 丸 })` で丸に .maplibregl-marker が付く。包む要素は無い)ので、
+   丸の要素そのものを透過させる。かつての `.maplibregl-marker:has(> 丸)` は子を探す書き方で
+   何にも当たらず、精度円の大きさぶんの当たり判定が残っていた */
+.maplibregl-user-location-dot,
+.maplibregl-user-location-accuracy-circle {
   pointer-events: none;
 }
 
