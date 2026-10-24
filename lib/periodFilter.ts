@@ -13,7 +13,7 @@ export type OutOfTimeMode = "dim" | "hide";
 export interface PeriodFilterValues {
   availableNow: boolean;
   openNow: boolean;
-  openNowIncludeUnknown: boolean;
+  openNowShowUnknown: boolean;
 }
 
 /** 判定に要るスポットの値 */
@@ -40,7 +40,7 @@ export function isOutOfTime(
   if (filters.openNow) {
     const state = openingStateAt(period?.opening_hours, now);
     if (state === "closed") return true;
-    if (state === "unknown" && !filters.openNowIncludeUnknown) return true;
+    if (state === "unknown" && !filters.openNowShowUnknown) return true;
   }
   return false;
 }

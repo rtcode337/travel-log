@@ -41,15 +41,16 @@ export interface SpotFilters {
   availableNow: boolean;
   /**
    * 「今営業中」= 営業時間(`opening_hours`)から今(JST)営業していると読めるスポットだけにする。
-   * 営業時間外は外す。不明(空・読めない書き方)は`openNowIncludeUnknown`で決める
+   * 営業時間外は外す。不明(空・読めない書き方)は`openNowShowUnknown`で決める
    */
   openNow: boolean;
   /**
-   * 「今営業中」で絞るとき、営業時間が不明なスポットも出すか。**既定は出す** ——
-   * 営業時間を持たないスポットが多い種別で、知らないだけのものまで消えると
-   * 「営業時間外」と見分けが付かないため。外したいときはトグルで外す
+   * 「今営業中」で絞るとき、営業時間が不明なスポットも出すか。**既定は出さない** ——
+   * 「今営業中」で知りたいのは今入れる店で、営業時間の分からない店が営業中と同じ顔で
+   * 並ぶと、行ってみたら閉まっていたが起きる。外れたものと同じく灰色で残すか隠すかは
+   * `outOfTime`に従う。出したいときはトグルで出す
    */
-  openNowIncludeUnknown: boolean;
+  openNowShowUnknown: boolean;
   /**
    * 「今手に入る」「今営業中」で外れたスポットを**灰色で残す**(`"dim"`。既定)か**隠す**(`"hide"`)か。
    * 隠すと時期外・営業時間外のものがあることすら読めなくなるので、既定は灰色(`lib/periodFilter.ts`)
@@ -112,7 +113,7 @@ export const DEFAULT_FILTERS: SpotFilters = {
   visited: ["unvisited"],
   availableNow: false,
   openNow: false,
-  openNowIncludeUnknown: true,
+  openNowShowUnknown: false,
   outOfTime: "dim",
   visitedDate: null,
   visitedDateTo: null,
@@ -211,7 +212,7 @@ export function isDimmed(
  * 空ではなく既定と違うかどうかで見る。`showRoutes`は表示の切り替え、
  * `visitedDate`は訪問順の経路の対象日(絞り込みではない)であって、
  * どちらも絞り込みではないため含めない。「今手に入る」「今営業中」は絞り込みなので含める
- * (`openNowIncludeUnknown`は「今営業中」の中の扱いで、それだけでは何も絞らないので見ない)。
+ * (`openNowShowUnknown`は「今営業中」の中の扱いで、それだけでは何も絞らないので見ない)。
  */
 export function hasActiveFilters(filters: SpotFilters): boolean {
   return (
@@ -255,7 +256,7 @@ export function FilterResetButton({
           visited: [...DEFAULT_FILTERS.visited],
           availableNow: false,
           openNow: false,
-          openNowIncludeUnknown: DEFAULT_FILTERS.openNowIncludeUnknown,
+          openNowShowUnknown: DEFAULT_FILTERS.openNowShowUnknown,
           outOfTime: DEFAULT_FILTERS.outOfTime,
         })
       }
@@ -435,7 +436,7 @@ export default function FilterBar({
             <HelpTip>
               「今」は日本時間で数えます(海外のスポットも日本時間で比べます)。
               今手に入る: 提供の時期に今の月が入るものに絞ります。時期が書かれていないもの(通年か不明)は手に入るものとして残します。
-              今営業中: 営業時間から今営業していると読めるものに絞ります。営業時間が書かれていない・読めない書き方(月や学校の休みの指定など。祝日は日本の祝日で判定します)のものは「不明」で、「不明も出す」がオンのときだけ残します。
+              今営業中: 営業時間から今営業していると読めるものに絞ります。営業時間が書かれていない・読めない書き方(月や学校の休みの指定など。祝日は日本の祝日で判定します)のものは「不明」で、外れたものとして扱います(「営業時間が不明も出す」をオンにすると営業中と並べて残します)。
               外れたもの(時期外・営業時間外)は灰色で残します。「時間外は隠す」をオンにすると地図と一覧から消します。
             </HelpTip>
           </span>
@@ -476,12 +477,12 @@ export default function FilterBar({
             {showOpenNow && filters.openNow && (
               <Chip
                 label="営業時間が不明も出す"
-                active={filters.openNowIncludeUnknown}
+                active={filters.openNowShowUnknown}
                 activeClassName={ALL_CHIP_ACTIVE_CLASS}
                 onClick={() =>
                   onChange({
                     ...filters,
-                    openNowIncludeUnknown: !filters.openNowIncludeUnknown,
+                    openNowShowUnknown: !filters.openNowShowUnknown,
                   })
                 }
               />
