@@ -68,9 +68,12 @@ test("「今」はJSTで数える(UTCでは日曜でもJSTでは月曜)", () => 
 
 test("読めない書き方を含むものは不明", () => {
   for (const value of [
-    "Jan-Mar Mo-Fr 10:00-16:00",
     "week 01-10 Mo 10:00-12:00",
-    "Mo[1] 10:00-12:00",
+    "2026 Mo-Fr 10:00-12:00",
+    "Mo-Fr[1] 10:00-12:00",
+    "Mo[6] 10:00-12:00",
+    "Feb 30 off",
+    "Mar 10-Oct 10:00-12:00",
     "Mo-Fr 10:00+",
     "Mo-Fr sunrise-sunset",
     'Mo-Fr 10:00-18:00 "予約制"',
@@ -151,4 +154,60 @@ test("祝日の対応範囲外の年で PH があれば不明", () => {
   assert.equal(openingStateAt("Mo-Fr 11:00-22:00; PH off", new Date("2100-01-04T12:00:00+09:00")), "unknown");
   // PH を使わなければ範囲外の年でも判定する
   assert.equal(openingStateAt("Mo-Fr 11:00-22:00", new Date("2100-01-04T12:00:00+09:00")), "open");
+});
+
+// 月日の規則の例に使う日: 2026-01-01(木)・2025-12-30(火)・2026-01-04(日)・2026-11-02(月)・2026-12-14(月)
+
+test("日付の休み・年をまたぐ日付の範囲は、その日だけ置き換える", () => {
+  const value = "Mo-Su 10:00-20:00; Jan 01 off";
+  assert.equal(openingStateAt(value, at("2026-01-01", "12:00")), "closed");
+  assert.equal(openingStateAt(value, at("2026-01-02", "12:00")), "open");
+  const range = "Mo-Su 10:00-19:00; Dec 29-Jan 03 off";
+  assert.equal(openingStateAt(range, at("2025-12-30", "12:00")), "closed");
+  assert.equal(openingStateAt(range, at("2026-01-03", "12:00")), "closed");
+  assert.equal(openingStateAt(range, at("2026-01-04", "12:00")), "open");
+  const list = "Mo-Su 09:00-18:00; Dec 31,Jan 01-06 off";
+  assert.equal(openingStateAt(list, at("2026-01-05", "12:00")), "closed");
+  assert.equal(openingStateAt(list, at("2026-01-07", "12:00")), "open");
+});
+
+test("月ごとの営業時間(後ろに : の付いた形・年をまたぐ月の範囲)", () => {
+  const value = "Mar-Oct: Th-Tu 09:30-17:00; Nov-Feb: Th-Tu 09:30-16:00; We off";
+  assert.equal(openingStateAt(value, jst(MON, "16:30")), "open");
+  assert.equal(openingStateAt(value, at("2026-11-02", "16:30")), "closed");
+  assert.equal(openingStateAt(value, at("2026-11-02", "15:30")), "open");
+  assert.equal(openingStateAt(value, jst(WED, "12:00")), "closed");
+  // 月だけの規則は、ほかの月には何も当てない(営業時間外)
+  assert.equal(openingStateAt("Apr-Nov 11:00-15:00", jst(MON, "12:00")), "open");
+  assert.equal(openingStateAt("Apr-Nov 11:00-15:00", at("2026-12-14", "12:00")), "closed");
+  // 時刻の数字を日と読まない
+  assert.equal(openingStateAt("Apr-Nov 11:00-15:00", jst(MON, "10:30")), "closed");
+});
+
+test("第何曜日(最後の曜日も)", () => {
+  // 2026-10 の月曜は 5・12・19・26 日
+  const value = "Mo-Sa 09:00-18:00; Mo[3] off; Su off";
+  assert.equal(openingStateAt(value, jst(MON, "12:00")), "closed");
+  assert.equal(openingStateAt(value, jst(12, "12:00")), "open");
+  assert.equal(openingStateAt("Mo-Su 10:00-17:00; Mo[-1] off", jst(26, "12:00")), "closed");
+  assert.equal(openingStateAt("Mo-Su 10:00-17:00; Mo[-1] off", jst(MON, "12:00")), "open");
+  const mixed = "Tu-Fr 17:00-21:00; Su[2,4] 12:00-15:00; Mo,Su[1,3,5] off";
+  // 2026-10-25 は第4日曜、2026-10-18 は第3日曜
+  assert.equal(openingStateAt(mixed, jst(SUN, "13:00")), "open");
+  assert.equal(openingStateAt(mixed, jst(18, "13:00")), "closed");
+});
+
+test("月日と第何曜日の日本語の表記", () => {
+  assert.deepEqual(describeOpeningHours("Mo-Su 10:00-20:00; Jan 01 off")?.lines, [
+    "月〜日 10:00〜20:00",
+    "1月1日 休み",
+  ]);
+  assert.deepEqual(describeOpeningHours("Apr-Nov 11:00-15:00; Dec 29-Jan 03 off")?.lines, [
+    "4月〜11月 11:00〜15:00",
+    "12月29日〜1月3日 休み",
+  ]);
+  assert.deepEqual(describeOpeningHours("Mo-Sa 09:00-18:00; Su[1,3] off")?.lines, [
+    "月〜土 9:00〜18:00",
+    "第1・第3日 休み",
+  ]);
 });

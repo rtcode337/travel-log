@@ -71,7 +71,7 @@ export default function SpotPeriodInfo({
             </ul>
             {hours.unreadable && (
               <p className="mt-1 text-xs text-gray-500">
-                月や学校の休みの指定など読めない書き方を含むため、営業中かどうかは判断していません(書いてあるままを出しています)。
+                学校の休みの指定など読めない書き方を含むため、営業中かどうかは判断していません(書いてあるままを出しています)。
               </p>
             )}
           </dd>

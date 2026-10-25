@@ -10,11 +10,16 @@
  * - 祝日`PH`(`PH off`・`PH 10:00-17:00`・`Sa,Su,PH 10:00-17:00`)。**今日(JST)が日本の祝日・
  *   振替休日・国民の休日なら`PH`の規則を当て、そうでなければ`PH`だけの規則は飛ばす**
  *   (`lib/japaneseHolidays.ts`。対応する年の範囲外では祝日か分からないので不明)
- * - `;`で区切った規則は**後のものが前のものをその曜日について置き換える**(`Mo-Fr 11:00-22:00; We off`)。
- *   時刻の後ろの`,`に曜日が続くもの(`Mo-Fr 10:00-12:00, Sa 10:00-14:00`)は置き換えずに足す
+ * - 月と日付(規則の頭に置く): 月(`Aug off`)・月の範囲(`Mar-Oct`。`Nov-Feb`のような年をまたぐ範囲も)・
+ *   日付(`Jan 01 off`)・日付の範囲(`Jan 01-03`・`Dec 29-Jan 03`)・列挙(`Dec 31,Jan 01-06`)。
+ *   後ろに`:`を付けた形(`Mar-Oct: Th-Tu 09:30-17:00`)も読む
+ * - 第何曜日(`Th[3] off`・`Su[1,3,5]`・`Mo[-1]`=その月の最後の月曜)
+ * - `;`で区切った規則は**後のものが前のものをその日について置き換える**(`Mo-Fr 11:00-22:00; We off`・
+ *   `Mo-Su 10:00-20:00; Jan 01 off`)。時刻の後ろの`,`に曜日が続くもの(`Mo-Fr 10:00-12:00, Sa 10:00-14:00`)は
+ *   置き換えずに足す
  *
- * **読めない書き方は「不明」に倒す**(学校休暇`SH`・月や日付の指定・週番号・
- * 第何曜日・日の出/日の入り・`+`の終わりの無い時刻・`||`・引用符のコメントなど)。
+ * **読めない書き方は「不明」に倒す**(学校休暇`SH`・週番号・年の指定・
+ * 日の出/日の入り・`+`の終わりの無い時刻・`||`・引用符のコメントなど)。
  * 規則が1つでも読めなければ、判定は全体を「不明」にする —— たとえば`SH off`は学校の休みに
  * 休むという意味で、今日が学校の休みかを知らない以上、残りの規則だけで「営業中」と言い切れない。
  *
@@ -47,9 +52,19 @@ interface TimeSpan {
   end: number;
 }
 
+/** 月日の範囲(`月*100+日`。`from > to`なら年をまたぐ) */
+interface DateRange {
+  from: number;
+  to: number;
+}
+
 /** 読めた規則1つ。`days`は月曜=0。`spans`が空なら休み */
 interface Rule {
   days: number[];
+  /** 第何曜日の指定(曜日 → 何番目の並び。`-1`は最後)。指定の無い曜日は毎週 */
+  nth: Record<number, number[]>;
+  /** 当てる月日(空なら毎日) */
+  dates: DateRange[];
   /** 祝日(`PH`)にも当てる規則 */
   holiday: boolean;
   spans: TimeSpan[];
@@ -97,11 +112,29 @@ function formatSpan(span: TimeSpan): string {
 /** 曜日の指定(`Mo-Fr,Su`)を月曜=0の配列と表記にする。読めなければnull */
 function parseDays(
   text: string
-): { days: number[]; holiday: boolean; label: string } | null {
+): { days: number[]; nth: Record<number, number[]>; holiday: boolean; label: string } | null {
   const days: number[] = [];
+  const nth: Record<number, number[]> = {};
   const labels: string[] = [];
   let holiday = false;
-  for (const part of text.split(",")) {
+  // `Su[1,3,5]`の中の`,`では切らない
+  for (const raw of text.split(/,(?![^[]*\])/)) {
+    // 第何曜日(`Th[3]`・`Su[1,3,5]`・`Mo[-1]`)。範囲(`Mo-Fr[1]`)には付けない
+    const nthMatch = /^\s*([A-Za-z]{2})\[([-\d,\s]+)\]\s*$/.exec(raw);
+    if (nthMatch) {
+      const day = WEEKDAYS.indexOf(nthMatch[1].toLowerCase() as (typeof WEEKDAYS)[number]);
+      const order = nthMatch[2].split(",").map((n) => Number(n.trim()));
+      if (day === -1 || order.some((n) => !Number.isInteger(n) || n === 0 || n < -1 || n > 5)) {
+        return null;
+      }
+      if (!days.includes(day)) days.push(day);
+      nth[day] = order;
+      labels.push(
+        order.map((n) => (n === -1 ? "最終" : `第${n}`)).join("・") + WEEKDAY_LABELS[day]
+      );
+      continue;
+    }
+    const part = raw;
     // 祝日(PH)は曜日と並べて書ける(`Sa,Su,PH`)。範囲(`Mo-PH`)にはならない
     if (part.trim().toLowerCase() === "ph") {
       holiday = true;
@@ -123,17 +156,92 @@ function parseDays(
       from === to ? WEEKDAY_LABELS[from] : `${WEEKDAY_LABELS[from]}〜${WEEKDAY_LABELS[to]}`
     );
   }
-  return { days, holiday, label: labels.join("・") };
+  return { days, nth, holiday, label: labels.join("・") };
 }
 
-/** 曜日の部分。2文字の語が`,`・`-`で繋がったもの(`off`の頭の`of`を拾わないよう語の境目で切る) */
-const DAYS_PREFIX_RE = /^([A-Za-z]{2}\b(?:-[A-Za-z]{2}\b)?(?:\s*,\s*[A-Za-z]{2}\b(?:-[A-Za-z]{2}\b)?)*)\s*(.*)$/;
+/**
+ * 曜日の部分。2文字の語が`,`・`-`で繋がったもの(`off`の頭の`of`を拾わないよう語の境目で切る)。
+ * 第何曜日の`[...]`も付けられる(`Mo,Su[1,3,5]`)
+ */
+const DAYS_PREFIX_RE =
+  /^([A-Za-z]{2}\b(?:-[A-Za-z]{2}\b|\[[-\d,\s]+\])?(?:\s*,\s*[A-Za-z]{2}\b(?:-[A-Za-z]{2}\b|\[[-\d,\s]+\])?)*)\s*(.*)$/;
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const MONTH_RE = "(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)";
+/** 月日の指定1つ(`Mar`・`Mar-Oct`・`Jan 01`・`Jan 01-03`・`Dec 29-Jan 03`) */
+// 日の後ろに`:`や数字が続くものは時刻(`Apr-Nov 11:00-15:00`の`11`を日と読まない)
+const DAY_NUM = "(\\d{1,2})(?![\\d:])";
+const DATE_ITEM = `${MONTH_RE}\\b(?:\\s+${DAY_NUM})?(?:\\s*-\\s*(?:${MONTH_RE}\\b(?:\\s+${DAY_NUM})?|${DAY_NUM}))?`;
+/** 規則の頭の月日の指定(列挙と、後ろの`:`も含む) */
+const DATES_PREFIX_RE = new RegExp(
+  `^(${DATE_ITEM.replace(/\((?!\?)/g, "(?:")}(?:\\s*,\\s*${DATE_ITEM.replace(/\((?!\?)/g, "(?:")})*)\\s*:?\\s*(.*)$`,
+  "i"
+);
+const DATE_ITEM_RE = new RegExp(`^${DATE_ITEM}$`, "i");
+
+function monthOf(name: string): number {
+  return MONTHS.indexOf(name.toLowerCase()) + 1;
+}
+
+/** 月日の指定(`Dec 31,Jan 01-06`)を範囲と表記にする。読めなければnull */
+function parseDates(text: string): { dates: DateRange[]; label: string } | null {
+  const dates: DateRange[] = [];
+  const labels: string[] = [];
+  for (const raw of text.split(",")) {
+    const m = DATE_ITEM_RE.exec(raw.trim());
+    if (!m) return null;
+    const fromMonth = monthOf(m[1]);
+    const fromDay = m[2] ? Number(m[2]) : null;
+    // 終わりの月(`Dec 29-Jan 03`・`Mar-Oct`)か、同じ月の終わりの日(`Jan 01-03`)
+    const toMonth = m[3] ? monthOf(m[3]) : fromMonth;
+    const toDay = m[4] ? Number(m[4]) : m[5] ? Number(m[5]) : null;
+    if (fromDay !== null && (fromDay < 1 || fromDay > MONTH_DAYS[fromMonth - 1])) return null;
+    if (toDay !== null && (toDay < 1 || toDay > MONTH_DAYS[toMonth - 1])) return null;
+    // 月だけ(`Mar`・`Mar-Oct`)は月の頭から終わりまで。片方だけ日付のある形(`Mar 10-Oct`)は読まない
+    if (m[3] && (fromDay === null) !== (toDay === null)) return null;
+    const hasRange = m[3] !== undefined || m[5] !== undefined;
+    const from = fromMonth * 100 + (fromDay ?? 1);
+    const to = toMonth * 100 + (toDay ?? (fromDay !== null && !hasRange ? fromDay : MONTH_DAYS[toMonth - 1]));
+    dates.push({ from, to });
+    const fmt = (v: number, withDay: boolean) =>
+      withDay ? `${Math.floor(v / 100)}月${v % 100}日` : `${Math.floor(v / 100)}月`;
+    const withDay = fromDay !== null;
+    labels.push(from === to ? fmt(from, withDay) : `${fmt(from, withDay)}〜${fmt(to, withDay)}`);
+  }
+  return { dates, label: labels.join("・") };
+}
 
 function parseRule(text: string, additional: boolean): Rule | null {
-  const source = text.trim();
+  let source = text.trim();
+  // 規則の頭の月日の指定(`Jan 01 off`・`Mar-Oct: Th-Tu 09:30-17:00`)
+  let dates: DateRange[] = [];
+  let dateLabel = "";
+  const datePrefix = DATES_PREFIX_RE.exec(source);
+  if (datePrefix) {
+    const parsed = parseDates(datePrefix[1]);
+    if (!parsed) return null;
+    dates = parsed.dates;
+    dateLabel = parsed.label;
+    source = datePrefix[2].trim();
+  }
+  const rule = parseWeekRule(source, additional);
+  if (!rule) return null;
+  if (!dateLabel) return rule;
+  // 月日だけの規則(`Jan 01 off`)は「毎日」を言わない
+  const label = rule.label.startsWith("毎日 ")
+    ? `${dateLabel} ${rule.label.slice("毎日 ".length)}`
+    : `${dateLabel} ${rule.label}`;
+  return { ...rule, dates, label };
+}
+
+/** 月日の指定を外した残り(曜日と時刻)を読む */
+function parseWeekRule(source: string, additional: boolean): Rule | null {
   if (source === "24/7") {
     return {
       days: [0, 1, 2, 3, 4, 5, 6],
+      nth: {},
+      dates: [],
       holiday: false,
       spans: [{ start: 0, end: DAY_MINUTES }],
       additional,
@@ -141,6 +249,7 @@ function parseRule(text: string, additional: boolean): Rule | null {
     };
   }
   let days = [0, 1, 2, 3, 4, 5, 6];
+  let nth: Record<number, number[]> = {};
   let holiday = false;
   let everyDay = true;
   let dayLabel = "毎日";
@@ -151,6 +260,7 @@ function parseRule(text: string, additional: boolean): Rule | null {
     // `SH`・`Jan`の頭など、曜日でも`PH`でもない2文字の語は読まない
     if (!parsed) return null;
     days = parsed.days;
+    nth = parsed.nth;
     holiday = parsed.holiday;
     everyDay = false;
     dayLabel = parsed.label;
@@ -158,12 +268,14 @@ function parseRule(text: string, additional: boolean): Rule | null {
   }
   const lower = rest.toLowerCase();
   if (lower === "off" || lower === "closed") {
-    return { days, holiday, spans: [], additional, label: `${dayLabel} 休み` };
+    return { days, nth, dates: [], holiday, spans: [], additional, label: `${dayLabel} 休み` };
   }
   // 曜日だけ(時刻なし)・`open`はその曜日を終日営業とみなす(書式の決まり)
   if ((rest === "" && !everyDay) || lower === "open") {
     return {
       days,
+      nth,
+      dates: [],
       holiday,
       spans: [{ start: 0, end: DAY_MINUTES }],
       additional,
@@ -180,6 +292,8 @@ function parseRule(text: string, additional: boolean): Rule | null {
   }
   return {
     days,
+    nth,
+    dates: [],
     holiday,
     spans,
     additional,
@@ -236,10 +350,36 @@ function parseOpeningHours(value: string): ParsedHours {
  * `PH`だけの規則は当たらない。**翌日にかかる時間帯は、始まった日のもの**として持つ
  * (判定で前の日から引き継ぐ)。
  */
-function daySpans(rules: Rule[], weekday: number, holiday: boolean): TimeSpan[] {
+interface Day {
+  year: number;
+  month: number;
+  day: number;
+  weekday: number;
+  holiday: boolean;
+}
+
+function inDates(dates: DateRange[], day: Day): boolean {
+  if (dates.length === 0) return true;
+  const at = day.month * 100 + day.day;
+  return dates.some((r) => (r.from <= r.to ? r.from <= at && at <= r.to : at >= r.from || at <= r.to));
+}
+
+/** その日が、規則の曜日(第何曜日の指定を含む)に当たるか */
+function onWeekday(rule: Rule, day: Day): boolean {
+  if (!rule.days.includes(day.weekday)) return false;
+  const order = rule.nth[day.weekday];
+  if (!order) return true;
+  const nthOfMonth = Math.ceil(day.day / 7);
+  const daysInMonth = new Date(Date.UTC(day.year, day.month, 0)).getUTCDate();
+  const isLast = day.day + 7 > daysInMonth;
+  return order.some((n) => (n === -1 ? isLast : n === nthOfMonth));
+}
+
+function daySpans(rules: Rule[], day: Day): TimeSpan[] {
   let spans: TimeSpan[] = [];
   for (const rule of rules) {
-    if (!rule.days.includes(weekday) && !(holiday && rule.holiday)) continue;
+    if (!inDates(rule.dates, day)) continue;
+    if (!onWeekday(rule, day) && !(day.holiday && rule.holiday)) continue;
     spans = rule.additional ? [...spans, ...rule.spans] : [...rule.spans];
   }
   return spans;
@@ -269,7 +409,7 @@ export function openingStateAt(
   if (todayHoliday === null || prevHoliday === null) return "unknown";
   const { minutes } = clock;
   if (
-    daySpans(parsed.rules, clock.weekday, todayHoliday).some(
+    daySpans(parsed.rules, { ...clock, holiday: todayHoliday }).some(
       (s) => s.start <= minutes && minutes < s.end
     )
   ) {
@@ -277,7 +417,7 @@ export function openingStateAt(
   }
   // 前の日に始まって日付をまたいだ時間帯(22:00-02:00 の 1:00 など)
   if (
-    daySpans(parsed.rules, prevClock.weekday, prevHoliday).some(
+    daySpans(parsed.rules, { ...prevClock, holiday: prevHoliday }).some(
       (s) => s.end > DAY_MINUTES && minutes < s.end - DAY_MINUTES
     )
   ) {
