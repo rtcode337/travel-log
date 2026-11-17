@@ -7,6 +7,7 @@ import { MODERATION_ROLES, SPOT_ADMIN_ROLES, type Role, type Spot } from "@/lib/
 import { parseRank } from "@/lib/rank";
 import { normalizeAvailableMonths } from "@/lib/availableMonths";
 import { normalizeOpeningHours } from "@/lib/openingHours";
+import { normalizeAskName } from "@/lib/askAi";
 
 /**
  * 閲覧できるのは「公開スポット」「本人が追加したスポット(status問わず)」、
@@ -104,6 +105,8 @@ export async function PATCH(
     return NextResponse.json({ error: months.error }, { status: 400 });
   }
   const hasHours = Object.prototype.hasOwnProperty.call(spot, "opening_hours");
+  // 生成AIに聞くときの名前も同じ(この欄を持たない画面から保存しても消えない)
+  const hasAskName = Object.prototype.hasOwnProperty.call(spot, "ask_name");
   const { rows } = await query<Spot>(
     `update spots set
       name = $1, name_kana = $2, lat = $3, lng = $4, region = $5,
@@ -112,7 +115,8 @@ export async function PATCH(
       key = case when $10 then $11 else key end,
       origin = case when $12 then $13 else origin end,
       available_months = case when $16 then $17 else available_months end,
-      opening_hours = case when $18 then $19 else opening_hours end
+      opening_hours = case when $18 then $19 else opening_hours end,
+      ask_name = case when $20 then $21 else ask_name end
      where id = $14
      returning *`,
     [
@@ -135,6 +139,8 @@ export async function PATCH(
       months.value,
       hasHours,
       hasHours ? normalizeOpeningHours(spot.opening_hours) : null,
+      hasAskName,
+      hasAskName ? normalizeAskName(spot.ask_name) : null,
     ]
   );
 

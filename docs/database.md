@@ -170,6 +170,7 @@ erDiagram
         text description
         text available_months "提供の時期(11-3・6,7,8 など。null=通年か不明。check)"
         text opening_hours "営業時間(OSM の opening_hours の書式のまま。null=不明)"
+        text ask_name "生成AIに聞くときの名前(null=name で聞く)"
         text status "published / pending / rejected / private"
         text origin "csv / manual。travel-log-data への還元抽出に使う"
         uuid created_by FK "on delete set null"
@@ -229,6 +230,9 @@ erDiagram
   営業時間は OpenStreetMap の opening_hours の書式をそのまま持ち、**書式の検査はしない**
   (読めない書き方は判定で「不明」に倒す。読み方は`lib/openingHours.ts`)。どちらも null が
   「通年か不明」「不明」
+- **`ask_name` は生成AI(Gemini)に聞くときの名前**(`lib/askAi.ts`)。null なら `name` で聞く。
+  地図に出す名前と調べたい相手が違うスポットのため(料理名で並べるスポットで、行き先の
+  代表の店の営業時間・アクセスを聞きたいなど)。何を入れるかはデータの側が決める
 - **`spot_deletions` は削除の墓標**。CSV 由来の公開スポットを画面から個別削除した
   ときだけ記録し、travel-log-data 側の `exclude.txt` へ追記する候補として
   還元用エクスポートに出す(行が消えるので値をコピーして残す)

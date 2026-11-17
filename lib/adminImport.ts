@@ -30,6 +30,8 @@ export const CSV_COLUMNS = [
   // 列が無いCSVは既存の値に触らない(categoriesと同じ扱い)
   "available_months",
   "opening_hours",
+  // 生成AIに聞くときの名前(lib/askAi.ts)。省略可で、列が無いCSVは既存の値に触らない
+  "ask_name",
 ] as const;
 
 // ルートCSV(スポットを巡った順に矢印で繋ぐ)の列。spot_keyはスポットCSVのkey列を指す。
@@ -81,6 +83,8 @@ interface CsvSpotRecord {
   /** 列が無いCSVではnull(既存の値は`hasMonthsColumn`で守る) */
   available_months: string | null;
   opening_hours: string | null;
+  /** 列が無いCSVではnull(既存の値は`hasAskNameColumn`で守る) */
+  ask_name: string | null;
   status: string;
   origin: "csv";
 }
@@ -126,6 +130,7 @@ export const runSpotsCsvImport = async (
     // 提供の時期・営業時間も同じ。列の無いCSV(これまでの形)は既存の値を消さない
     const hasMonthsColumn = header.includes("available_months");
     const hasHoursColumn = header.includes("opening_hours");
+    const hasAskNameColumn = header.includes("ask_name");
     const idx = Object.fromEntries(
       CSV_COLUMNS.map((c) => [c, header.indexOf(c)])
     ) as Record<(typeof CSV_COLUMNS)[number], number>;
@@ -190,6 +195,7 @@ export const runSpotsCsvImport = async (
           description: get("description") || null,
           available_months: months.value,
           opening_hours: openingHours,
+          ask_name: get("ask_name") || null,
           // CSVインポートはこのページ(spot_admin/admin専用)からのみ行えるため、
           // 承認待ちを経由せずそのまま公開する
           status: "published",
@@ -259,6 +265,7 @@ export const runSpotsCsvImport = async (
       spot.description !== record.description ||
       (hasMonthsColumn && (spot.available_months ?? null) !== record.available_months) ||
       (hasHoursColumn && (spot.opening_hours ?? null) !== record.opening_hours) ||
+      (hasAskNameColumn && (spot.ask_name ?? null) !== record.ask_name) ||
       (record.key !== null && spot.key !== record.key) ||
       // 手動追加(manual)の行がCSVと一致した=travel-log-dataへ還元済みなので、
       // 内容が同一でもPATCHしてorigin='csv'に倒す(次回の還元用エクスポートから外す)
@@ -345,6 +352,7 @@ export const runSpotsCsvImport = async (
             description: record.description,
             ...(hasMonthsColumn ? { available_months: record.available_months } : {}),
             ...(hasHoursColumn ? { opening_hours: record.opening_hours } : {}),
+            ...(hasAskNameColumn ? { ask_name: record.ask_name } : {}),
             ...(record.key !== null ? { key: record.key } : {}),
             origin: record.origin,
           })),

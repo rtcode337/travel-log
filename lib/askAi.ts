@@ -24,7 +24,18 @@ import type { Spot, SpotType } from "@/lib/types";
  * **当てはまらないスポットもある。** ご当地グルメのように施設ではない種別では
  * 営業時間もアクセスも意味を成さないので、その場合は一言で飛ばすよう頼んである
  * (種別は利用者が増やせるので、アプリ側で出し分けられない)。
+ *
+ * **聞く名前はスポットの`ask_name`を先に使う**(空なら`name`)。地図に出す名前と、
+ * 調べたい相手の名前が違うスポットがあるため —— 料理名で並べるご当地グルメでは、
+ * 料理名で聞くと料理の説明が返り、行き先(代表の店)の営業時間やアクセスが分からない。
+ * 何を入れるかはデータの側が決める(アプリは「聞くときはこちらの名前で」としか知らない)。
  */
+
+/** 生成AIに聞くときの名前を整える(前後の空白を落とし、空ならnull=`name`で聞く) */
+export function normalizeAskName(value: string | null | undefined): string | null {
+  const trimmed = (value ?? "").trim();
+  return trimmed === "" ? null : trimmed;
+}
 
 /** 質問文。AIのページのテキストボックスにこの文字列が入る */
 function buildSpotQuestion(
@@ -38,8 +49,9 @@ function buildSpotQuestion(
     ? `このスポットは「${spotType.label}」として記録しています。` +
       `その種別の場所として何が魅力かという観点も踏まえて教えてください。`
     : "";
+  const askName = normalizeAskName(spot.ask_name) ?? spot.name;
   return (
-    `「${spot.name}」(${where})について教えてください。` +
+    `「${askName}」(${where})について教えてください。` +
     typeContext +
     `まず最初に、訪れるのに要ることを箇条書きで手短に: ` +
     `(1) 営業時間・定休日(季節で変わるならその違いも)、` +

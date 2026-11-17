@@ -79,6 +79,8 @@ export function expandSpot(spot: CachedSpot): Spot {
     key: null,
     origin: "csv",
     description: null,
+    // 生成AIに聞くときの名前は詳細(api.spots.get で取り直す)だけが読む
+    ask_name: null,
     created_by: null,
     created_at: "",
     updated_at: "",

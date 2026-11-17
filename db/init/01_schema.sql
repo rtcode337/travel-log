@@ -148,6 +148,9 @@ create table spots (
   -- 部分だけを読む)。nullは不明。**書式の検査はしない** —— 読めない書き方でも保存して
   -- 判定で「不明」に倒す(1件の書き方で取り込み全体を止めないため)
   opening_hours text,
+  -- 生成AIに聞くときの名前(lib/askAi.ts)。nullならname。地図に出す名前と、調べたい相手の
+  -- 名前が違うスポットのため(料理名のスポットで、代表の店の営業時間・アクセスを聞きたい等)
+  ask_name text,
   -- private: 誰でも作成できる非公開スポット。作成者本人にしか見えず、口コミも使えない
   status        text not null default 'published' check (
     status in ('published', 'pending', 'rejected', 'private')

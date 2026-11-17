@@ -16,6 +16,7 @@ import { resolveSeriesStyles } from "@/lib/seriesStyle";
 import { parseRank, RANKS } from "@/lib/rank";
 import { normalizeAvailableMonths } from "@/lib/availableMonths";
 import { normalizeOpeningHours } from "@/lib/openingHours";
+import { normalizeAskName } from "@/lib/askAi";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
 // (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
@@ -190,6 +191,8 @@ interface SpotInput {
   available_months?: string | null;
   /** 営業時間(OSMのopening_hoursの書式)。省略・null・空は「不明」。書式は問わない */
   opening_hours?: string | null;
+  /** 生成AIに聞くときの名前。省略・null・空は「nameで聞く」 */
+  ask_name?: string | null;
   /** 登録経路。CSVインポート(AdminView)だけが'csv'を明示し、省略時は'manual' */
   origin?: string;
 }
@@ -209,12 +212,12 @@ async function insertSpots(
   const { rows } = await query<Spot>(
     `insert into spots
       (spot_type_id, key, name, name_kana, lat, lng, region, rank, series, categories, description,
-       available_months, opening_hours, status, origin, created_by)
+       available_months, opening_hours, ask_name, status, origin, created_by)
      select $1, u.key, u.name, u.name_kana, u.lat, u.lng, u.region, u.rank, u.series,
             array(select jsonb_array_elements_text(u.categories)), u.description,
-            u.available_months, u.opening_hours, u.status, u.origin, $2
-     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::text[], $11::jsonb[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[])
-       with ordinality as u(key, name, name_kana, lat, lng, region, rank, series, categories, description, status, origin, available_months, opening_hours, ord)
+            u.available_months, u.opening_hours, u.ask_name, u.status, u.origin, $2
+     from unnest($3::text[], $4::text[], $5::text[], $6::float8[], $7::float8[], $8::text[], $9::text[], $10::text[], $11::jsonb[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[])
+       with ordinality as u(key, name, name_kana, lat, lng, region, rank, series, categories, description, status, origin, available_months, opening_hours, ask_name, ord)
      order by u.ord
      returning *`,
     [
@@ -235,6 +238,7 @@ async function insertSpots(
       // 呼び出し側(POST)で整えてある
       records.map((r) => r.available_months ?? null),
       records.map((r) => r.opening_hours ?? null),
+      records.map((r) => normalizeAskName(r.ask_name)),
     ]
   );
   return rows;

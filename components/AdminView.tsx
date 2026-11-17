@@ -927,6 +927,7 @@ export default function AdminView({
           "description",
           "available_months",
           "opening_hours",
+          "ask_name",
         ],
         ...manualSpots.map((s) => [
           s.name,
@@ -940,6 +941,7 @@ export default function AdminView({
           s.description,
           s.available_months,
           s.opening_hours,
+          s.ask_name,
         ]),
       ]).trimEnd();
       const excludeKeys = deleted.map((d) => d.key ?? d.name).join("\n");
@@ -1625,7 +1627,9 @@ export default function AdminView({
                   空=通年か不明。読めない値は取り込みを止める)、opening_hoursは
                   OpenStreetMapのopening_hoursの書式の営業時間(例: Mo-Fr 11:00-22:00; We off。
                   空=不明。読めない書き方もそのまま保存し、営業中かの判定では「不明」になる)。
-                  この2列が無いCSVは、既存スポットの値を変えない)。
+                  ask_nameは生成AI(Gemini)に聞くときの名前で、空ならnameで聞く
+                  (地図に出す名前と調べたい相手が違うとき。例: 料理名のスポットで代表の店を聞く)。
+                  この3列が無いCSVは、既存スポットの値を変えない)。
                 </HelpTip>
               </h3>
 

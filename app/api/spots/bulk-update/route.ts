@@ -7,6 +7,7 @@ import { SPOT_TYPE_SELECT } from "@/lib/spot-types-query";
 import { parseRank } from "@/lib/rank";
 import { normalizeAvailableMonths } from "@/lib/availableMonths";
 import { normalizeOpeningHours } from "@/lib/openingHours";
+import { normalizeAskName } from "@/lib/askAi";
 
 // 大量のスポット・写真を1リクエストで捌くため、既定(10秒)では足りない
 // (Vercelのサーバーレス関数の上限。指定の無いホストでは無視される)
@@ -32,6 +33,8 @@ interface BulkUpdateRecord {
   available_months?: string | null;
   /** 含まれるときだけ更新(同上) */
   opening_hours?: string | null;
+  /** 含まれるときだけ更新(同上) */
+  ask_name?: string | null;
 }
 
 /**
@@ -103,6 +106,9 @@ export async function POST(request: Request) {
   const hasHours = records.map((r) =>
     Object.prototype.hasOwnProperty.call(r, "opening_hours")
   );
+  const hasAskName = records.map((r) =>
+    Object.prototype.hasOwnProperty.call(r, "ask_name")
+  );
   const months: (string | null)[] = [];
   for (const [i, r] of records.entries()) {
     const parsed = normalizeAvailableMonths(hasMonths[i] ? r.available_months : null);
@@ -124,14 +130,17 @@ export async function POST(request: Request) {
         key = case when u.has_key then u.key else s.key end,
         origin = case when u.has_origin then u.origin else s.origin end,
         available_months = case when u.has_months then u.available_months else s.available_months end,
-        opening_hours = case when u.has_hours then u.opening_hours else s.opening_hours end
+        opening_hours = case when u.has_hours then u.opening_hours else s.opening_hours end,
+        ask_name = case when u.has_ask_name then u.ask_name else s.ask_name end
        from unnest(
          $2::uuid[], $3::text[], $4::text[], $5::float8[], $6::float8[], $7::text[],
          $8::text[], $9::text[], $10::bool[], $11::jsonb[], $12::bool[], $13::text[],
-         $14::bool[], $15::text[], $16::text[], $17::bool[], $18::text[], $19::bool[], $20::text[]
+         $14::bool[], $15::text[], $16::text[], $17::bool[], $18::text[], $19::bool[], $20::text[],
+         $21::bool[], $22::text[]
        ) as u(id, name, name_kana, lat, lng, region, series, description,
               has_categories, categories, has_key, key, has_origin, origin, rank,
-              has_months, available_months, has_hours, opening_hours)
+              has_months, available_months, has_hours, opening_hours,
+              has_ask_name, ask_name)
        where s.id = u.id and s.spot_type_id = $1 and s.status = 'published'
        returning s.*`,
       [
@@ -155,6 +164,8 @@ export async function POST(request: Request) {
         months,
         hasHours,
         records.map((r, i) => (hasHours[i] ? normalizeOpeningHours(r.opening_hours) : null)),
+        hasAskName,
+        records.map((r, i) => (hasAskName[i] ? normalizeAskName(r.ask_name) : null)),
       ]
     );
     return NextResponse.json({ data: rows });

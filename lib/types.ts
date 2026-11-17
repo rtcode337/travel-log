@@ -63,6 +63,9 @@ export interface Spot {
   /** 営業時間(OpenStreetMap の opening_hours の書式のまま)。null=不明。
    * 判定と日本語の表記は lib/openingHours.ts(読めない書き方は「不明」に倒す) */
   opening_hours: string | null;
+  /** 生成AIに聞くときの名前(lib/askAi.ts)。null=`name`で聞く。地図に出す名前と
+   * 調べたい相手が違うスポットのため(料理名のスポットで、代表の店のことを聞きたい等) */
+  ask_name: string | null;
   status: SpotStatus;
   /** 登録経路。csv=CSVインポート(travel-log-data由来)、manual=画面からの手動追加。
    * 手動追加の公開スポットをtravel-log-dataへ還元するエクスポートの抽出条件に使う */
