@@ -7,6 +7,7 @@ import {
   countedVisits,
   SPOTS_PAGE_SIZE,
   formatVisitedOn,
+  type Category,
   type MyReview,
   type Series,
   type Spot,
@@ -41,6 +42,8 @@ import SpotDownloadDialogs from "@/components/SpotDownloadDialogs";
 import { getSeriesOrder } from "@/lib/seriesStyle";
 import { rankOrder } from "@/lib/rank";
 import SeriesFilter from "@/components/SeriesFilter";
+import ChoiceRow from "@/components/ChoiceRow";
+import { getCategoryOrder } from "@/lib/category";
 import TabBar from "@/components/TabBar";
 import { useSeriesStyles } from "@/lib/useSeriesStyles";
 import { useRankEnabled } from "@/lib/useRankEnabled";
@@ -291,6 +294,11 @@ export default function SpotsView({
   // すべて(空配列)を既定にする(種別によらず全件から探し始められるように)
   const [managementSeries, setManagementSeries] = useState<Series[]>([]);
   const [managementRanks, setManagementRanks] = useState<RankFilterValue[]>([]);
+  // カテゴリ(地図・一覧の絞り込みと同じく、選んだものを全部持つスポットだけ)
+  const [managementCategories, setManagementCategories] = useState<Category[]>([]);
+  const [managementAvailableCategories, setManagementAvailableCategories] = useState<
+    Category[]
+  >([]);
   const [managementPage, setManagementPage] = useState(1);
 
   const loadManagementSpots = useCallback(async () => {
@@ -301,10 +309,16 @@ export default function SpotsView({
       search: managementSearch || undefined,
       series: managementSeries,
       ranks: managementRanks,
+      categories: managementCategories,
     });
     if (data) {
       setManagementItems(data.items);
       setManagementTotal(data.total);
+      setManagementAvailableCategories(
+        [...data.availableCategories].sort(
+          (a, b) => getCategoryOrder(a, categories) - getCategoryOrder(b, categories)
+        )
+      );
       setManagementAvailableSeries(
         [...data.availableSeries].sort(
           (a, b) => getSeriesOrder(a, seriesStyles) - getSeriesOrder(b, seriesStyles)
@@ -319,7 +333,9 @@ export default function SpotsView({
     managementSearch,
     managementSeries,
     managementRanks,
+    managementCategories,
     seriesStyles,
+    categories,
   ]);
 
   useEffect(() => {
@@ -1100,6 +1116,29 @@ export default function SpotsView({
                       onChange={handleManagementSeriesChange}
                       seriesStyles={seriesStyles}
                       collapsible
+                    />
+                  </div>
+                )}
+                {/* カテゴリは絞り込みモーダル(FilterBar)と同じ見出しと器と並び。選んだカテゴリが
+                    選択肢から消えても(データの入れ替えなど)外せるよう、選択中のものは残す */}
+                {(managementAvailableCategories.length > 1 ||
+                  managementCategories.length > 0) && (
+                  <div className="mb-2">
+                    <span className="mb-1 block text-xs font-medium text-gray-500">
+                      カテゴリ
+                    </span>
+                    <ChoiceRow
+                      options={[
+                        ...managementAvailableCategories,
+                        ...managementCategories.filter(
+                          (c) => !managementAvailableCategories.includes(c)
+                        ),
+                      ].map((category) => ({ value: category, content: category }))}
+                      selected={managementCategories}
+                      onChange={(selected) => {
+                        setManagementPage(1);
+                        setManagementCategories(selected);
+                      }}
                     />
                   </div>
                 )}

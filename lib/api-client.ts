@@ -144,6 +144,8 @@ export const api = {
       series?: string[];
       /** A〜E、またはランクなしを表す 'none' */
       ranks?: string[];
+      /** 選んだカテゴリを全部持つスポットだけ(AND) */
+      categories?: string[];
     }) => {
       const qs = new URLSearchParams();
       qs.set("type", opts.type);
@@ -151,7 +153,13 @@ export const api = {
       if (opts.search) qs.set("search", opts.search);
       for (const series of opts.series ?? []) qs.append("series", series);
       for (const rank of opts.ranks ?? []) qs.append("rank", rank);
-      return request<{ items: Spot[]; total: number; availableSeries: string[] }>(
+      for (const category of opts.categories ?? []) qs.append("category", category);
+      return request<{
+        items: Spot[];
+        total: number;
+        availableSeries: string[];
+        availableCategories: string[];
+      }>(
         `/api/spots?${qs.toString()}`
       );
     },

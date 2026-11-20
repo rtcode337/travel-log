@@ -86,28 +86,55 @@ export default function SeriesFilter({
   // 種別では目当ての値を探せず、複数選択もできなかった
   if (!canTileSeries(series, seriesStyles)) {
     // **長い一覧は押すまで畳む**(アイコンで並べられる種別・数の少ない種別は今までどおり)。
-    // 畳んでいても選んだものは見えるように、選択中のシリーズはチップで出す
-    if (collapsible && !open && series.length > COLLAPSE_OVER) {
+    // 畳んでいても選んだものは見えるように、選択中のシリーズはチップで出す。
+    // **開いた後は、開いたのと同じ場所のボタンで閉じる** —— 閉じる手立てが無いと、
+    // 選び終えたあとも一覧が結果の上を占めたままになる。ボタンは開閉どちらでも先頭に
+    // 置く(チップの後ろに置くと、選んだ数でボタンの位置が動き、同じ場所を押せない)
+    if (collapsible && series.length > COLLAPSE_OVER) {
+      const toggle = (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          {open
+            ? "シリーズの一覧を閉じる"
+            : selected.length > 0
+              ? "シリーズを選び直す"
+              : "シリーズで絞り込む"}
+          ({series.length}件) {open ? "▲" : "▼"}
+        </button>
+      );
+      if (!open) {
+        return (
+          <div className="flex flex-wrap items-center gap-1">
+            {toggle}
+            {selected.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => onChange(selected.filter((v) => v !== r))}
+                className="max-w-full truncate rounded-full bg-blue-600 px-2 py-1 text-xs font-medium text-white"
+                title={`${r} を外す`}
+              >
+                {r} ✕
+              </button>
+            ))}
+          </div>
+        );
+      }
       return (
-        <div className="flex flex-wrap items-center gap-1">
-          {selected.map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => onChange(selected.filter((v) => v !== r))}
-              className="max-w-full truncate rounded-full bg-blue-600 px-2 py-1 text-xs font-medium text-white"
-              title={`${r} を外す`}
-            >
-              {r} ✕
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            {selected.length > 0 ? "シリーズを選び直す" : "シリーズで絞り込む"}({series.length}件)
-          </button>
+        <div className="flex flex-col items-start gap-1">
+          {toggle}
+          <div className="w-full">
+            <SearchableSeriesFilter
+              series={series}
+              selected={selected}
+              onChange={onChange}
+              seriesStyles={seriesStyles}
+            />
+          </div>
         </div>
       );
     }

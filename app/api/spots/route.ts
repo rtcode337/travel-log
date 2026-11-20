@@ -123,6 +123,14 @@ export async function GET(request: Request) {
     conditions.push(`series = any($${listParams.length}::text[])`);
   }
 
+  // カテゴリの絞り込み。**選んだものを全部持つスポットだけ**(AND。地図・一覧の
+  // 絞り込みの`hasAllCategories`と同じ)。`@>`はspots_categories_idx(GIN)で引ける
+  const categoryParams = searchParams.getAll("category");
+  if (categoryParams.length > 0) {
+    listParams.push(categoryParams);
+    conditions.push(`categories @> $${listParams.length}::text[]`);
+  }
+
   // ランクの絞り込み。'none'(ランクなし)はnullとの比較になるので別の条件にする
   const rankParams = searchParams.getAll("rank");
   const ranks = rankParams.map(parseRank).filter((r): r is NonNullable<typeof r> => r !== null);
@@ -148,7 +156,12 @@ export async function GET(request: Request) {
   const orderParams = [...listParams, [...RANKS], seriesOrder];
   const rankOrderIdx = orderParams.length - 1;
   const seriesOrderIdx = orderParams.length;
-  const [{ rows: items }, { rows: countRows }, { rows: seriesRows }] = await Promise.all([
+  const [
+    { rows: items },
+    { rows: countRows },
+    { rows: seriesRows },
+    { rows: categoryRows },
+  ] = await Promise.all([
     query<Spot>(
       `select * from spots where ${where}
        order by coalesce(array_position($${rankOrderIdx}::text[], rank), 999999),
@@ -162,6 +175,11 @@ export async function GET(request: Request) {
       `select distinct series from spots where ${baseConditions.join(" and ")} and series is not null`,
       params
     ),
+    // カテゴリの選択肢もシリーズと同じく種別全体から出す(並びは画面側が種別の設定で決める)
+    query<{ category: string }>(
+      `select distinct unnest(categories) as category from spots where ${baseConditions.join(" and ")}`,
+      params
+    ),
   ]);
 
   return NextResponse.json({
@@ -169,6 +187,7 @@ export async function GET(request: Request) {
       items,
       total: Number(countRows[0].count),
       availableSeries: seriesRows.map((r) => r.series),
+      availableCategories: categoryRows.map((r) => r.category),
     },
   });
 }
