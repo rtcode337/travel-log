@@ -7,6 +7,7 @@ import PlanBuildPanel from "@/components/PlanBuildPanel";
 import HelpTip from "@/components/HelpTip";
 import LinkedText from "@/components/LinkedText";
 import GoogleSpotLinks from "@/components/GoogleSpotLinks";
+import MapScaleControl from "@/components/MapScaleControl";
 import WeatherAskLink from "@/components/WeatherAskLink";
 import VisitPlanListFormModal from "@/components/VisitPlanListFormModal";
 import { useNavVisibility } from "@/components/AppFrame";
@@ -1172,7 +1173,8 @@ export default function MapView({
       style: osmStyle,
       center: savedView?.center ?? JAPAN_CENTER,
       zoom: savedView?.zoom ?? JAPAN_ZOOM,
-      attributionControl: { compact: true },
+      // 著作権表示は縮尺の後に自分で足す(右下で縮尺を一番下に置くため。下の addControl)
+      attributionControl: false,
     });
     mapReadyRef.current = false;
     pendingMapReadyRef.current = [];
@@ -1193,6 +1195,11 @@ export default function MapView({
       positionOptions: { enableHighAccuracy: true, timeout: 10000 },
     });
     map.addControl(geolocate, "top-right");
+    // 縮尺(目盛りの付いた物差し。components/MapScaleControl.ts)。**右下の一番下に置く** ——
+    // 左下は種別のチップと「元の地図に戻る」が使っている。MapLibre は下の角では
+    // あとから足した部品を上に積むので、縮尺を先に、著作権表示(畳んだ「i」)を後に足す
+    map.addControl(new MapScaleControl(), "bottom-right");
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     geolocateRef.current = geolocate;
     mapRef.current = map;
 

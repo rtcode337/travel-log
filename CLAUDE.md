@@ -145,7 +145,7 @@ GitHub Actions(`.github/workflows/docker-publish.yml`)がビルド時に`<JST日
 | ファイル | 中身 |
 |---|---|
 | [docs/design/spot-types.md](docs/design/spot-types.md) | スポット種別(`spot_types`)と種別ごとの設定、ランク・シリーズ・カテゴリ、ピンの見た目を決める仕組み。提供の時期・営業時間と「今手に入る」「今営業中」の判定。 |
-| [docs/design/map.md](docs/design/map.md) | 画面の骨組み(下タブとスクロールする領域)、経路と訪問順・訪問予定リストの線、Google マップ・生成AIへの導線、ピンと線の出し分け、重なったピン、別種別の重ね表示、共通の UI 部品。 |
+| [docs/design/map.md](docs/design/map.md) | 画面の骨組み(下タブとスクロールする領域)、経路と訪問順・訪問予定リストの線、Google マップ・生成AIへの導線、地図の縮尺、ピンと線の出し分け、重なったピン、別種別の重ね表示、共通の UI 部品。 |
 | [docs/design/admin.md](docs/design/admin.md) | キー一覧での削除、GitHub・ZIP からの取り込み、修正・追加の依頼、還元用エクスポート、全削除、スポットの新規登録と CSV の差分更新。 |
 | [docs/design/visits.md](docs/design/visits.md) | 訪問記録と口コミ、写真と追記、エクスポート、未訪問記録と非表示、訪問予定リスト(旅程)と天気。 |
 
