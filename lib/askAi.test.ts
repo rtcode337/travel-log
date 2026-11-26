@@ -49,3 +49,13 @@ test("聞くときの名前は前後の空白を落とし、空ならnull", () =
   assert.equal(normalizeAskName(null), null);
   assert.equal(normalizeAskName(undefined), null);
 });
+
+test("名物・おすすめも聞く(食事処ならそこで何を頼むかを知りたい)", () => {
+  assert.match(question(spot({})), /名物やおすすめ/);
+});
+
+test("質問文は短く保つ(Googleの確かめる画面は、最後までスクロールしないと続行できない)", () => {
+  const q = question(spot({}));
+  const body = q.replace(/^「名物そば」\([^)]*\)/, "");
+  assert.ok(body.length <= 120, `名前と所在地を除いて ${body.length} 字`);
+});
